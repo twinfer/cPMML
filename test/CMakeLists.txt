@@ -45,6 +45,7 @@ add_model_test(IrisKNN)
 add_model_test(IrisScorecard)
 add_model_test(IrisNaiveBayes)
 add_model_test(IrisClustering)
+add_model_test(IrisRuleSet)
 
 add_custom_command(
         TARGET unit_tests

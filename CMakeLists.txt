@@ -198,6 +198,8 @@ add_library(
         src/naivebayesmodel/naivebayesevaluator.h
         src/clusteringmodel/clusteringmodel.h
         src/clusteringmodel/clusteringevaluator.h
+        src/rulesetmodel/rulesetmodel.h
+        src/rulesetmodel/rulesetevaluator.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY
