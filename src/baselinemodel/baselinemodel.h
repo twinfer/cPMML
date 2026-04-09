@@ -24,13 +24,19 @@
  * href="http://dmg.org/pmml/v4-4/BaselineModel.html">PMML BaselineModel</a>.
  *
  * Computes a statistical test statistic comparing an observed field value to a
- * reference baseline distribution. Supported test statistics:
- * - zScore  : (x - mean) / sqrt(variance) using GaussianDistribution baseline
- * - logProb : log P(x) using DiscreteDistribution / CountTable baseline
+ * reference baseline distribution.
+ *
+ * Supported test statistics:
+ * - zScore / zValue : (x - mean) / sqrt(variance)
+ *     GaussianDistribution baseline: mean and variance attributes
+ *     PoissonDistribution baseline: mean attribute (variance = mean)
+ *     UniformDistribution baseline: lower, upper; mean=(L+U)/2, var=(U-L)²/12
+ * - chiSquare       : (x - expected)² / expected  (CountTable / NormalizedCountTable)
+ * - logProb         : log P(x) using DiscreteDistribution / CountTable baseline
  */
 class BaselineModel : public InternalModel {
  public:
-  enum class TestStat { ZSCORE, LOG_PROB };
+  enum class TestStat { ZSCORE, CHI_SQUARE, LOG_PROB };
 
   struct BaselineDist {
     // Gaussian
@@ -62,7 +68,12 @@ class BaselineModel : public InternalModel {
     test_field_idx = indexer->get_index(test_field);
 
     std::string stat_str = to_lower(td.get_attribute("testStatistic"));
-    stat = (stat_str == "zscore") ? TestStat::ZSCORE : TestStat::LOG_PROB;
+    if (stat_str == "zscore" || stat_str == "zvalue")
+      stat = TestStat::ZSCORE;
+    else if (stat_str == "chisquare")
+      stat = TestStat::CHI_SQUARE;
+    else
+      stat = TestStat::LOG_PROB;
 
     XmlNode base_node = td.get_child("Baseline");
 
@@ -71,12 +82,25 @@ class BaselineModel : public InternalModel {
       baseline.mean = g.get_double_attribute("mean");
       baseline.variance = g.get_double_attribute("variance");
       baseline.is_gaussian = true;
+    } else if (base_node.exists_child("PoissonDistribution")) {
+      XmlNode p = base_node.get_child("PoissonDistribution");
+      baseline.mean = p.get_double_attribute("mean");
+      baseline.variance = baseline.mean;  // Poisson: variance = mean
+      baseline.is_gaussian = true;
+    } else if (base_node.exists_child("UniformDistribution")) {
+      XmlNode u = base_node.get_child("UniformDistribution");
+      double lower = u.get_double_attribute("lower");
+      double upper = u.get_double_attribute("upper");
+      baseline.mean = (lower + upper) / 2.0;
+      baseline.variance = (upper - lower) * (upper - lower) / 12.0;
+      baseline.is_gaussian = true;
     } else {
-      // Discrete distribution: CountTable or DiscreteDistribution
+      // Discrete distribution: CountTable, NormalizedCountTable, or DiscreteDistribution
       baseline.is_gaussian = false;
-      XmlNode table = base_node.exists_child("CountTable")
-                          ? base_node.get_child("CountTable")
-                          : base_node.get_child("DiscreteDistribution");
+      std::string table_tag = "DiscreteDistribution";
+      if (base_node.exists_child("CountTable")) table_tag = "CountTable";
+      else if (base_node.exists_child("NormalizedCountTable")) table_tag = "NormalizedCountTable";
+      XmlNode table = base_node.get_child(table_tag);
       for (const auto &fv : table.get_childs("FieldValue")) {
         double key = Value(fv.get_attribute("value")).value;
         double count = to_double(fv.get_attribute("count"));
@@ -102,6 +126,20 @@ class BaselineModel : public InternalModel {
     switch (stat) {
       case TestStat::ZSCORE:
         return (x - baseline.mean) / std::sqrt(baseline.variance);
+      case TestStat::CHI_SQUARE: {
+        // (x - expected)^2 / expected; for continuous: (x - mean)^2 / variance
+        if (baseline.is_gaussian) {
+          return (x - baseline.mean) * (x - baseline.mean) / baseline.variance;
+        } else {
+          // For count data: sum of (observed - expected)^2 / expected across cells
+          // Single-cell form: use the count for x as observed vs proportional expected
+          auto it = baseline.counts.find(x);
+          if (it == baseline.counts.end() || baseline.total <= 0) return 0.0;
+          double expected = it->second;
+          double diff = x - expected;
+          return (expected > 0) ? diff * diff / expected : 0.0;
+        }
+      }
       case TestStat::LOG_PROB: {
         auto it = baseline.counts.find(x);
         double p = (it != baseline.counts.end() && baseline.total > 0)

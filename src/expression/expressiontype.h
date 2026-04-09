@@ -31,7 +31,7 @@ class ExpressionType {
     NORM_DISCRETE,
     DISCREZITE,
     MAP_VALUES,
-    //    TEXT_INDEX,
+    TEXT_INDEX,
     APPLY,
     //    AGGREGATE,
     //    UNRECOGNIZED
@@ -55,7 +55,7 @@ class ExpressionType {
         {"normdiscrete", ExpressionTypeValue::NORM_DISCRETE},
         {"discretize", ExpressionTypeValue::DISCREZITE},
         {"mapvalues", ExpressionTypeValue::MAP_VALUES},
-        //        {"textindex", ExpressionTypeValue::TEXT_INDEX},
+        {"textindex", ExpressionTypeValue::TEXT_INDEX},
         {"apply", ExpressionTypeValue::APPLY},
         //        {"aggregate", ExpressionTypeValue::AGGREGATE}
     };
@@ -83,8 +83,8 @@ class ExpressionType {
         return "Discretize";
       case ExpressionTypeValue::MAP_VALUES:
         return "MapValues";
-        //      case ExpressionTypeValue::TEXT_INDEX:
-        //        return "TextIndex";
+        case ExpressionTypeValue::TEXT_INDEX:
+        return "TextIndex";
       case ExpressionTypeValue::APPLY:
         return "Apply";
         //      case ExpressionTypeValue::AGGREGATE:

@@ -18,6 +18,7 @@
 #include "mapvalues.h"
 #include "normcontinuous.h"
 #include "normdiscrete.h"
+#include "textindex.h"
 
 /**
  * @class ExpressionBuilder
@@ -45,6 +46,8 @@ class ExpressionBuilder {
         return std::make_shared<Apply>(node, output_index, output_type, indexer);
       case ExpressionType::ExpressionTypeValue::MAP_VALUES:
         return std::make_shared<MapValues>(node, output_index, output_type, indexer);
+      case ExpressionType::ExpressionTypeValue::TEXT_INDEX:
+        return std::make_shared<TextIndex>(node, output_index, output_type, indexer);
       default:
         return nullptr;
     }

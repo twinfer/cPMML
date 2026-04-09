@@ -50,6 +50,7 @@ add_model_test(IrisBaseline)
 add_model_test(IrisAnomaly)
 add_model_test(IrisGP)
 add_model_test(IrisText)
+add_model_test(IrisTextIndex)
 
 add_custom_command(
         TARGET unit_tests

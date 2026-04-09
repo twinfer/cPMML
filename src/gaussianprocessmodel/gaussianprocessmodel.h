@@ -26,7 +26,8 @@
  * Implementation of InternalModel representing a <a
  * href="http://dmg.org/pmml/v4-4/GaussianProcess.html">PMML GaussianProcessModel</a>.
  *
- * Supported kernels: RadialBasisKernel, ARDSquaredExponentialKernel.
+ * Supported kernels: RadialBasisKernel, ARDSquaredExponentialKernel,
+ *                    AbsoluteExponentialKernel, GeneralizedExponentialKernel.
  *
  * At load time K is computed and Cholesky-factored so that:
  *   alpha = K^{-1} y_train
@@ -37,14 +38,15 @@
  */
 class GaussianProcessModel : public InternalModel {
  public:
-  enum class KernelType { RBF, ARD };
+  enum class KernelType { RBF, ARD, ABS_EXP, GEN_EXP };
 
   // --- Members ---
 
   KernelType kernel_type = KernelType::RBF;
-  double gamma = 1.0;         // RBF bandwidth or ARD amplitude
+  double gamma = 1.0;         // amplitude / bandwidth
   double noise_var = 0.01;    // diagonal noise added to K
-  Eigen::VectorXd lambdas;    // per-dimension scales (ARD only)
+  double degree = 2.0;        // exponent (GeneralizedExponentialKernel)
+  Eigen::VectorXd lambdas;    // per-dimension rates (ARD / AbsExp / GenExp)
 
   std::vector<std::string> feat_names;
   std::vector<size_t> feat_indices;
@@ -102,12 +104,26 @@ class GaussianProcessModel : public InternalModel {
         }
         return gamma * std::exp(-sum);
       }
+      case KernelType::ABS_EXP: {
+        // AbsoluteExponentialKernel: gamma * exp(-sum_i lambda_i * |x_i - z_i|)
+        double sum = 0.0;
+        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i)
+          sum += lambdas[i] * std::abs(a[i] - b[i]);
+        return gamma * std::exp(-sum);
+      }
+      case KernelType::GEN_EXP: {
+        // GeneralizedExponentialKernel: gamma * exp(-sum_i lambda_i * |x_i - z_i|^degree)
+        double sum = 0.0;
+        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i)
+          sum += lambdas[i] * std::pow(std::abs(a[i] - b[i]), degree);
+        return gamma * std::exp(-sum);
+      }
     }
     return 0.0;
   }
 
   double kernel_self() const {
-    return (kernel_type == KernelType::ARD) ? gamma : 1.0;
+    return (kernel_type == KernelType::RBF) ? 1.0 : gamma;
   }
 
   Eigen::VectorXd compute_k_star(const Sample &sample) const {
@@ -144,16 +160,36 @@ class GaussianProcessModel : public InternalModel {
       noise_var = k.exists_attribute("noiseVariance")
                       ? k.get_double_attribute("noiseVariance")
                       : 0.01;
-      // Parse per-dimension lambdas from Lambda/Array
-      if (k.exists_child("Lambda")) {
-        XmlNode arr = k.get_child("Lambda").get_child("Array");
-        std::vector<std::string> parts = split(arr.value(), " ");
-        lambdas.resize(static_cast<Eigen::Index>(parts.size()));
-        for (size_t i = 0; i < parts.size(); ++i)
-          lambdas[static_cast<Eigen::Index>(i)] = to_double(parts[i]);
-      }
+      parse_lambdas(k);
+    } else if (node.exists_child("AbsoluteExponentialKernel")) {
+      kernel_type = KernelType::ABS_EXP;
+      XmlNode k = node.get_child("AbsoluteExponentialKernel");
+      gamma = k.get_double_attribute("gamma");
+      noise_var = k.exists_attribute("noiseVariance")
+                      ? k.get_double_attribute("noiseVariance")
+                      : 0.01;
+      parse_lambdas(k);
+    } else if (node.exists_child("GeneralizedExponentialKernel")) {
+      kernel_type = KernelType::GEN_EXP;
+      XmlNode k = node.get_child("GeneralizedExponentialKernel");
+      gamma = k.get_double_attribute("gamma");
+      degree = k.exists_attribute("degree") ? k.get_double_attribute("degree") : 2.0;
+      noise_var = k.exists_attribute("noiseVariance")
+                      ? k.get_double_attribute("noiseVariance")
+                      : 0.01;
+      parse_lambdas(k);
     } else {
       throw cpmml::ParsingException("GaussianProcessModel: unsupported or missing kernel");
+    }
+  }
+
+  void parse_lambdas(const XmlNode &k) {
+    if (k.exists_child("Lambda")) {
+      XmlNode arr = k.get_child("Lambda").get_child("Array");
+      std::vector<std::string> parts = split(arr.value(), " ");
+      lambdas.resize(static_cast<Eigen::Index>(parts.size()));
+      for (size_t i = 0; i < parts.size(); ++i)
+        lambdas[static_cast<Eigen::Index>(i)] = to_double(parts[i]);
     }
   }
 
@@ -195,8 +231,8 @@ class GaussianProcessModel : public InternalModel {
       y_train[static_cast<Eigen::Index>(r)] = to_double(row.get_child(target_col).value());
     }
 
-    // For ARD: if lambdas not yet set, default to 1 per dimension
-    if (kernel_type == KernelType::ARD && lambdas.size() == 0) {
+    // For kernels with per-dimension lambdas: default to 1 if not yet parsed
+    if (kernel_type != KernelType::RBF && lambdas.size() == 0) {
       lambdas = Eigen::VectorXd::Ones(static_cast<Eigen::Index>(n_feat));
     }
   }

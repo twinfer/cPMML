@@ -7,7 +7,7 @@ set(AUTHOR "Paolo Iannino")
 # PROJECT NAME/VERSION
 set(PROJECT_NAME cPMML)
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 5)
+set(PROJECT_VERSION_MINOR 6)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
@@ -174,6 +174,7 @@ add_library(
         src/expression/expressionbuilder.h
         src/expression/apply.h
         src/expression/fieldref.h
+        src/expression/textindex.h
         src/output/outputexpression.h
         src/output/outputexpressiontype.h
         src/output/outputexpressionbuilder.h

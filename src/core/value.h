@@ -135,6 +135,16 @@ class Value {
     return to_double(value, DataType::DataTypeValue::INTEGER);
   }
 
+  // Reverse lookup: double → original string (only valid without STRING_OPTIMIZATION)
+#ifndef STRING_OPTIMIZATION
+  inline static std::string double_to_string(double d) {
+    for (const auto &kv : string_converter) {
+      if (kv.second == d) return kv.first;
+    }
+    return "";
+  }
+#endif
+
   inline static double to_double(const std::string &value, const DataType &datatype) {
     switch (datatype.value) {
       case DataType::DataTypeValue::BOOLEAN:
