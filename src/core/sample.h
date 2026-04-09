@@ -29,7 +29,7 @@ class Feature {
 
   Feature() = default;
 
-  Feature(const std::string &name, const Value &value)
+  Feature(const std::string& name, const Value& value)
 #ifdef DEBUG
       : name(name),
         value(value)
@@ -41,7 +41,7 @@ class Feature {
   const std::string to_string() const { return "{\"" + name + "\": " + value.to_string() + "}"; };
 #endif
 
-  inline const Value &cvalue() const {
+  inline const Value& cvalue() const {
     if (value.missing) throw cpmml::MissingValueException("missing value");
 
     return value;
@@ -60,15 +60,15 @@ class Sample {
  public:
   Sample() {}
 
-  explicit Sample(const size_t &size) : features(size) {}
+  explicit Sample(const size_t& size) : features(size) {}
 
-  inline Feature &operator[](const size_t &feature_index) { return features[feature_index]; }
+  inline Feature& operator[](const size_t& feature_index) { return features[feature_index]; }
 
-  inline const Feature &operator[](const size_t &feature_index) const { return features[feature_index]; }
+  inline const Feature& operator[](const size_t& feature_index) const { return features[feature_index]; }
 
-  inline void change_value(const size_t &feature_index, const Value &value) { features[feature_index].value = value; }
+  inline void change_value(const size_t& feature_index, const Value& value) { features[feature_index].value = value; }
 
-  inline void change_value_if_missing(const size_t &feature_index, const Value &value) {
+  inline void change_value_if_missing(const size_t& feature_index, const Value& value) {
     if (features[feature_index].value.missing) {
       features[feature_index].value = value;
       features[feature_index].value.missing = false;

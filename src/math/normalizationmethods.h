@@ -21,7 +21,7 @@
  * Normalization Methods</a>.
  */
 //@{
-inline std::vector<double> categorical_softmax(const std::vector<double> &values) {
+inline std::vector<double> categorical_softmax(const std::vector<double>& values) {
   std::vector<double> exps;
   std::vector<double> result;
   double sum = 0;
@@ -35,18 +35,18 @@ inline std::vector<double> categorical_softmax(const std::vector<double> &values
   return result;
 }
 
-inline std::vector<double> categorical_simplemax(const std::vector<double> &values) {
+inline std::vector<double> categorical_simplemax(const std::vector<double>& values) {
   std::vector<double> result;
   double sum = 0;
 
-  for (const auto &value : values) sum += value;
+  for (const auto& value : values) sum += value;
 
-  for (const auto &value : values) result.push_back(value / sum);
+  for (const auto& value : values) result.push_back(value / sum);
 
   return result;
 }
 
-inline std::vector<double> categorical_none(const std::vector<double> &values) {
+inline std::vector<double> categorical_none(const std::vector<double>& values) {
   std::vector<double> result;
   double sum = 0;
   size_t i = 0;
@@ -66,8 +66,8 @@ inline std::vector<double> categorical_none(const std::vector<double> &values) {
   return result;
 }
 
-inline std::vector<double> categorical_base(const std::vector<double> &values, std::function<double(double)> function,
-                                            const std::string &function_name) {
+inline std::vector<double> categorical_base(const std::vector<double>& values, std::function<double(double)> function,
+                                            const std::string& function_name) {
   if (values.size() != 2) throw cpmml::MathException(function_name + " must have exactly 2 inputs");
 
   std::vector<double> result;
@@ -77,23 +77,23 @@ inline std::vector<double> categorical_base(const std::vector<double> &values, s
   return result;
 }
 
-inline std::vector<double> categorical_logit(const std::vector<double> &values) {
+inline std::vector<double> categorical_logit(const std::vector<double>& values) {
   return categorical_base(values, logit, "logit");
 }
 
-inline std::vector<double> categorical_probit(const std::vector<double> &values) {
+inline std::vector<double> categorical_probit(const std::vector<double>& values) {
   return categorical_base(values, probit, "probit");
 }
 
-inline std::vector<double> categorical_cloglog(const std::vector<double> &values) {
+inline std::vector<double> categorical_cloglog(const std::vector<double>& values) {
   return categorical_base(values, cloglog, "cloglog");
 }
 
-inline std::vector<double> categorical_loglog(const std::vector<double> &values) {
+inline std::vector<double> categorical_loglog(const std::vector<double>& values) {
   return categorical_base(values, loglog, "loglog");
 }
 
-inline std::vector<double> categorical_cauchit(const std::vector<double> &values) {
+inline std::vector<double> categorical_cauchit(const std::vector<double>& values) {
   if (values.size() != 2) throw cpmml::MathException("Cauchit must have exactly 2 inputs");
 
   std::vector<double> result;
@@ -103,7 +103,7 @@ inline std::vector<double> categorical_cauchit(const std::vector<double> &values
   return result;
 }
 
-inline std::vector<double> ordinal_base(const std::vector<double> &values, std::function<double(double)> function) {
+inline std::vector<double> ordinal_base(const std::vector<double>& values, std::function<double(double)> function) {
   std::vector<double> result;
 
   result.push_back(function(values[0]));
@@ -113,36 +113,36 @@ inline std::vector<double> ordinal_base(const std::vector<double> &values, std::
   return result;
 }
 
-inline std::vector<double> ordinal_logit(const std::vector<double> &values) { return ordinal_base(values, logit); }
+inline std::vector<double> ordinal_logit(const std::vector<double>& values) { return ordinal_base(values, logit); }
 
-inline std::vector<double> ordinal_probit(const std::vector<double> &values) { return ordinal_base(values, probit); }
+inline std::vector<double> ordinal_probit(const std::vector<double>& values) { return ordinal_base(values, probit); }
 
-inline std::vector<double> ordinal_exp(const std::vector<double> &values) { return ordinal_base(values, _exp); }
+inline std::vector<double> ordinal_exp(const std::vector<double>& values) { return ordinal_base(values, _exp); }
 
-inline std::vector<double> ordinal_cloglog(const std::vector<double> &values) { return ordinal_base(values, cloglog); }
+inline std::vector<double> ordinal_cloglog(const std::vector<double>& values) { return ordinal_base(values, cloglog); }
 
-inline std::vector<double> ordinal_loglog(const std::vector<double> &values) { return ordinal_base(values, loglog); }
+inline std::vector<double> ordinal_loglog(const std::vector<double>& values) { return ordinal_base(values, loglog); }
 
-inline std::vector<double> ordinal_cauchit(const std::vector<double> &values) { return ordinal_base(values, cauchit); }
+inline std::vector<double> ordinal_cauchit(const std::vector<double>& values) { return ordinal_base(values, cauchit); }
 
-inline std::vector<double> ordinal_none(const std::vector<double> &values) {
+inline std::vector<double> ordinal_none(const std::vector<double>& values) {
   return ordinal_base(values, [](double a) { return a; });
 }
 
-inline double single_logit(const double &a) { return logit(a); }
+inline double single_logit(const double& a) { return logit(a); }
 
-inline double single_softmax(const double &a) { return logit(a); }
+inline double single_softmax(const double& a) { return logit(a); }
 
-inline double single_exp(const double &a) { return _exp(a); }
+inline double single_exp(const double& a) { return _exp(a); }
 
-inline double single_probit(const double &a) { return probit(a); }
+inline double single_probit(const double& a) { return probit(a); }
 
-inline double single_cloglog(const double &a) { return cloglog(a); }
+inline double single_cloglog(const double& a) { return cloglog(a); }
 
-inline double single_loglog(const double &a) { return loglog(a); }
+inline double single_loglog(const double& a) { return loglog(a); }
 
-inline double single_cauchit(const double &a) { return cauchit(a); }
+inline double single_cauchit(const double& a) { return cauchit(a); }
 
-inline double single_none(const double &a) { return a; }
+inline double single_none(const double& a) { return a; }
 //@}
 #endif

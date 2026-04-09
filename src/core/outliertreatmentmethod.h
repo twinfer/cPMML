@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+
 #include "utils/utils.h"
 
 /**
@@ -33,13 +34,13 @@ class OutlierTreatmentMethod {
 
   OutlierTreatmentMethod() = default;
 
-  explicit OutlierTreatmentMethod(const std::string &value) : value(from_string(to_lower(value))) {}
+  explicit OutlierTreatmentMethod(const std::string& value) : value(from_string(to_lower(value))) {}
 
-  inline bool operator==(const OutlierTreatmentMethod &other) const { return value == other.value; };
+  inline bool operator==(const OutlierTreatmentMethod& other) const { return value == other.value; };
 
-  inline bool operator!=(const OutlierTreatmentMethod &other) const { return value != other.value; };
+  inline bool operator!=(const OutlierTreatmentMethod& other) const { return value != other.value; };
 
-  static OutlierTreatmentMethodValue from_string(const std::string &outliertreatmentmethod) {
+  static OutlierTreatmentMethodValue from_string(const std::string& outliertreatmentmethod) {
     const static std::unordered_map<std::string, OutlierTreatmentMethodValue> outliertreatmentmethod_converter = {
         {"asis", OutlierTreatmentMethodValue::AS_IS},
         {"asmissingvalues", OutlierTreatmentMethodValue::AS_MISSING_VALUES},
@@ -47,7 +48,7 @@ class OutlierTreatmentMethod {
 
     try {
       return outliertreatmentmethod_converter.at(outliertreatmentmethod);
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return OutlierTreatmentMethodValue::AS_IS;
     }
   }

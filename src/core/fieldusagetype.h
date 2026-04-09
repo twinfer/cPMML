@@ -27,9 +27,9 @@ class FieldUsageType {
 
   FieldUsageType() = default;
 
-  explicit FieldUsageType(const std::string &field_usage_type) : value(from_string(field_usage_type)) {}
+  explicit FieldUsageType(const std::string& field_usage_type) : value(from_string(field_usage_type)) {}
 
-  static FieldUsageTypeValue from_string(const std::string &field_usage_type) {
+  static FieldUsageTypeValue from_string(const std::string& field_usage_type) {
     const static std::unordered_map<std::string, FieldUsageTypeValue> field_usage_type_converter = {
         {"active", FieldUsageTypeValue::ACTIVE},
         {"target", FieldUsageTypeValue::TARGET},
@@ -42,7 +42,7 @@ class FieldUsageType {
 
     try {
       return field_usage_type_converter.at(to_lower(field_usage_type));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return FieldUsageTypeValue::ACTIVE;
     }
   }

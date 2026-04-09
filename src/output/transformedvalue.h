@@ -27,17 +27,17 @@ class TransformedValue : public OutputExpression {
 
   TransformedValue() {}
 
-  TransformedValue(const XmlNode &node, const std::shared_ptr<Indexer> &indexer, const size_t &output_index,
-                   const DataType &output_type)
+  TransformedValue(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
+                   const DataType& output_type)
       : OutputExpression(output_index, output_type, indexer),
         expression(
             ExpressionBuilder::build(node.get_child_bylist(expression_names), output_index, output_type, indexer)) {
     Expression::inputs = expression->inputs;
   }
 
-  inline Value eval(Sample &sample) const override { return expression->eval(sample); }
+  inline Value eval(Sample& sample) const override { return expression->eval(sample); }
 
-  inline std::string eval_str(Sample &sample, const InternalScore &score) const override {
+  inline std::string eval_str(Sample& sample, const InternalScore& score) const override {
 #ifndef REGEX_SUPPORT
     return std::to_string(expression->eval(sample).value);
 #else

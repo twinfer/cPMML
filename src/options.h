@@ -10,7 +10,7 @@
 // STRING_OPTIMIZATION uses a hash-based encoding for string values which is
 // faster but not reversible. Disabled to support TextIndex expressions that
 // need to recover the original string from a Sample value.
-//#define STRING_OPTIMIZATION
-//#define DEBUG
+// #define STRING_OPTIMIZATION
+// #define DEBUG
 
 #endif

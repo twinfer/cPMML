@@ -23,15 +23,15 @@ class Property {
 
   const PropertyValue value;
 
-  explicit Property(const std::string &property) : value(from_string(property)) {}
+  explicit Property(const std::string& property) : value(from_string(property)) {}
 
-  static PropertyValue from_string(const std::string &property) {
+  static PropertyValue from_string(const std::string& property) {
     const static std::unordered_map<std::string, PropertyValue> property_converter = {
         {"valid", PropertyValue::VALID}, {"invalid", PropertyValue::INVALID}, {"missing", PropertyValue::MISSING}};
 
     try {
       return property_converter.at(to_lower(property));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return PropertyValue::VALID;
     }
   }

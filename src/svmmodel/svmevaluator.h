@@ -23,22 +23,22 @@
  */
 class SvmEvaluator : public InternalEvaluator {
  public:
-  explicit SvmEvaluator(const XmlNode &node)
+  explicit SvmEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         svm(node.get_child("SupportVectorMachineModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   SupportVectorMachineModel svm;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return svm.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return svm.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return svm.predict(sample);
   }
 

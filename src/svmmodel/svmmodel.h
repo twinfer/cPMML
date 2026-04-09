@@ -7,13 +7,12 @@
 #ifndef CPMML_SVMMODEL_H
 #define CPMML_SVMMODEL_H
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <Eigen/Dense>
 
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
@@ -53,11 +52,10 @@ class SupportVectorMachineModel : public InternalModel {
     bool is_weight_vector = false;
     Eigen::VectorXd weight_vector;
 
-    inline double decision(const Eigen::VectorXd &x, const SvmKernel &kernel) const {
+    inline double decision(const Eigen::VectorXd& x, const SvmKernel& kernel) const {
       if (is_weight_vector) return weight_vector.dot(x) + bias;
       double result = bias;
-      for (size_t i = 0; i < alphas.size(); i++)
-        result += alphas[i] * kernel.compute(x, support_vectors[i]);
+      for (size_t i = 0; i < alphas.size(); i++) result += alphas[i] * kernel.compute(x, support_vectors[i]);
       return result;
     }
   };
@@ -79,9 +77,9 @@ class SupportVectorMachineModel : public InternalModel {
 
   SupportVectorMachineModel() = default;
 
-  SupportVectorMachineModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                             const TransformationDictionary &transformation_dictionary,
-                             const std::shared_ptr<Indexer> &indexer)
+  SupportVectorMachineModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                            const TransformationDictionary& transformation_dictionary,
+                            const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         kernel(SvmKernel::from_node(node)),
         use_support_vectors(to_lower(node.get_attribute("svmRepresentation")) != "coefficients"),
@@ -94,36 +92,35 @@ class SupportVectorMachineModel : public InternalModel {
     if (use_support_vectors && node.exists_child("VectorDictionary"))
       vector_dict = parse_vector_dictionary(node.get_child("VectorDictionary"));
 
-    for (const auto &svm_node : node.get_childs("SupportVectorMachine"))
+    for (const auto& svm_node : node.get_childs("SupportVectorMachine"))
       machines.push_back(parse_machine(svm_node, vector_dict));
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto &m : machines) classes.push_back(m.target_category);
+      for (const auto& m : machines) classes.push_back(m.target_category);
     else
       classes.push_back(mining_schema.target.name);
   }
 
   // --- Scoring ---
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     const Eigen::VectorXd x = sample_to_vector(sample);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
       const double val = machines[0].decision(x, kernel);
-      return std::make_unique<RegressionScore>(std::to_string(val), val, classes,
-                                               std::vector<double>{val});
+      return std::make_unique<RegressionScore>(std::to_string(val), val, classes, std::vector<double>{val});
     }
 
     std::vector<double> scores;
     scores.reserve(machines.size());
-    for (const auto &m : machines) scores.push_back(m.decision(x, kernel));
+    for (const auto& m : machines) scores.push_back(m.decision(x, kernel));
 
     std::string winner = is_ovo ? predict_ovo(x) : predict_ova(scores);
     const double best = *std::max_element(scores.begin(), scores.end());
     return std::make_unique<RegressionScore>(winner, best, classes, scores);
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     const Eigen::VectorXd x = sample_to_vector(sample);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION)
@@ -135,14 +132,14 @@ class SupportVectorMachineModel : public InternalModel {
  private:
   // --- Feature vector construction ---
 
-  void parse_vector_fields(const XmlNode &model_node, const std::shared_ptr<Indexer> &indexer) {
+  void parse_vector_fields(const XmlNode& model_node, const std::shared_ptr<Indexer>& indexer) {
     if (!model_node.exists_child("VectorDictionary")) return;
     const XmlNode vf = model_node.get_child("VectorDictionary").get_child("VectorFields");
-    for (const auto &fr : vf.get_childs("FieldRef"))
+    for (const auto& fr : vf.get_childs("FieldRef"))
       field_indices.push_back(indexer->get_index(fr.get_attribute("field")));
   }
 
-  Eigen::VectorXd sample_to_vector(const Sample &sample) const {
+  Eigen::VectorXd sample_to_vector(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(field_indices.size()));
     for (size_t i = 0; i < field_indices.size(); i++)
       x[static_cast<Eigen::Index>(i)] = sample[field_indices[i]].value.value;
@@ -151,12 +148,11 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- VectorDictionary parsing ---
 
-  std::unordered_map<std::string, Eigen::VectorXd> parse_vector_dictionary(
-      const XmlNode &dict_node) const {
+  std::unordered_map<std::string, Eigen::VectorXd> parse_vector_dictionary(const XmlNode& dict_node) const {
     std::unordered_map<std::string, Eigen::VectorXd> result;
     const size_t n_fields = field_indices.size();
 
-    for (const auto &vi : dict_node.get_childs("VectorInstance")) {
+    for (const auto& vi : dict_node.get_childs("VectorInstance")) {
       const std::string id = vi.get_attribute("id");
       result[id] = parse_vector_instance(vi, n_fields);
     }
@@ -164,7 +160,7 @@ class SupportVectorMachineModel : public InternalModel {
   }
 
   // Parse a VectorInstance element — handles both REAL-SparseArray and REAL-Array
-  static Eigen::VectorXd parse_vector_instance(const XmlNode &vi, size_t n) {
+  static Eigen::VectorXd parse_vector_instance(const XmlNode& vi, size_t n) {
     Eigen::VectorXd vec = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(n));
 
     if (vi.exists_child("REAL-SparseArray")) {
@@ -178,8 +174,7 @@ class SupportVectorMachineModel : public InternalModel {
       }
     } else if (vi.exists_child("REAL-Array")) {
       const std::vector<std::string> entries = split(vi.get_child("REAL-Array").value(), " ");
-      for (size_t k = 0; k < entries.size() && k < n; k++)
-        vec[static_cast<Eigen::Index>(k)] = to_double(entries[k]);
+      for (size_t k = 0; k < entries.size() && k < n; k++) vec[static_cast<Eigen::Index>(k)] = to_double(entries[k]);
     }
 
     return vec;
@@ -187,19 +182,15 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- SupportVectorMachine parsing ---
 
-  SvmMachine parse_machine(const XmlNode &node,
-                            const std::unordered_map<std::string, Eigen::VectorXd> &vector_dict) const {
+  SvmMachine parse_machine(const XmlNode& node,
+                           const std::unordered_map<std::string, Eigen::VectorXd>& vector_dict) const {
     SvmMachine m;
-    m.target_category    = node.get_attribute("targetCategory");
+    m.target_category = node.get_attribute("targetCategory");
     m.alternate_category = node.get_attribute("alternateTargetCategory");
-    m.threshold          = node.exists_attribute("threshold")
-                               ? to_double(node.get_attribute("threshold"))
-                               : model_threshold;
+    m.threshold = node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : model_threshold;
 
     const XmlNode coeff_node = node.get_child("Coefficients");
-    m.bias = coeff_node.exists_attribute("absoluteValue")
-                 ? to_double(coeff_node.get_attribute("absoluteValue"))
-                 : 0.0;
+    m.bias = coeff_node.exists_attribute("absoluteValue") ? to_double(coeff_node.get_attribute("absoluteValue")) : 0.0;
 
     if (use_support_vectors) {
       // Build (αᵢ, xᵢ) pairs from SupportVectors + Coefficients
@@ -231,17 +222,17 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- Classification methods ---
 
-  std::string predict_ova(const std::vector<double> &scores) const {
+  std::string predict_ova(const std::vector<double>& scores) const {
     size_t best = 0;
     for (size_t i = 1; i < scores.size(); i++)
       if (scores[i] > scores[best]) best = i;
     return machines[best].target_category;
   }
 
-  std::string predict_ova_str(const Eigen::VectorXd &x) const {
+  std::string predict_ova_str(const Eigen::VectorXd& x) const {
     double best_score = -std::numeric_limits<double>::max();
     std::string best_class;
-    for (const auto &m : machines) {
+    for (const auto& m : machines) {
       const double score = m.decision(x, kernel);
       if (score > best_score) {
         best_score = score;
@@ -251,11 +242,11 @@ class SupportVectorMachineModel : public InternalModel {
     return best_class;
   }
 
-  std::string predict_ovo(const Eigen::VectorXd &x) const {
+  std::string predict_ovo(const Eigen::VectorXd& x) const {
     std::unordered_map<std::string, int> votes;
-    for (const auto &cls : classes) votes[cls] = 0;
+    for (const auto& cls : classes) votes[cls] = 0;
 
-    for (const auto &m : machines) {
+    for (const auto& m : machines) {
       if (m.decision(x, kernel) > m.threshold)
         votes[m.target_category]++;
       else
@@ -265,7 +256,7 @@ class SupportVectorMachineModel : public InternalModel {
     // Class with most votes; tie breaks to first in document order
     int max_votes = -1;
     std::string winner;
-    for (const auto &cls : classes) {
+    for (const auto& cls : classes) {
       if (votes.at(cls) > max_votes) {
         max_votes = votes.at(cls);
         winner = cls;

@@ -7,28 +7,27 @@
 #ifndef CPMML_MODELBUILDER_H
 #define CPMML_MODELBUILDER_H
 
+#include <pugixml.hpp>
 #include <string>
 
-#include <pugixml.hpp>
-
+#include "anomalydetectionmodel/anomalydetectionevaluator.h"
+#include "baselinemodel/baselineevaluator.h"
+#include "clusteringmodel/clusteringevaluator.h"
 #include "datadictionary.h"
 #include "ensemblemodel/ensembleevaluator.h"
+#include "gaussianprocessmodel/gaussianprocessevaluator.h"
+#include "generalregressionmodel/generalregressionevaluator.h"
 #include "header.h"
 #include "internal_evaluator.h"
-#include "clusteringmodel/clusteringevaluator.h"
-#include "rulesetmodel/rulesetevaluator.h"
-#include "baselinemodel/baselineevaluator.h"
-#include "anomalydetectionmodel/anomalydetectionevaluator.h"
-#include "gaussianprocessmodel/gaussianprocessevaluator.h"
-#include "textmodel/textmodel.h"
-#include "timeseriesmodel/timeseriesevaluator.h"
-#include "generalregressionmodel/generalregressionevaluator.h"
 #include "knnmodel/knnevaluator.h"
 #include "naivebayesmodel/naivebayesevaluator.h"
 #include "neuralnetwork/neuralnetworkevaluator.h"
 #include "regressionmodel/regressionevaluator.h"
+#include "rulesetmodel/rulesetevaluator.h"
 #include "scorecard/scorecardevaluator.h"
 #include "svmmodel/svmevaluator.h"
+#include "textmodel/textmodel.h"
+#include "timeseriesmodel/timeseriesevaluator.h"
 #include "treemodel/treeevaluator.h"
 #include "treemodel/treemodel.h"
 #include "xmlnode.h"
@@ -40,12 +39,11 @@
  */
 class ModelBuilder {
  public:
-  inline static std::unique_ptr<InternalEvaluator> build(const std::string &filename, const bool zipped) {
+  inline static std::unique_ptr<InternalEvaluator> build(const std::string& filename, const bool zipped) {
     std::vector<char> file_data = read_file(filename, zipped);
     pugi::xml_document document;
     pugi::xml_parse_result result = document.load_buffer(file_data.data(), file_data.size());
-    if (!result)
-      throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
+    if (!result) throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
 
     XmlNode xmlNode(document.child("PMML"));
     std::unique_ptr<InternalEvaluator> evaluator;

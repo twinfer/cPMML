@@ -22,22 +22,22 @@
  */
 class GeneralRegressionEvaluator : public InternalEvaluator {
  public:
-  explicit GeneralRegressionEvaluator(const XmlNode &node)
+  explicit GeneralRegressionEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         grm(node.get_child("GeneralRegressionModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   GeneralRegressionModel grm;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return grm.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return grm.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return grm.predict(sample);
   }
 

@@ -8,6 +8,7 @@
 #define CPMML_NORMALIZATIONMETHODTYPE_H
 
 #include <string>
+
 #include "utils/utils.h"
 
 /**
@@ -31,13 +32,13 @@ class NormalizationMethodType {
 
   NormalizationMethodType() = default;
 
-  explicit NormalizationMethodType(const std::string &value) : value(from_string(to_lower(value))) {}
+  explicit NormalizationMethodType(const std::string& value) : value(from_string(to_lower(value))) {}
 
-  inline bool operator==(const NormalizationMethodType &other) const { return value == other.value; };
+  inline bool operator==(const NormalizationMethodType& other) const { return value == other.value; };
 
-  inline bool operator!=(const NormalizationMethodType &other) const { return value != other.value; };
+  inline bool operator!=(const NormalizationMethodType& other) const { return value != other.value; };
 
-  static NormalizationMethodTypeValue from_string(const std::string &normalization_methodtype) {
+  static NormalizationMethodTypeValue from_string(const std::string& normalization_methodtype) {
     const static std::unordered_map<std::string, NormalizationMethodTypeValue> normalization_methodtype_converter = {
         {"none", NormalizationMethodTypeValue::NONE},       {"simplemax", NormalizationMethodTypeValue::SIMPLEMAX},
         {"softmax", NormalizationMethodTypeValue::SOFTMAX}, {"logit", NormalizationMethodTypeValue::LOGIT},
@@ -47,7 +48,7 @@ class NormalizationMethodType {
 
     try {
       return normalization_methodtype_converter.at(to_lower(normalization_methodtype));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return NormalizationMethodTypeValue::NONE;
     }
   }

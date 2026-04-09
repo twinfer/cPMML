@@ -9,6 +9,7 @@
 
 #include <string>
 #include <vector>
+
 #include "miningschema.h"
 #include "transformationdictionary.h"
 
@@ -26,24 +27,24 @@ class DagBuilder {
  public:
   DagBuilder() = default;
 
-  static std::vector<std::string> build(const MiningSchema &mining_schema,
-                                        const TransformationDictionary &transformation_dictionary) {
+  static std::vector<std::string> build(const MiningSchema& mining_schema,
+                                        const TransformationDictionary& transformation_dictionary) {
     std::unordered_set<std::string> visited;
     std::unordered_set<std::string> removed;
     std::vector<std::string> dag;
 
-    for (const auto &derived_field : transformation_dictionary.derivedfields)
+    for (const auto& derived_field : transformation_dictionary.derivedfields)
       buildR(derived_field, dag, visited, removed, mining_schema, transformation_dictionary);
 
     return dag;
   }
 
  private:
-  static void buildR(const DerivedField &derived_field, std::vector<std::string> &dag,
-                     std::unordered_set<std::string> &visited, std::unordered_set<std::string> &removed,
-                     const MiningSchema &minining_schema, const TransformationDictionary &transformation_dictionary) {
+  static void buildR(const DerivedField& derived_field, std::vector<std::string>& dag,
+                     std::unordered_set<std::string>& visited, std::unordered_set<std::string>& removed,
+                     const MiningSchema& minining_schema, const TransformationDictionary& transformation_dictionary) {
     if (visited.find(derived_field.name) != visited.cend()) return;
-    for (const auto &input : derived_field.expression->inputs) {
+    for (const auto& input : derived_field.expression->inputs) {
       if (removed.find(input) != removed.cend()) {
         removed.insert(derived_field.name);
         visited.insert(derived_field.name);

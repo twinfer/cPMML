@@ -18,22 +18,22 @@
  */
 class RuleSetEvaluator : public InternalEvaluator {
  public:
-  explicit RuleSetEvaluator(const XmlNode &node)
+  explicit RuleSetEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         ruleset(node.get_child("RuleSetModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   RuleSetModel ruleset;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return ruleset.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return ruleset.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return ruleset.predict(sample);
   }
 

@@ -10,7 +10,6 @@
 #define SET_THRESHOLD 150
 
 #include "datadictionary.h"
-
 #include "miningschema.h"
 #include "predicatetype.h"
 
@@ -25,7 +24,7 @@ class PredicateBuilder {
 
   PredicateBuilder() = default;
 
-  explicit PredicateBuilder(const std::shared_ptr<Indexer> &indexer) : indexer(indexer) {}
+  explicit PredicateBuilder(const std::shared_ptr<Indexer>& indexer) : indexer(indexer) {}
 
   inline Predicate build(XmlNode node) const {
     if (node.is_empty()) return Predicate("true");
@@ -50,7 +49,7 @@ class PredicateBuilder {
       }
       case PredicateType::PredicateTypeValue::COMPOUND:
         std::vector<Predicate> predicates;
-        for (const auto &child : node.get_childs()) predicates.push_back(build(child));
+        for (const auto& child : node.get_childs()) predicates.push_back(build(child));
 
         return Predicate(predicates, node.get_attribute("booleanOperator"));
     }

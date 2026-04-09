@@ -32,39 +32,39 @@
 class RegressionModel : public InternalModel {
  public:
   NormalizationMethodType normalization_methodtype;
-  std::function<double(const double &)> regression_normalization;
-  std::function<std::vector<double>(const std::vector<double> &)> classification_normalization;
+  std::function<double(const double&)> regression_normalization;
+  std::function<std::vector<double>(const std::vector<double>&)> classification_normalization;
   std::vector<RegressionTable> regression_tables;
   std::vector<std::string> classes;
 
   RegressionModel() = default;
 
-  RegressionModel(const XmlNode &node, const DataDictionary &data_dictionary, const std::shared_ptr<Indexer> &indexer)
+  RegressionModel(const XmlNode& node, const DataDictionary& data_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, indexer),
         normalization_methodtype(node.get_attribute("normalizationMethod")),
         regression_normalization(SingleNormalizationMethodBuilder::build(normalization_methodtype)),
         classification_normalization(MultiNormalizationMethodBuilder::build(normalization_methodtype)),
         regression_tables(RegressionTable::to_regressiontables(node.get_childs("RegressionTable"), indexer)) {
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto &regression_table : regression_tables) classes.push_back(regression_table.target_category);
+      for (const auto& regression_table : regression_tables) classes.push_back(regression_table.target_category);
     else
       classes.push_back(mining_schema.target.name);
   }
 
-  RegressionModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                  const TransformationDictionary &transformationDictionary, const std::shared_ptr<Indexer> &indexer)
+  RegressionModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                  const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),
         normalization_methodtype(node.get_attribute("normalizationMethod")),
         regression_normalization(SingleNormalizationMethodBuilder::build(normalization_methodtype)),
         classification_normalization(MultiNormalizationMethodBuilder::build(normalization_methodtype)),
         regression_tables(RegressionTable::to_regressiontables(node.get_childs("RegressionTable"), indexer)) {
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto &regression_table : regression_tables) classes.push_back(regression_table.target_category);
+      for (const auto& regression_table : regression_tables) classes.push_back(regression_table.target_category);
     else
       classes.push_back(mining_schema.target.name);
   }
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     std::vector<double> scores;
     double regressed_value;
     switch (mining_function.value) {
@@ -81,7 +81,7 @@ class RegressionModel : public InternalModel {
     throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::REGRESSION:
         return std::to_string(regression_normalization(regression_tables[0].score(sample)));
@@ -92,15 +92,15 @@ class RegressionModel : public InternalModel {
     throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
   }
 
-  inline std::vector<double> get_scores(const Sample &sample) const {
+  inline std::vector<double> get_scores(const Sample& sample) const {
     std::vector<double> scores;
 
-    for (const auto &regressionTable : regression_tables) scores.push_back(regressionTable.score(sample));
+    for (const auto& regressionTable : regression_tables) scores.push_back(regressionTable.score(sample));
 
     return scores;
   }
 
-  inline std::string get_class(const std::vector<double> &scores) const {
+  inline std::string get_class(const std::vector<double>& scores) const {
     double max = -double_min();
     size_t _class = 0;
 

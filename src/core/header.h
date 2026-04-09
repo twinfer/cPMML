@@ -9,6 +9,7 @@
 
 #include <sstream>
 #include <string>
+
 #include "xmlnode.h"
 
 /**
@@ -25,12 +26,12 @@ class Header {
   std::string description;
   std::string model_version;
 
-  Header(){};
+  Header() {};
 
-  explicit Header(const XmlNode &node)
+  explicit Header(const XmlNode& node)
       : copyright(node.get_attribute("copyright")),
         description(node.get_attribute("description")),
-        model_version(node.get_attribute("modelVersion")){};
+        model_version(node.get_attribute("modelVersion")) {};
 };
 
 #endif

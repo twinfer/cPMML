@@ -31,8 +31,8 @@ class NormDiscrete : public Expression {
 
   NormDiscrete() = default;
 
-  NormDiscrete(const XmlNode &node, const unsigned int &output_index, const DataType &output_type,
-               const std::shared_ptr<Indexer> &indexer)
+  NormDiscrete(const XmlNode& node, const unsigned int& output_index, const DataType& output_type,
+               const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.get_attribute("field")),
@@ -45,7 +45,7 @@ class NormDiscrete : public Expression {
     inputs.insert(field_name);
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     Value input = sample[index].value;
     if (input.missing) return mapmissing_to;
     if (input == value) return Value(1, output_type);

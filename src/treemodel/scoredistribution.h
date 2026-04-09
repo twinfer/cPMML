@@ -61,11 +61,11 @@ class ScoreDistribution {
         probability(confidence),
         probability_string(confidence_string) {}
 
-  static std::vector<ScoreDistribution> to_score_distributions(const std::vector<XmlNode> &score_distribution_nodes,
-                                                               const DataType &target_type) {
+  static std::vector<ScoreDistribution> to_score_distributions(const std::vector<XmlNode>& score_distribution_nodes,
+                                                               const DataType& target_type) {
     std::vector<ScoreDistribution> result;  // initialization just for perf improvement
 
-    for (const auto &node : score_distribution_nodes) result.push_back(ScoreDistribution(node, target_type));
+    for (const auto& node : score_distribution_nodes) result.push_back(ScoreDistribution(node, target_type));
 
     return result;
   }

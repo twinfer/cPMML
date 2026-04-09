@@ -22,22 +22,22 @@
  */
 class KnnEvaluator : public InternalEvaluator {
  public:
-  explicit KnnEvaluator(const XmlNode &node)
+  explicit KnnEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         knn(node.get_child("NearestNeighborModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   NearestNeighborModel knn;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return knn.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return knn.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return knn.predict(sample);
   }
 

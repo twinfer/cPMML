@@ -19,12 +19,12 @@
  */
 class RegressionScore : public InternalScore {
  public:
-  RegressionScore(const std::string &simple_score, const double &simple_scored, const std::vector<std::string> &classes,
-                  const std::vector<double> &scores)
+  RegressionScore(const std::string& simple_score, const double& simple_scored, const std::vector<std::string>& classes,
+                  const std::vector<double>& scores)
       : InternalScore(simple_score, get_probabilities(classes, scores)) {}
 
-  static std::unordered_map<std::string, double> get_probabilities(const std::vector<std::string> &classes,
-                                                                   const std::vector<double> &scores) {
+  static std::unordered_map<std::string, double> get_probabilities(const std::vector<std::string>& classes,
+                                                                   const std::vector<double>& scores) {
     std::unordered_map<std::string, double> probabilities;
 
     for (auto i = 0u; i < classes.size(); i++) probabilities[classes[i]] = scores[i];

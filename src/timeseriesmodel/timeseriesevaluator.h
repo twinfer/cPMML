@@ -23,30 +23,37 @@
  */
 class TimeSeriesEvaluator : public InternalEvaluator {
  public:
-  explicit TimeSeriesEvaluator(const XmlNode &node)
-      : InternalEvaluator(node),
-        ts_model(node.get_child("TimeSeriesModel")) {}
+  explicit TimeSeriesEvaluator(const XmlNode& node)
+      : InternalEvaluator(node), ts_model(node.get_child("TimeSeriesModel")) {}
 
   TimeSeriesModel ts_model;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>&) override {
     return true;  // no sample input to validate
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &) const override {
-    throw cpmml::ParsingException(
-        "TimeSeriesModel does not support score(); use model.forecast(horizon)");
+  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>&) const override {
+    throw cpmml::ParsingException("TimeSeriesModel does not support score(); use model.forecast(horizon)");
   }
 
-  inline std::string predict(
-      const std::unordered_map<std::string, std::string> &) const override {
-    throw cpmml::ParsingException(
-        "TimeSeriesModel does not support predict(); use model.forecast(horizon)");
+  inline std::string predict(const std::unordered_map<std::string, std::string>&) const override {
+    throw cpmml::ParsingException("TimeSeriesModel does not support predict(); use model.forecast(horizon)");
   }
 
-  inline std::vector<double> forecast(int horizon) const override {
-    return ts_model.forecast(horizon);
+  inline std::vector<double> forecast(int horizon) const override { return ts_model.forecast(horizon, {}); }
+
+  inline std::vector<double> forecast(
+      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const override {
+    return ts_model.forecast(horizon, regressors);
+  }
+
+  inline std::vector<std::pair<double, double>> forecast_with_variance(int horizon) const override {
+    return ts_model.forecast_with_variance(horizon, {});
+  }
+
+  inline std::vector<std::pair<double, double>> forecast_with_variance(
+      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const override {
+    return ts_model.forecast_with_variance(horizon, regressors);
   }
 };
 

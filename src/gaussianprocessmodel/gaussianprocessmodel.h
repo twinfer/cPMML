@@ -7,11 +7,10 @@
 #ifndef CPMML_GAUSSIANPROCESSMODEL_H
 #define CPMML_GAUSSIANPROCESSMODEL_H
 
+#include <Eigen/Dense>
 #include <cmath>
 #include <string>
 #include <vector>
-
-#include <Eigen/Dense>
 
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
@@ -43,28 +42,28 @@ class GaussianProcessModel : public InternalModel {
   // --- Members ---
 
   KernelType kernel_type = KernelType::RBF;
-  double gamma = 1.0;         // amplitude / bandwidth
-  double noise_var = 0.01;    // diagonal noise added to K
-  double degree = 2.0;        // exponent (GeneralizedExponentialKernel)
-  Eigen::VectorXd lambdas;    // per-dimension rates (ARD / AbsExp / GenExp)
+  double gamma = 1.0;       // amplitude / bandwidth
+  double noise_var = 0.01;  // diagonal noise added to K
+  double degree = 2.0;      // exponent (GeneralizedExponentialKernel)
+  Eigen::VectorXd lambdas;  // per-dimension rates (ARD / AbsExp / GenExp)
 
   std::vector<std::string> feat_names;
   std::vector<size_t> feat_indices;
   size_t n_train = 0;
   size_t n_feat = 0;
 
-  Eigen::MatrixXd X_train;   // n_train × n_feat
-  Eigen::VectorXd y_train;   // n_train
-  Eigen::VectorXd alpha;     // K^{-1} y_train (precomputed)
-  Eigen::MatrixXd L;         // lower Cholesky factor of K (for variance)
+  Eigen::MatrixXd X_train;  // n_train × n_feat
+  Eigen::VectorXd y_train;  // n_train
+  Eigen::VectorXd alpha;    // K^{-1} y_train (precomputed)
+  Eigen::MatrixXd L;        // lower Cholesky factor of K (for variance)
 
   // --- Constructors ---
 
   GaussianProcessModel() = default;
 
-  GaussianProcessModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                       const TransformationDictionary &transformation_dictionary,
-                       const std::shared_ptr<Indexer> &indexer)
+  GaussianProcessModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                       const TransformationDictionary& transformation_dictionary,
+                       const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     parse_kernel(node);
     parse_training(node, indexer);
@@ -73,7 +72,7 @@ class GaussianProcessModel : public InternalModel {
 
   // --- Scoring ---
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     Eigen::VectorXd k = compute_k_star(sample);
     double mean = k.dot(alpha);
     Eigen::VectorXd v = L.triangularView<Eigen::Lower>().solve(k);
@@ -83,7 +82,7 @@ class GaussianProcessModel : public InternalModel {
     return sc;
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     return std::to_string(compute_k_star(sample).dot(alpha));
   }
 
@@ -92,7 +91,7 @@ class GaussianProcessModel : public InternalModel {
   // Kernel computation
   // -----------------------------------------------------------------------
 
-  double kernel(const Eigen::VectorXd &a, const Eigen::VectorXd &b) const {
+  double kernel(const Eigen::VectorXd& a, const Eigen::VectorXd& b) const {
     switch (kernel_type) {
       case KernelType::RBF:
         return std::exp(-gamma * (a - b).squaredNorm());
@@ -107,8 +106,7 @@ class GaussianProcessModel : public InternalModel {
       case KernelType::ABS_EXP: {
         // AbsoluteExponentialKernel: gamma * exp(-sum_i lambda_i * |x_i - z_i|)
         double sum = 0.0;
-        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i)
-          sum += lambdas[i] * std::abs(a[i] - b[i]);
+        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i) sum += lambdas[i] * std::abs(a[i] - b[i]);
         return gamma * std::exp(-sum);
       }
       case KernelType::GEN_EXP: {
@@ -122,11 +120,9 @@ class GaussianProcessModel : public InternalModel {
     return 0.0;
   }
 
-  double kernel_self() const {
-    return (kernel_type == KernelType::RBF) ? 1.0 : gamma;
-  }
+  double kernel_self() const { return (kernel_type == KernelType::RBF) ? 1.0 : gamma; }
 
-  Eigen::VectorXd compute_k_star(const Sample &sample) const {
+  Eigen::VectorXd compute_k_star(const Sample& sample) const {
     Eigen::VectorXd x = extract(sample);
     Eigen::VectorXd k(n_train);
     for (size_t i = 0; i < n_train; ++i)
@@ -134,10 +130,9 @@ class GaussianProcessModel : public InternalModel {
     return k;
   }
 
-  Eigen::VectorXd extract(const Sample &sample) const {
+  Eigen::VectorXd extract(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(n_feat));
-    for (size_t i = 0; i < n_feat; ++i)
-      x[static_cast<Eigen::Index>(i)] = sample[feat_indices[i]].value.value;
+    for (size_t i = 0; i < n_feat; ++i) x[static_cast<Eigen::Index>(i)] = sample[feat_indices[i]].value.value;
     return x;
   }
 
@@ -145,55 +140,46 @@ class GaussianProcessModel : public InternalModel {
   // Parsing
   // -----------------------------------------------------------------------
 
-  void parse_kernel(const XmlNode &node) {
+  void parse_kernel(const XmlNode& node) {
     if (node.exists_child("RadialBasisKernel")) {
       kernel_type = KernelType::RBF;
       XmlNode k = node.get_child("RadialBasisKernel");
       gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance")
-                      ? k.get_double_attribute("noiseVariance")
-                      : 0.01;
+      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
     } else if (node.exists_child("ARDSquaredExponentialKernel")) {
       kernel_type = KernelType::ARD;
       XmlNode k = node.get_child("ARDSquaredExponentialKernel");
       gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance")
-                      ? k.get_double_attribute("noiseVariance")
-                      : 0.01;
+      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
       parse_lambdas(k);
     } else if (node.exists_child("AbsoluteExponentialKernel")) {
       kernel_type = KernelType::ABS_EXP;
       XmlNode k = node.get_child("AbsoluteExponentialKernel");
       gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance")
-                      ? k.get_double_attribute("noiseVariance")
-                      : 0.01;
+      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
       parse_lambdas(k);
     } else if (node.exists_child("GeneralizedExponentialKernel")) {
       kernel_type = KernelType::GEN_EXP;
       XmlNode k = node.get_child("GeneralizedExponentialKernel");
       gamma = k.get_double_attribute("gamma");
       degree = k.exists_attribute("degree") ? k.get_double_attribute("degree") : 2.0;
-      noise_var = k.exists_attribute("noiseVariance")
-                      ? k.get_double_attribute("noiseVariance")
-                      : 0.01;
+      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
       parse_lambdas(k);
     } else {
       throw cpmml::ParsingException("GaussianProcessModel: unsupported or missing kernel");
     }
   }
 
-  void parse_lambdas(const XmlNode &k) {
+  void parse_lambdas(const XmlNode& k) {
     if (k.exists_child("Lambda")) {
       XmlNode arr = k.get_child("Lambda").get_child("Array");
       std::vector<std::string> parts = split(arr.value(), " ");
       lambdas.resize(static_cast<Eigen::Index>(parts.size()));
-      for (size_t i = 0; i < parts.size(); ++i)
-        lambdas[static_cast<Eigen::Index>(i)] = to_double(parts[i]);
+      for (size_t i = 0; i < parts.size(); ++i) lambdas[static_cast<Eigen::Index>(i)] = to_double(parts[i]);
     }
   }
 
-  void parse_training(const XmlNode &node, const std::shared_ptr<Indexer> &indexer) {
+  void parse_training(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     if (!node.exists_child("TrainingInstances"))
       throw cpmml::ParsingException("GaussianProcessModel: missing TrainingInstances");
 
@@ -203,7 +189,7 @@ class GaussianProcessModel : public InternalModel {
     // Build field → column map, separating active features from target
     std::vector<std::string> feat_cols;
     std::string target_col;
-    for (const auto &f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
+    for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
       std::string field = f.get_attribute("field");
       std::string col = f.get_attribute("column");
       if (field == target_name) {
@@ -224,7 +210,7 @@ class GaussianProcessModel : public InternalModel {
     y_train.resize(static_cast<Eigen::Index>(n_train));
 
     for (size_t r = 0; r < n_train; ++r) {
-      const XmlNode &row = rows[r];
+      const XmlNode& row = rows[r];
       for (size_t c = 0; c < n_feat; ++c)
         X_train(static_cast<Eigen::Index>(r), static_cast<Eigen::Index>(c)) =
             to_double(row.get_child(feat_cols[c]).value());
@@ -242,11 +228,9 @@ class GaussianProcessModel : public InternalModel {
     for (size_t i = 0; i < n_train; ++i)
       for (size_t j = 0; j < n_train; ++j)
         K(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) =
-            kernel(X_train.row(static_cast<Eigen::Index>(i)),
-                   X_train.row(static_cast<Eigen::Index>(j)));
+            kernel(X_train.row(static_cast<Eigen::Index>(i)), X_train.row(static_cast<Eigen::Index>(j)));
 
-    K += noise_var * Eigen::MatrixXd::Identity(static_cast<Eigen::Index>(n_train),
-                                                static_cast<Eigen::Index>(n_train));
+    K += noise_var * Eigen::MatrixXd::Identity(static_cast<Eigen::Index>(n_train), static_cast<Eigen::Index>(n_train));
 
     Eigen::LLT<Eigen::MatrixXd> llt(K);
     if (llt.info() != Eigen::Success)

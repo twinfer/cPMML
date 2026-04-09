@@ -33,28 +33,28 @@ class NumericPredictor {
   double coefficient = double_min();
   double exponent = double_min();
 
-  std::function<double(const Value &)> numeric_predictor;
+  std::function<double(const Value&)> numeric_predictor;
 
   NumericPredictor() = default;
 
-  NumericPredictor(const XmlNode &node,  // NumericPredictor node
-                   const std::shared_ptr<Indexer> &indexer)
+  NumericPredictor(const XmlNode& node,  // NumericPredictor node
+                   const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
         index(indexer->get_index(name)),
         datatype(indexer->get_type(name)),
         coefficient(node.get_double_attribute("coefficient")),
         exponent(node.exists_attribute("exponent") ? node.get_double_attribute("exponent") : 1) {}
 
-  inline double get_term(const Sample &sample) const {
-    const Value &value = sample[index].value;
+  inline double get_term(const Sample& sample) const {
+    const Value& value = sample[index].value;
     return value.missing ? 0 : coefficient * std::pow(value.value, exponent);
   }
 
-  static std::vector<NumericPredictor> to_numericpredictors(const std::vector<XmlNode> &nodes,
-                                                            const std::shared_ptr<Indexer> &indexer) {
+  static std::vector<NumericPredictor> to_numericpredictors(const std::vector<XmlNode>& nodes,
+                                                            const std::shared_ptr<Indexer>& indexer) {
     std::vector<NumericPredictor> result;
 
-    for (const auto &node : nodes) result.push_back(NumericPredictor(node, indexer));
+    for (const auto& node : nodes) result.push_back(NumericPredictor(node, indexer));
 
     return result;
   }

@@ -30,9 +30,9 @@ class OpType {
   OpTypeValue value = OpTypeValue::UNDEFINED;
 
   OpType() = default;
-  explicit OpType(const std::string &optype) : value(from_string(optype)) {}
+  explicit OpType(const std::string& optype) : value(from_string(optype)) {}
 
-  static OpTypeValue from_string(const std::string &optype) {
+  static OpTypeValue from_string(const std::string& optype) {
     const static std::unordered_map<std::string, OpTypeValue> optype_converter = {
         {"categorical", OpType::OpTypeValue::CATEGORICAL},
         {"ordinal", OpType::OpTypeValue::ORDINAL},
@@ -40,7 +40,7 @@ class OpType {
 
     try {
       return optype_converter.at(::to_lower(optype));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return OpTypeValue::UNDEFINED;
     }
   }

@@ -59,9 +59,8 @@ class BaselineModel : public InternalModel {
 
   BaselineModel() = default;
 
-  BaselineModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                const TransformationDictionary &transformation_dictionary,
-                const std::shared_ptr<Indexer> &indexer)
+  BaselineModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     XmlNode td = node.get_child("TestDistributions");
     test_field = td.get_attribute("field");
@@ -98,10 +97,12 @@ class BaselineModel : public InternalModel {
       // Discrete distribution: CountTable, NormalizedCountTable, or DiscreteDistribution
       baseline.is_gaussian = false;
       std::string table_tag = "DiscreteDistribution";
-      if (base_node.exists_child("CountTable")) table_tag = "CountTable";
-      else if (base_node.exists_child("NormalizedCountTable")) table_tag = "NormalizedCountTable";
+      if (base_node.exists_child("CountTable"))
+        table_tag = "CountTable";
+      else if (base_node.exists_child("NormalizedCountTable"))
+        table_tag = "NormalizedCountTable";
       XmlNode table = base_node.get_child(table_tag);
-      for (const auto &fv : table.get_childs("FieldValue")) {
+      for (const auto& fv : table.get_childs("FieldValue")) {
         double key = Value(fv.get_attribute("value")).value;
         double count = to_double(fv.get_attribute("count"));
         baseline.counts[key] = count;
@@ -112,16 +113,14 @@ class BaselineModel : public InternalModel {
 
   // --- Scoring ---
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     return std::make_unique<InternalScore>(compute(sample));
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
-    return std::to_string(compute(sample));
-  }
+  inline std::string predict_raw(const Sample& sample) const override { return std::to_string(compute(sample)); }
 
  private:
-  double compute(const Sample &sample) const {
+  double compute(const Sample& sample) const {
     const double x = sample[test_field_idx].value.value;
     switch (stat) {
       case TestStat::ZSCORE:
@@ -142,9 +141,8 @@ class BaselineModel : public InternalModel {
       }
       case TestStat::LOG_PROB: {
         auto it = baseline.counts.find(x);
-        double p = (it != baseline.counts.end() && baseline.total > 0)
-                       ? it->second / baseline.total
-                       : 1.0 / (baseline.total + 1.0);
+        double p = (it != baseline.counts.end() && baseline.total > 0) ? it->second / baseline.total
+                                                                       : 1.0 / (baseline.total + 1.0);
         return std::log(p);
       }
     }

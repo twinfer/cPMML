@@ -25,10 +25,10 @@
  */
 class OutputExpressionBuilder {
  public:
-  inline static std::shared_ptr<OutputExpression> build(const XmlNode &node, const unsigned int &output_index,
-                                                        const DataType &output_type,
-                                                        const std::shared_ptr<Indexer> &indexer,
-                                                        const std::string &model_target) {
+  inline static std::shared_ptr<OutputExpression> build(const XmlNode& node, const unsigned int& output_index,
+                                                        const DataType& output_type,
+                                                        const std::shared_ptr<Indexer>& indexer,
+                                                        const std::string& model_target) {
     switch (OutputExpressionType(node.get_attribute("feature")).value) {
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);

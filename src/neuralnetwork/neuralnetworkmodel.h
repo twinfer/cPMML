@@ -7,12 +7,11 @@
 #ifndef CPMML_NEURALNETWORKMODEL_H
 #define CPMML_NEURALNETWORKMODEL_H
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <Eigen/Dense>
 
 #include "core/datadictionary.h"
 #include "core/derivedfield.h"
@@ -43,12 +42,12 @@ class NeuralNetworkModel : public InternalModel {
   };
 
   struct Layer {
-    Eigen::MatrixXd weights;        // [n_neurons x n_inputs_to_layer]
-    Eigen::VectorXd biases;         // [n_neurons]
+    Eigen::MatrixXd weights;  // [n_neurons x n_inputs_to_layer]
+    Eigen::VectorXd biases;   // [n_neurons]
     NeuralActivationType activation;
     double threshold;
     double width;
-    std::string normalization;      // "none", "softmax", "simplemax"
+    std::string normalization;  // "none", "softmax", "simplemax"
     std::vector<std::string> output_ids;
   };
 
@@ -76,9 +75,8 @@ class NeuralNetworkModel : public InternalModel {
 
   NeuralNetworkModel() = default;
 
-  NeuralNetworkModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                     const TransformationDictionary &transformation_dictionary,
-                     const std::shared_ptr<Indexer> &indexer)
+  NeuralNetworkModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                     const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         default_activation(parse_activation(node.get_attribute("activationFunction"))),
         default_threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 0.0),
@@ -89,20 +87,20 @@ class NeuralNetworkModel : public InternalModel {
     parse_neural_outputs(node.get_child("NeuralOutputs"));
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto &no : neural_outputs) classes.push_back(no.target_category);
+      for (const auto& no : neural_outputs) classes.push_back(no.target_category);
     else
       classes.push_back(mining_schema.target.name);
 
     // Build output lookup map (avoid rebuilding per score call)
     if (!layers.empty()) {
-      const auto &last_ids = layers.back().output_ids;
+      const auto& last_ids = layers.back().output_ids;
       for (size_t i = 0; i < last_ids.size(); i++) output_id_to_idx[last_ids[i]] = i;
     }
   }
 
   // --- Scoring ---
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     Eigen::VectorXd out = forward_pass(sample);
     std::vector<double> scores = collect_scores(out);
 
@@ -114,7 +112,7 @@ class NeuralNetworkModel : public InternalModel {
     return std::make_unique<RegressionScore>(std::to_string(scores[0]), scores[0], classes, scores);
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     Eigen::VectorXd out = forward_pass(sample);
     std::vector<double> scores = collect_scores(out);
 
@@ -129,12 +127,10 @@ class NeuralNetworkModel : public InternalModel {
  private:
   // --- Parse helpers ---
 
-  static std::string normalize_method_str(const std::string &s) {
-    return (s == "null") ? "none" : to_lower(s);
-  }
+  static std::string normalize_method_str(const std::string& s) { return (s == "null") ? "none" : to_lower(s); }
 
-  void parse_neural_inputs(const XmlNode &inputs_node, const std::shared_ptr<Indexer> &indexer) {
-    for (const auto &ni : inputs_node.get_childs("NeuralInput")) {
+  void parse_neural_inputs(const XmlNode& inputs_node, const std::shared_ptr<Indexer>& indexer) {
+    for (const auto& ni : inputs_node.get_childs("NeuralInput")) {
       NeuralInput input;
       input.id = ni.get_attribute("id");
       input.derived_field = DerivedField(ni.get_child("DerivedField"), indexer);
@@ -142,28 +138,23 @@ class NeuralNetworkModel : public InternalModel {
     }
   }
 
-  void parse_layers(const XmlNode &model_node) {
+  void parse_layers(const XmlNode& model_node) {
     // prev_id_to_idx: maps each neuron id in the previous "level" to its
     // column index in the weight matrix of the next layer.
     std::unordered_map<std::string, size_t> prev_id_to_idx;
-    for (size_t i = 0; i < neural_inputs.size(); i++)
-      prev_id_to_idx[neural_inputs[i].id] = i;
+    for (size_t i = 0; i < neural_inputs.size(); i++) prev_id_to_idx[neural_inputs[i].id] = i;
 
-    for (const auto &layer_node : model_node.get_childs("NeuralLayer")) {
+    for (const auto& layer_node : model_node.get_childs("NeuralLayer")) {
       auto neuron_nodes = layer_node.get_childs("Neuron");
       const size_t n = neuron_nodes.size();
       const size_t prev_n = prev_id_to_idx.size();
 
-      NeuralActivationType act =
-          layer_node.exists_attribute("activationFunction")
-              ? parse_activation(layer_node.get_attribute("activationFunction"))
-              : default_activation;
-      double thr = layer_node.exists_attribute("threshold")
-                       ? to_double(layer_node.get_attribute("threshold"))
-                       : default_threshold;
-      double wid = layer_node.exists_attribute("width")
-                       ? to_double(layer_node.get_attribute("width"))
-                       : default_width;
+      NeuralActivationType act = layer_node.exists_attribute("activationFunction")
+                                     ? parse_activation(layer_node.get_attribute("activationFunction"))
+                                     : default_activation;
+      double thr = layer_node.exists_attribute("threshold") ? to_double(layer_node.get_attribute("threshold"))
+                                                            : default_threshold;
+      double wid = layer_node.exists_attribute("width") ? to_double(layer_node.get_attribute("width")) : default_width;
       std::string norm = normalize_method_str(layer_node.get_attribute("normalizationMethod"));
 
       Eigen::MatrixXd W = Eigen::MatrixXd::Zero(n, prev_n);
@@ -172,18 +163,17 @@ class NeuralNetworkModel : public InternalModel {
       std::unordered_map<std::string, size_t> curr_id_to_idx;
 
       for (size_t i = 0; i < n; i++) {
-        const auto &neuron = neuron_nodes[i];
+        const auto& neuron = neuron_nodes[i];
         std::string nid = neuron.get_attribute("id");
         output_ids.push_back(nid);
         curr_id_to_idx[nid] = i;
 
         if (neuron.exists_attribute("bias")) b[i] = to_double(neuron.get_attribute("bias"));
 
-        for (const auto &con : neuron.get_childs("Con")) {
+        for (const auto& con : neuron.get_childs("Con")) {
           const std::string from = con.get_attribute("from");
           const auto it = prev_id_to_idx.find(from);
-          if (it != prev_id_to_idx.end())
-            W(i, it->second) = to_double(con.get_attribute("weight"));
+          if (it != prev_id_to_idx.end()) W(i, it->second) = to_double(con.get_attribute("weight"));
         }
       }
 
@@ -192,8 +182,8 @@ class NeuralNetworkModel : public InternalModel {
     }
   }
 
-  void parse_neural_outputs(const XmlNode &outputs_node) {
-    for (const auto &no : outputs_node.get_childs("NeuralOutput")) {
+  void parse_neural_outputs(const XmlNode& outputs_node) {
+    for (const auto& no : outputs_node.get_childs("NeuralOutput")) {
       NeuralOutput output;
       output.output_neuron = no.get_attribute("outputNeuron");
 
@@ -209,7 +199,7 @@ class NeuralNetworkModel : public InternalModel {
 
   // --- Forward pass ---
 
-  Eigen::VectorXd forward_pass(const Sample &sample) const {
+  Eigen::VectorXd forward_pass(const Sample& sample) const {
     // Build a local mutable sample large enough to hold any new indices
     // that NeuralInput DerivedFields may have registered after base_sample.
     Sample local(indexer->size());
@@ -223,7 +213,7 @@ class NeuralNetworkModel : public InternalModel {
     }
 
     // Layer-by-layer forward pass
-    for (const auto &layer : layers) {
+    for (const auto& layer : layers) {
       Eigen::VectorXd pre = layer.weights * x + layer.biases;
 
       // Element-wise activation
@@ -246,10 +236,10 @@ class NeuralNetworkModel : public InternalModel {
     return x;
   }
 
-  std::vector<double> collect_scores(const Eigen::VectorXd &out) const {
+  std::vector<double> collect_scores(const Eigen::VectorXd& out) const {
     std::vector<double> scores;
     scores.reserve(neural_outputs.size());
-    for (const auto &no : neural_outputs) {
+    for (const auto& no : neural_outputs) {
       const auto it = output_id_to_idx.find(no.output_neuron);
       if (it != output_id_to_idx.end())
         scores.push_back(out[static_cast<Eigen::Index>(it->second)]);

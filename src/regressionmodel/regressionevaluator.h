@@ -24,22 +24,23 @@
  */
 class RegressionEvaluator : public InternalEvaluator {
  public:
-  explicit RegressionEvaluator(const XmlNode &node)
+  explicit RegressionEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
-        regression(node.get_child("RegressionModel"), data_dictionary, transformation_dictionary, indexer){};
+        regression(node.get_child("RegressionModel"), data_dictionary, transformation_dictionary, indexer) {};
 
   RegressionModel regression;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return regression.validate(sample);
   }
 
-  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::unique_ptr<InternalScore> score(
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return regression.score(sample);
   }
 
   // Simple score, due to the type of value returned is 2/300 ns faster
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return regression.predict(sample);
   }
 

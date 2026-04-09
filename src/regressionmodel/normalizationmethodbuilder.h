@@ -20,7 +20,7 @@
  */
 class SingleNormalizationMethodBuilder {
  public:
-  static std::function<double(const double &)> build(const NormalizationMethodType &normalizationMethodType) {
+  static std::function<double(const double&)> build(const NormalizationMethodType& normalizationMethodType) {
     switch (normalizationMethodType.value) {
       case NormalizationMethodType::NormalizationMethodTypeValue::NONE:
         return single_none;
@@ -52,8 +52,8 @@ class SingleNormalizationMethodBuilder {
  */
 class MultiNormalizationMethodBuilder {
  public:
-  static std::function<std::vector<double>(const std::vector<double> &)> build(
-      const NormalizationMethodType &normalizationMethodType) {
+  static std::function<std::vector<double>(const std::vector<double>&)> build(
+      const NormalizationMethodType& normalizationMethodType) {
     switch (normalizationMethodType.value) {
       case NormalizationMethodType::NormalizationMethodTypeValue::NONE:
         return categorical_none;

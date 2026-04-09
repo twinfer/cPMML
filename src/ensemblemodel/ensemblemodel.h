@@ -29,17 +29,17 @@ class EnsembleModel : public InternalModel {
   Predicate predicate;
   MultipleModelMethod multiplemodelmethod;
   std::vector<Segment> ensemble;
-  std::function<std::unique_ptr<InternalScore>(const Sample &)> score_ensemble;
+  std::function<std::unique_ptr<InternalScore>(const Sample&)> score_ensemble;
 
   EnsembleModel() = default;
 
-  EnsembleModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                const TransformationDictionary &transformation_dictionary, const std::shared_ptr<Indexer> &indexer)
+  EnsembleModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         multiplemodelmethod(node.get_child("Segmentation").get_attribute("multipleModelMethod"),
                             InternalModel::mining_function) {
     PredicateBuilder predicate_builder(indexer);
-    for (const auto &child : node.get_child("Segmentation").get_childs("Segment"))
+    for (const auto& child : node.get_child("Segmentation").get_childs("Segment"))
       ensemble.push_back(Segment(child, predicate_builder,
                                  build_segment_model(child, data_dictionary, InternalModel::transformation_dictionary,
                                                      predicate_builder, indexer)));
@@ -48,23 +48,23 @@ class EnsembleModel : public InternalModel {
     base_sample = create_basesample(indexer);
   };
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     return score_ensemble(sample);
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     std::unique_ptr<InternalScore> score(score_ensemble(sample));
 
     return score->score;
   }
 
-  static std::unique_ptr<InternalModel> build_segment_model(const XmlNode &node, const DataDictionary &data_dictionary,
-                                                            const TransformationDictionary &transformation_dictionary,
-                                                            const PredicateBuilder &predicate_builder,
-                                                            const std::shared_ptr<Indexer> &indexer) {
+  static std::unique_ptr<InternalModel> build_segment_model(const XmlNode& node, const DataDictionary& data_dictionary,
+                                                            const TransformationDictionary& transformation_dictionary,
+                                                            const PredicateBuilder& predicate_builder,
+                                                            const std::shared_ptr<Indexer>& indexer) {
     if (node.exists_child("MiningModel")) {
       return std::make_unique<EnsembleModel>(node.get_child("MiningModel"), data_dictionary, transformation_dictionary,
-                                        indexer);
+                                             indexer);
     } else {
       if (node.exists_child("TreeModel")) {
         return std::make_unique<TreeModel>(node.get_child("TreeModel"), data_dictionary, predicate_builder, indexer);

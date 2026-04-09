@@ -13,11 +13,10 @@
 
 #include "datadictionary.h"
 #include "header.h"
+#include "indexer.h"
 #include "internal_score.h"
 #include "options.h"
 #include "transformationdictionary.h"
-
-#include "indexer.h"
 
 /**
  * @class InternalEvaluator
@@ -43,7 +42,7 @@ class InternalEvaluator {
 
   InternalEvaluator() = default;
 
-  InternalEvaluator(const XmlNode &node)
+  InternalEvaluator(const XmlNode& node)
       : indexer(new Indexer()),
         name(node.name()),
         version(node.get_attribute("version")),
@@ -52,14 +51,14 @@ class InternalEvaluator {
         hasPreprocessing(node.exists_child("TransformationDictionary")),
         transformation_dictionary(hasPreprocessing
                                       ? TransformationDictionary(node.get_child("TransformationDictionary"), indexer)
-                                      : TransformationDictionary()){};
+                                      : TransformationDictionary()) {};
 
-  virtual inline bool validate(const std::unordered_map<std::string, std::string> &sample) { return false; }
+  virtual inline bool validate(const std::unordered_map<std::string, std::string>& sample) { return false; }
 
-  virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string> &sample) const = 0;
+  virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const = 0;
 
   // Simple score, due to the type of value returned is 2/300 ns faster
-  virtual std::string predict(const std::unordered_map<std::string, std::string> &sample) const = 0;
+  virtual std::string predict(const std::unordered_map<std::string, std::string>& sample) const = 0;
 
   virtual inline std::string get_target_name() const { return ""; }
 
@@ -67,13 +66,27 @@ class InternalEvaluator {
     throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
   }
 
-  InternalEvaluator(const InternalEvaluator &) = default;
+  virtual std::vector<double> forecast(
+      int /*horizon*/, const std::unordered_map<std::string, std::vector<double>>& /*regressors*/) const {
+    throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
+  }
 
-  InternalEvaluator(InternalEvaluator &&) = default;
+  virtual std::vector<std::pair<double, double>> forecast_with_variance(int /*horizon*/) const {
+    throw cpmml::ParsingException("forecast_with_variance() is only available for TimeSeriesModel");
+  }
 
-  InternalEvaluator &operator=(const InternalEvaluator &) = default;
+  virtual std::vector<std::pair<double, double>> forecast_with_variance(
+      int /*horizon*/, const std::unordered_map<std::string, std::vector<double>>& /*regressors*/) const {
+    throw cpmml::ParsingException("forecast_with_variance() is only available for TimeSeriesModel");
+  }
 
-  InternalEvaluator &operator=(InternalEvaluator &&) = default;
+  InternalEvaluator(const InternalEvaluator&) = default;
+
+  InternalEvaluator(InternalEvaluator&&) = default;
+
+  InternalEvaluator& operator=(const InternalEvaluator&) = default;
+
+  InternalEvaluator& operator=(InternalEvaluator&&) = default;
 
   virtual ~InternalEvaluator() = default;
 };

@@ -31,19 +31,19 @@ class Indexer {
  public:
   Indexer() = default;
 
-  std::pair<size_t, DataType> get(const std::string &name) const {
+  std::pair<size_t, DataType> get(const std::string& name) const {
     return std::make_pair(name_index.at(name), name_datatype.at(name));
   }
 
-  size_t get_index(const std::string &name) const { return name_index.at(name); }
+  size_t get_index(const std::string& name) const { return name_index.at(name); }
 
-  DataType get_type(const std::string &name) const { return name_datatype.at(name); }
+  DataType get_type(const std::string& name) const { return name_datatype.at(name); }
 
-  std::string get_name(const size_t &index) const { return index_name.at(index); }
+  std::string get_name(const size_t& index) const { return index_name.at(index); }
 
-  DataType get_type(const size_t &index) const { return index_datatype.at(index); }
+  DataType get_type(const size_t& index) const { return index_datatype.at(index); }
 
-  bool contains(const std::string &name) const { return name_index.find(name) != name_index.cend(); }
+  bool contains(const std::string& name) const { return name_index.find(name) != name_index.cend(); }
 
   std::string random_name() {
     std::string random = std::to_string(rand());
@@ -52,7 +52,7 @@ class Indexer {
     return random;
   }
 
-  size_t get_or_set(const std::string &name) {
+  size_t get_or_set(const std::string& name) {
     if (name_index.find(name) == name_index.end()) {
       name_index[name] = _size;
       index_name[_size] = name;
@@ -62,7 +62,7 @@ class Indexer {
     return name_index[name];
   }
 
-  std::pair<size_t, DataType> get_or_set(const std::string &name, const DataType &datatype) {
+  std::pair<size_t, DataType> get_or_set(const std::string& name, const DataType& datatype) {
     if (name_datatype.find(name) == name_datatype.end()) {  // set datatype in case just name is set
       name_datatype[name] = datatype;
       if (name_index.find(name) == name_index.end()) {  // set both in case neither name is set

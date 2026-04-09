@@ -29,9 +29,9 @@ class Closure {
 
   const ClosureValue value;
 
-  explicit Closure(const std::string &closure) : value(from_string(closure)) {}
+  explicit Closure(const std::string& closure) : value(from_string(closure)) {}
 
-  static ClosureValue from_string(const std::string &closure) {
+  static ClosureValue from_string(const std::string& closure) {
     const static std::unordered_map<std::string, ClosureValue> closure_converter = {
         {"closedclosed", ClosureValue::CLOSED_CLOSED},
         {"openopen", ClosureValue::OPEN_OPEN},
@@ -40,7 +40,7 @@ class Closure {
 
     try {
       return closure_converter.at(to_lower(to_lower(closure)));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException(closure + " not supported");
     }
   }

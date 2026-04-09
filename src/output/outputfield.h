@@ -34,7 +34,7 @@ class OutputField {
 
   OutputField() : derived(false), index(std::numeric_limits<size_t>::max()) {}
 
-  OutputField(const XmlNode &node, const std::shared_ptr<Indexer> &indexer, const std::string &model_target)
+  OutputField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
       : name(node.get_attribute("name")),
         optype(node.get_attribute("optype")),
         derived(OutputExpressionType(node.get_attribute("feature")).value ==
@@ -53,9 +53,9 @@ class OutputField {
     expression = OutputExpressionBuilder::build(node, index, datatype, indexer, model_target);
   }
 
-  inline void prepare(Sample &sample) const { sample.change_value_if_missing(index, expression->eval(sample)); }
+  inline void prepare(Sample& sample) const { sample.change_value_if_missing(index, expression->eval(sample)); }
 
-  inline void add_output(Sample &sample, InternalScore &score) const {
+  inline void add_output(Sample& sample, InternalScore& score) const {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING:
         score.str_outputs[name] = expression->eval_str(sample, score);
@@ -65,11 +65,11 @@ class OutputField {
     }
   }
 
-  inline static std::unordered_map<std::string, OutputField> to_outputfields(const std::vector<XmlNode> &nodes,
+  inline static std::unordered_map<std::string, OutputField> to_outputfields(const std::vector<XmlNode>& nodes,
                                                                              std::shared_ptr<Indexer> indexer,
-                                                                             const std::string &model_target) {
+                                                                             const std::string& model_target) {
     std::unordered_map<std::string, OutputField> result;
-    for (const auto &node : nodes) {
+    for (const auto& node : nodes) {
       OutputField derived_field(node, indexer, model_target);
       result.insert(std::make_pair(derived_field.name, derived_field));
     }

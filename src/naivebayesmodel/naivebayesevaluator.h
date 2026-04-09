@@ -18,22 +18,22 @@
  */
 class NaiveBayesEvaluator : public InternalEvaluator {
  public:
-  explicit NaiveBayesEvaluator(const XmlNode &node)
+  explicit NaiveBayesEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         nb(node.get_child("NaiveBayesModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   NaiveBayesModel nb;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return nb.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return nb.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return nb.predict(sample);
   }
 

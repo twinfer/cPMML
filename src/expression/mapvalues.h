@@ -37,8 +37,8 @@ class MapValues : public Expression {
 
   MapValues() = default;
 
-  MapValues(const XmlNode &node, const size_t &output_index, const DataType &output_type,
-            const std::shared_ptr<Indexer> &indexer)
+  MapValues(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+            const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
@@ -48,7 +48,7 @@ class MapValues : public Expression {
         out(node.get_attribute("outputColumn")) {
     std::string tmp_column;
     std::string tmp_input;
-    for (const auto &n : node.get_childs("FieldColumnPair")) {
+    for (const auto& n : node.get_childs("FieldColumnPair")) {
       tmp_input = n.get_attribute("field");
       inputs.insert(tmp_input);
       tmp_column = n.get_attribute("column");
@@ -56,23 +56,23 @@ class MapValues : public Expression {
       fieldcolumn_pairs[tmp_column] = tmp_input;
     }
 
-    for (const auto &column : columns) raw_columns.push_back(indexer->get_or_set(fieldcolumn_pairs[column]));
+    for (const auto& column : columns) raw_columns.push_back(indexer->get_or_set(fieldcolumn_pairs[column]));
 
-    for (const auto &n : raw_node.get_child("InlineTable").get_childs("row")) {
+    for (const auto& n : raw_node.get_child("InlineTable").get_childs("row")) {
       std::vector<Value> keys;
-      for (const auto &column : columns) {
+      for (const auto& column : columns) {
         keys.push_back(Value(n.get_child(column).value()));  // datatype is inferred!!!
       }
       tree_table.add(keys, Value(n.get_child(out).value(), output_type));
     }
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     std::vector<Value> keys;
     Value tmp;
     bool missing_input = false;
 
-    for (const auto &column : raw_columns) {
+    for (const auto& column : raw_columns) {
       tmp = sample[column].value;
       if (tmp.missing) missing_input = true;
 
@@ -89,7 +89,7 @@ class MapValues : public Expression {
 
     try {
       return tree_table.get(keys);
-    } catch (const std::out_of_range &e) {
+    } catch (const std::out_of_range& e) {
       if (exist_defaultvalue)
         return defaultValue;
       else if (exist_missingreplacement)

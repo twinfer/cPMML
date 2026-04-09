@@ -55,17 +55,17 @@ class BuiltInFunction {  // inputs are mapped by position
   std::string function_string;
   BuiltInFunctionType function_type = BuiltInFunctionType::IDENTITY;
   int n_args = -1;
-  std::function<Value(const std::vector<Value> &)> function;
+  std::function<Value(const std::vector<Value>&)> function;
 
   BuiltInFunction() = default;
 
-  explicit BuiltInFunction(const std::string &function_string)
+  explicit BuiltInFunction(const std::string& function_string)
       : function_string(function_string),
         function_type(from_string(function_string)),
         n_args(get_nargs(function_type)),
         function(get_function(function_type)) {}
 
-  static BuiltInFunctionType from_string(const std::string &builtinfunction) {
+  static BuiltInFunctionType from_string(const std::string& builtinfunction) {
     const static std::unordered_map<std::string, BuiltInFunctionType> builtinfunction_converter = {
         {"+", BuiltInFunctionType::PLUS},
         {"-", BuiltInFunctionType::MINUS},
@@ -93,12 +93,12 @@ class BuiltInFunction {  // inputs are mapped by position
 
     try {
       return builtinfunction_converter.at(to_lower(builtinfunction));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException(builtinfunction + " not supported");
     }
   }
 
-  static int get_nargs(const BuiltInFunctionType &function_type) {
+  static int get_nargs(const BuiltInFunctionType& function_type) {
     switch (function_type) {
       case BuiltInFunctionType::PLUS:
         return 2;
@@ -125,7 +125,7 @@ class BuiltInFunction {  // inputs are mapped by position
     }
   }
 
-  static std::function<Value(const std::vector<Value> &)> get_function(const BuiltInFunctionType &function_type) {
+  static std::function<Value(const std::vector<Value>&)> get_function(const BuiltInFunctionType& function_type) {
     switch (function_type) {
       case BuiltInFunctionType::PLUS:
         return plus;
@@ -174,56 +174,56 @@ class BuiltInFunction {  // inputs are mapped by position
     }
   }
 
-  inline Value operator()(const std::vector<Value> &input) const {
+  inline Value operator()(const std::vector<Value>& input) const {
     if (n_args != -1 && n_args != (int)input.size()) throw cpmml::InvalidValueException("Wrong number of inputs");
     return function(input);
   }
 
-  inline static Value plus(const std::vector<Value> &input) { return input[0] + input[1]; }
-  inline static Value minus(const std::vector<Value> &input) { return input[0] - input[1]; }
-  inline static Value mul(const std::vector<Value> &input) { return input[0] * input[1]; }
-  inline static Value div(const std::vector<Value> &input) { return input[0] / input[1]; }
-  inline static Value max(const std::vector<Value> &input) { return Value::max(input); }
-  inline static Value min(const std::vector<Value> &input) { return Value::min(input); }
-  inline static Value sum(const std::vector<Value> &input) { return Value::sum(input); }
-  inline static Value avg(const std::vector<Value> &input) { return Value::sum(input) / Value(input.size()); }
-  inline static Value is_missing(const std::vector<Value> &input) {
+  inline static Value plus(const std::vector<Value>& input) { return input[0] + input[1]; }
+  inline static Value minus(const std::vector<Value>& input) { return input[0] - input[1]; }
+  inline static Value mul(const std::vector<Value>& input) { return input[0] * input[1]; }
+  inline static Value div(const std::vector<Value>& input) { return input[0] / input[1]; }
+  inline static Value max(const std::vector<Value>& input) { return Value::max(input); }
+  inline static Value min(const std::vector<Value>& input) { return Value::min(input); }
+  inline static Value sum(const std::vector<Value>& input) { return Value::sum(input); }
+  inline static Value avg(const std::vector<Value>& input) { return Value::sum(input) / Value(input.size()); }
+  inline static Value is_missing(const std::vector<Value>& input) {
     return Value(input[0].missing, DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value is_notmissing(const std::vector<Value> &input) {
+  inline static Value is_notmissing(const std::vector<Value>& input) {
     return Value(!input[0].missing, DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value equal(const std::vector<Value> &input) {
+  inline static Value equal(const std::vector<Value>& input) {
     return Value(input[0] == input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value not_equal(const std::vector<Value> &input) {
+  inline static Value not_equal(const std::vector<Value>& input) {
     return Value(input[0] != input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value less_than(const std::vector<Value> &input) {
+  inline static Value less_than(const std::vector<Value>& input) {
     return Value(input[0] < input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value less_thanorequal(const std::vector<Value> &input) {
+  inline static Value less_thanorequal(const std::vector<Value>& input) {
     return Value(input[0] <= input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value greater_than(const std::vector<Value> &input) {
+  inline static Value greater_than(const std::vector<Value>& input) {
     return Value(input[0] > input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value greater_thanorequal(const std::vector<Value> &input) {
+  inline static Value greater_thanorequal(const std::vector<Value>& input) {
     return Value(input[0] >= input[1], DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value exp(const std::vector<Value> &input) {
+  inline static Value exp(const std::vector<Value>& input) {
     return Value(std::exp(input[0].value), DataType::DataTypeValue::DOUBLE);
   }
-  inline static Value is_in(const std::vector<Value> &input) {
+  inline static Value is_in(const std::vector<Value>& input) {
     auto found = std::find(input.begin() + 1, input.end(), input[0]);
     return Value(found != input.begin() && found != input.end(), DataType::DataTypeValue::BOOLEAN);
   }
-  inline static Value is_notin(const std::vector<Value> &input) {
+  inline static Value is_notin(const std::vector<Value>& input) {
     return Value(!(is_in(input).value), DataType::DataTypeValue::BOOLEAN);
   }
 
 #ifdef REGEX_SUPPORT
-  inline static Value replace(const std::vector<Value> &input) {
+  inline static Value replace(const std::vector<Value>& input) {
     return input[0].replace(input[1].svalue, input[2].svalue);
   }
 #endif

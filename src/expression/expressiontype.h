@@ -41,13 +41,13 @@ class ExpressionType {
 
   ExpressionType() = default;
 
-  explicit ExpressionType(const std::string &value) : value(from_string(to_lower(value))) {}
+  explicit ExpressionType(const std::string& value) : value(from_string(to_lower(value))) {}
 
-  inline bool operator==(const ExpressionType &other) const { return value == other.value; };
+  inline bool operator==(const ExpressionType& other) const { return value == other.value; };
 
-  inline bool operator!=(const ExpressionType &other) const { return value != other.value; };
+  inline bool operator!=(const ExpressionType& other) const { return value != other.value; };
 
-  static ExpressionTypeValue from_string(const std::string &expressiontype) {
+  static ExpressionTypeValue from_string(const std::string& expressiontype) {
     const static std::unordered_map<std::string, ExpressionTypeValue> expressiontype_converter = {
         {"constant", ExpressionTypeValue::CONSTANT},
         {"fieldref", ExpressionTypeValue::FIELD_REF},
@@ -62,7 +62,7 @@ class ExpressionType {
 
     try {
       return expressiontype_converter.at(to_lower(expressiontype));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException("unrecognized expression type " +
                                     expressiontype);  // cannot happen (due to how the expression type is
                                                       // retrieved (XML element name)
@@ -83,7 +83,7 @@ class ExpressionType {
         return "Discretize";
       case ExpressionTypeValue::MAP_VALUES:
         return "MapValues";
-        case ExpressionTypeValue::TEXT_INDEX:
+      case ExpressionTypeValue::TEXT_INDEX:
         return "TextIndex";
       case ExpressionTypeValue::APPLY:
         return "Apply";

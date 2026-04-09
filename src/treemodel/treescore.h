@@ -23,30 +23,30 @@ class TreeScore : public InternalScore {
 
   TreeScore() = default;
 
-  TreeScore(const std::string &simple_score, const DataType &target_type,
-            const std::vector<XmlNode> &score_distribution_nodes)
+  TreeScore(const std::string& simple_score, const DataType& target_type,
+            const std::vector<XmlNode>& score_distribution_nodes)
       : InternalScore(simple_score, get_probabilities(ScoreDistribution::to_score_distributions(
                                         score_distribution_nodes, target_type))),
         is_score(true),
         target_type(target_type) {}
 
   static std::unordered_map<std::string, double> get_probabilities(
-      const std::vector<ScoreDistribution> &score_distributions) {
+      const std::vector<ScoreDistribution>& score_distributions) {
     std::unordered_map<std::string, double> probabilities;
 
     double total = 0;
-    for (const auto &score_distribution : score_distributions) total += score_distribution.record_count;
+    for (const auto& score_distribution : score_distributions) total += score_distribution.record_count;
 
-    for (const auto &score_distribution : score_distributions)
+    for (const auto& score_distribution : score_distributions)
       probabilities[score_distribution.value_string] = score_distribution.record_count / total;
 
     return probabilities;
   }
 
-  static std::unordered_map<std::string, double> get_totals(const std::vector<ScoreDistribution> &score_distributions) {
+  static std::unordered_map<std::string, double> get_totals(const std::vector<ScoreDistribution>& score_distributions) {
     std::unordered_map<std::string, double> totals;
 
-    for (const auto &score_distribution : score_distributions)
+    for (const auto& score_distribution : score_distributions)
       totals[score_distribution.value_string] = score_distribution.record_count;
 
     return totals;

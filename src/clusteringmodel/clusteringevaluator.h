@@ -7,9 +7,9 @@
 #ifndef CPMML_CLUSTERINGEVALUATOR_H
 #define CPMML_CLUSTERINGEVALUATOR_H
 
+#include "clusteringmodel.h"
 #include "core/internal_evaluator.h"
 #include "core/xmlnode.h"
-#include "clusteringmodel.h"
 
 /**
  * @class ClusteringEvaluator
@@ -18,22 +18,22 @@
  */
 class ClusteringEvaluator : public InternalEvaluator {
  public:
-  explicit ClusteringEvaluator(const XmlNode &node)
+  explicit ClusteringEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         clustering(node.get_child("ClusteringModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   ClusteringModel clustering;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return clustering.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return clustering.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return clustering.predict(sample);
   }
 

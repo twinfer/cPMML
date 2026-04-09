@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+
 #include "utils/utils.h"
 
 /**
@@ -29,13 +30,13 @@ class InvalidValueTreatmentMethod {
 
   InvalidValueTreatmentMethod() = default;
 
-  explicit InvalidValueTreatmentMethod(const std::string &value) : value(from_string(value)) {}
+  explicit InvalidValueTreatmentMethod(const std::string& value) : value(from_string(value)) {}
 
-  inline bool operator==(const InvalidValueTreatmentMethod &other) const { return value == other.value; };
+  inline bool operator==(const InvalidValueTreatmentMethod& other) const { return value == other.value; };
 
-  inline bool operator!=(const InvalidValueTreatmentMethod &other) const { return value != other.value; };
+  inline bool operator!=(const InvalidValueTreatmentMethod& other) const { return value != other.value; };
 
-  static InvalidValueTreatmentMethodValue from_string(const std::string &invalidvaluetreatmentmethod) {
+  static InvalidValueTreatmentMethodValue from_string(const std::string& invalidvaluetreatmentmethod) {
     const static std::unordered_map<std::string, InvalidValueTreatmentMethodValue>
         invalidvaluetreatmentmethod_converter = {{"asis", InvalidValueTreatmentMethodValue::AS_IS},
                                                  {"returninvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID},
@@ -43,7 +44,7 @@ class InvalidValueTreatmentMethod {
 
     try {
       return invalidvaluetreatmentmethod_converter.at(to_lower(invalidvaluetreatmentmethod));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return InvalidValueTreatmentMethodValue::RETURN_INVALID;
     }
   }

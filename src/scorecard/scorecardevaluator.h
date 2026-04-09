@@ -18,22 +18,21 @@
  */
 class ScorecardEvaluator : public InternalEvaluator {
  public:
-  explicit ScorecardEvaluator(const XmlNode &node)
-      : InternalEvaluator(node),
-        sc(node.get_child("Scorecard"), data_dictionary, transformation_dictionary, indexer) {}
+  explicit ScorecardEvaluator(const XmlNode& node)
+      : InternalEvaluator(node), sc(node.get_child("Scorecard"), data_dictionary, transformation_dictionary, indexer) {}
 
   ScorecardModel sc;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return sc.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return sc.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return sc.predict(sample);
   }
 

@@ -8,6 +8,7 @@
 #define CPMML_FIELDREF_H
 
 #include <string>
+
 #include "core/value.h"
 #include "expression.h"
 
@@ -30,15 +31,15 @@ class FieldRef : public Expression {
 
   FieldRef() = default;
 
-  FieldRef(const std::string &field_name, const std::shared_ptr<Indexer> &indexer, const size_t &output_index,
-           const DataType &output_type)
+  FieldRef(const std::string& field_name, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
+           const DataType& output_type)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(false),
         field_name(field_name),
         index(indexer->get_or_set(field_name)) {}
 
-  FieldRef(const XmlNode &node, const size_t &output_index, const DataType &output_type,
-           const std::shared_ptr<Indexer> &indexer)
+  FieldRef(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+           const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.get_attribute("field")),
@@ -47,7 +48,7 @@ class FieldRef : public Expression {
     inputs.insert(field_name);
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     Value value = sample[index].value;
     return value.missing ? mapmissing_to : value;
   }
@@ -72,7 +73,7 @@ class SimpleFieldRef {
 
   SimpleFieldRef() : exist_missingreplacement(false), index(std::numeric_limits<size_t>::max()) {}
 
-  SimpleFieldRef(const XmlNode &node, const std::shared_ptr<Indexer> &indexer)
+  SimpleFieldRef(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.get_attribute("field")),
         index(indexer->get_index(field_name)),
@@ -80,15 +81,15 @@ class SimpleFieldRef {
                           ? Value(node.get_attribute("mapMissingTo"), indexer->get_type(field_name))
                           : Value()) {}
 
-  inline Value value(const Sample &sample) const {
+  inline Value value(const Sample& sample) const {
     Value value = sample[index].value;
     return value.missing ? mapmissing_to : value;
   }
 
-  static std::vector<SimpleFieldRef> to_simplefields(const std::vector<XmlNode> &nodes,
-                                                     const std::shared_ptr<Indexer> &indexer) {
+  static std::vector<SimpleFieldRef> to_simplefields(const std::vector<XmlNode>& nodes,
+                                                     const std::shared_ptr<Indexer>& indexer) {
     std::vector<SimpleFieldRef> result;
-    for (const auto &node : nodes) result.push_back(SimpleFieldRef(node, indexer));
+    for (const auto& node : nodes) result.push_back(SimpleFieldRef(node, indexer));
 
     return result;
   }

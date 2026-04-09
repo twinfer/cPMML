@@ -34,8 +34,8 @@ class NormContinuous : public Expression {
 
   NormContinuous() = default;
 
-  NormContinuous(const XmlNode &node, const unsigned int &output_index, const DataType &output_type,
-                 const std::shared_ptr<Indexer> &indexer)
+  NormContinuous(const XmlNode& node, const unsigned int& output_index, const DataType& output_type,
+                 const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
@@ -52,18 +52,18 @@ class NormContinuous : public Expression {
     inputs.insert(field_name);
   }
 
-  static std::vector<Value> get_values(const std::string &linearnorm_type, const XmlNode &node,
-                                       const DataType &dataType) {
+  static std::vector<Value> get_values(const std::string& linearnorm_type, const XmlNode& node,
+                                       const DataType& dataType) {
     std::vector<Value> result;
 
-    for (const auto &linear_norm : node.get_childs_bypattern("LinearNorm"))
+    for (const auto& linear_norm : node.get_childs_bypattern("LinearNorm"))
       result.push_back(Value(linear_norm.get_attribute("orig"), dataType));
 
     return result;
   }
 
   inline unsigned int get_interval(
-      const Value &value) const {  // if value == orig then the closest interval will be right and
+      const Value& value) const {  // if value == orig then the closest interval will be right and
                                    // the interpolation also (look at formula and ifs to see it)
     unsigned int i, min_i = std::numeric_limits<unsigned int>::min();
     Value min(double_min(), DataType::DataTypeValue::DOUBLE), a, b;
@@ -84,13 +84,13 @@ class NormContinuous : public Expression {
     return min_i;  // nearest interval (see outlier below)
   }
 
-  inline Value interpolate(const Value &value) const {
+  inline Value interpolate(const Value& value) const {
     unsigned int i = get_interval(value);
     return norm[i] + (value - orig[i]) / (orig[i + 1] - orig[i]) *
                          (norm[i + 1] - norm[i]);  // that's why input and output type must be equal
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     Value input = sample[index].value;
 
     if (input < orig[0] && input > orig[1]) {

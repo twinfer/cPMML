@@ -34,8 +34,8 @@ class Discretize : public Expression {
 
   Discretize() = default;
 
-  Discretize(const XmlNode &node, const size_t &output_index, const DataType &output_type,
-             const std::shared_ptr<Indexer> &indexer)
+  Discretize(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+             const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
@@ -48,13 +48,13 @@ class Discretize : public Expression {
         exist_defaultvalue(node.exists_attribute("defaultValue")),
         defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()) {
     inputs.insert(field_name);
-    for (const auto &child : raw_node.get_childs("DiscretizeBin")) {
+    for (const auto& child : raw_node.get_childs("DiscretizeBin")) {
       discretizebin_values.push_back(Value(child.get_attribute("binValue"), output_type));
       discretizebin_intervals.push_back(IntervalBuilder::build(child.get_child("Interval"), index, datatype));
     }
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     Value input = sample[index].value;
 
     if (input.missing) return mapmissing_to;

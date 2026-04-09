@@ -42,9 +42,9 @@ class PredicateOpType {
 
   PredicateOpType() = default;
 
-  explicit PredicateOpType(const std::string &predicatetype) : value(from_string(predicatetype)) {}
+  explicit PredicateOpType(const std::string& predicatetype) : value(from_string(predicatetype)) {}
 
-  static PredicateOpTypeValue from_string(const std::string &predicate_type) {
+  static PredicateOpTypeValue from_string(const std::string& predicate_type) {
     const static std::unordered_map<std::string, PredicateOpTypeValue> datatype_converter = {
         {"equal", PredicateOpTypeValue::EQUAL},
         {"notequal", PredicateOpTypeValue::NOT_EQUAL},
@@ -63,7 +63,7 @@ class PredicateOpType {
 
     try {
       return datatype_converter.at(to_lower(predicate_type));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException("unsupported predicate op type: " + predicate_type);
     }
   }

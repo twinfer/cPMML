@@ -7,15 +7,15 @@
 #include "cPMML.h"
 
 namespace cpmml {
-Exception::Exception(const std::string &message) : message(message) {}
+Exception::Exception(const std::string& message) : message(message) {}
 
-const char *Exception::what() const noexcept { return (message).c_str(); }
+const char* Exception::what() const noexcept { return (message).c_str(); }
 
-MissingValueException::MissingValueException(const std::string &message) : Exception(message) {}
+MissingValueException::MissingValueException(const std::string& message) : Exception(message) {}
 
-InvalidValueException::InvalidValueException(const std::string &message) : Exception(message) {}
+InvalidValueException::InvalidValueException(const std::string& message) : Exception(message) {}
 
-MathException::MathException(const std::string &message) : Exception(message) {}
+MathException::MathException(const std::string& message) : Exception(message) {}
 
-ParsingException::ParsingException(const std::string &message) : Exception(message) {}
+ParsingException::ParsingException(const std::string& message) : Exception(message) {}
 }  // namespace cpmml

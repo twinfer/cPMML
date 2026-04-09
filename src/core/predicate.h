@@ -38,22 +38,22 @@ class Predicate {
 
   Predicate() = default;
 
-  explicit Predicate(const std::string &predicatetype) : predicatetype(predicatetype) {}
+  explicit Predicate(const std::string& predicatetype) : predicatetype(predicatetype) {}
 
-  Predicate(const size_t feature, const std::string &predicatetype, const Value &value)
+  Predicate(const size_t feature, const std::string& predicatetype, const Value& value)
       : feature(feature), is_empty(false), predicatetype(predicatetype), value(value) {}
 
-  Predicate(const size_t feature, const std::string &predicatetype, const std::set<Value> &values)
+  Predicate(const size_t feature, const std::string& predicatetype, const std::set<Value>& values)
       : feature(feature), is_empty(false), predicatetype(predicatetype), is_set_predicate(true), values(values) {}
 
-  Predicate(const size_t feature, const std::string &predicatetype,
-            const std::unordered_set<Value, Value::ValueHash> &values_hash)
+  Predicate(const size_t feature, const std::string& predicatetype,
+            const std::unordered_set<Value, Value::ValueHash>& values_hash)
       : feature(feature), is_empty(false), predicatetype(predicatetype), is_hash_set(true), values_hash(values_hash) {}
 
-  Predicate(const std::vector<Predicate> &predicates, const std::string &predicatetype)
+  Predicate(const std::vector<Predicate>& predicates, const std::string& predicatetype)
       : is_empty(false), predicatetype(predicatetype), is_compound_predicate(true), predicates(predicates) {}
 
-  inline bool operator()(const Sample &other) const {
+  inline bool operator()(const Sample& other) const {
     switch (predicatetype.value) {
       case PredicateOpType::PredicateOpTypeValue::TRUE:
         return true;
@@ -70,7 +70,7 @@ class Predicate {
       default:
         try {
           return operator()(other[feature].value);
-        } catch (const std::out_of_range &exception) {
+        } catch (const std::out_of_range& exception) {
 #ifdef DEBUG
           throw cpmml::GenericException("feature \"" + other[feature].name +
                                         "\" not found in sample: " + other.to_string());
@@ -81,7 +81,7 @@ class Predicate {
     }
   }
 
-  inline bool operator()(const Value &other) const {
+  inline bool operator()(const Value& other) const {
     switch (predicatetype.value) {
       case PredicateOpType::PredicateOpTypeValue::TRUE:
         return true;
@@ -120,21 +120,21 @@ class Predicate {
     return false;
   }
 
-  inline bool AND(const Sample &other) const {
+  inline bool AND(const Sample& other) const {
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
       if (!it->operator()(other)) return false;
 
     return true;
   }
 
-  inline bool OR(const Sample &other) const {
+  inline bool OR(const Sample& other) const {
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
       if (it->operator()(other)) return true;
 
     return false;
   }
 
-  inline bool XOR(const Sample &other) const {
+  inline bool XOR(const Sample& other) const {
     bool first = predicates.front().operator()(other);
 
     for (auto it = predicates.cbegin() + 1; it != predicates.cend(); it++)
@@ -143,7 +143,7 @@ class Predicate {
     return false;
   }
 
-  inline bool SURROGATE(const Sample &other) const {
+  inline bool SURROGATE(const Sample& other) const {
     bool result = false;
 
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++) {
@@ -154,21 +154,21 @@ class Predicate {
     return result;
   }
 
-  inline bool AND(const Value &other) const {
+  inline bool AND(const Value& other) const {
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
       if (!it->operator()(other)) return false;
 
     return true;
   }
 
-  inline bool OR(const Value &other) const {
+  inline bool OR(const Value& other) const {
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
       if (it->operator()(other)) return true;
 
     return false;
   }
 
-  inline bool XOR(const Value &other) const {
+  inline bool XOR(const Value& other) const {
     bool first = predicates.front().operator()(other);
 
     for (auto it = predicates.cbegin() + 1; it != predicates.cend(); it++)
@@ -177,7 +177,7 @@ class Predicate {
     return false;
   }
 
-  inline bool SURROGATE(const Value &other) const {
+  inline bool SURROGATE(const Value& other) const {
     bool result = false;
 
     for (auto it = predicates.cbegin(); it != predicates.cend(); it++) {

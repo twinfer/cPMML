@@ -7,6 +7,7 @@
 #ifndef CPMML_KNNMODEL_H
 #define CPMML_KNNMODEL_H
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -14,8 +15,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <Eigen/Dense>
 
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
@@ -45,8 +44,14 @@ class NearestNeighborModel : public InternalModel {
   // --- Enumerations ---
 
   enum class Metric {
-    EUCLIDEAN, CITYBLOCK, CHEBYSHEV, MINKOWSKI,
-    SIMPLE_MATCHING, JACCARD, TANIMOTO, BINARY_SIMILARITY
+    EUCLIDEAN,
+    CITYBLOCK,
+    CHEBYSHEV,
+    MINKOWSKI,
+    SIMPLE_MATCHING,
+    JACCARD,
+    TANIMOTO,
+    BINARY_SIMILARITY
   };
 
   enum class CompareFunc { ABS_DIFF, GAUSS_SIM, DELTA, EQUAL };
@@ -69,7 +74,7 @@ class NearestNeighborModel : public InternalModel {
   std::string continuous_method;   // to_lower of continuousScoringMethod
 
   std::vector<KnnInput> knn_inputs;
-  Eigen::MatrixXd training_features;   // [n_instances x n_features]
+  Eigen::MatrixXd training_features;  // [n_instances x n_features]
   std::vector<std::string> training_targets;
   std::vector<std::string> classes;
 
@@ -77,9 +82,9 @@ class NearestNeighborModel : public InternalModel {
 
   NearestNeighborModel() = default;
 
-  NearestNeighborModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                        const TransformationDictionary &transformation_dictionary,
-                        const std::shared_ptr<Indexer> &indexer)
+  NearestNeighborModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                       const TransformationDictionary& transformation_dictionary,
+                       const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         k(static_cast<int>(node.get_long_attribute("numberOfNeighbors"))),
         metric(Metric::EUCLIDEAN),
@@ -96,7 +101,7 @@ class NearestNeighborModel : public InternalModel {
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
       std::unordered_set<std::string> seen;
-      for (const auto &t : training_targets)
+      for (const auto& t : training_targets)
         if (seen.insert(t).second) classes.push_back(t);
     } else {
       classes.push_back(mining_schema.target.name);
@@ -105,33 +110,30 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Scoring ---
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     const Eigen::VectorXd query = build_query(sample);
     auto neighbors = find_k_nearest(query);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
       const double val = to_double(regress(neighbors));
-      return std::make_unique<RegressionScore>(std::to_string(val), val, classes,
-                                               std::vector<double>{val});
+      return std::make_unique<RegressionScore>(std::to_string(val), val, classes, std::vector<double>{val});
     }
 
     const std::string winner = classify(neighbors);
     std::vector<double> scores(classes.size(), 0.0);
-    for (const auto &[dist, idx] : neighbors) {
+    for (const auto& [dist, idx] : neighbors) {
       auto it = std::find(classes.begin(), classes.end(), training_targets[idx]);
-      if (it != classes.end())
-        scores[std::distance(classes.begin(), it)] += 1.0;
+      if (it != classes.end()) scores[std::distance(classes.begin(), it)] += 1.0;
     }
-    for (auto &s : scores) s /= static_cast<double>(k);
+    for (auto& s : scores) s /= static_cast<double>(k);
     return std::make_unique<RegressionScore>(winner, 1.0, classes, scores);
   }
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     const Eigen::VectorXd query = build_query(sample);
     auto neighbors = find_k_nearest(query);
 
-    if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION)
-      return regress(neighbors);
+    if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) return regress(neighbors);
 
     return classify(neighbors);
   }
@@ -139,19 +141,19 @@ class NearestNeighborModel : public InternalModel {
  private:
   // --- Parsing ---
 
-  static Metric parse_metric_type(const XmlNode &measure) {
-    if (measure.exists_child("euclidean"))        return Metric::EUCLIDEAN;
-    if (measure.exists_child("cityBlock"))        return Metric::CITYBLOCK;
-    if (measure.exists_child("chebychev"))        return Metric::CHEBYSHEV;
-    if (measure.exists_child("minkowski"))        return Metric::MINKOWSKI;
-    if (measure.exists_child("simpleMatching"))   return Metric::SIMPLE_MATCHING;
-    if (measure.exists_child("jaccard"))          return Metric::JACCARD;
-    if (measure.exists_child("tanimoto"))         return Metric::TANIMOTO;
+  static Metric parse_metric_type(const XmlNode& measure) {
+    if (measure.exists_child("euclidean")) return Metric::EUCLIDEAN;
+    if (measure.exists_child("cityBlock")) return Metric::CITYBLOCK;
+    if (measure.exists_child("chebychev")) return Metric::CHEBYSHEV;
+    if (measure.exists_child("minkowski")) return Metric::MINKOWSKI;
+    if (measure.exists_child("simpleMatching")) return Metric::SIMPLE_MATCHING;
+    if (measure.exists_child("jaccard")) return Metric::JACCARD;
+    if (measure.exists_child("tanimoto")) return Metric::TANIMOTO;
     if (measure.exists_child("binarySimilarity")) return Metric::BINARY_SIMILARITY;
     return Metric::EUCLIDEAN;
   }
 
-  void parse_metric(const XmlNode &node) {
+  void parse_metric(const XmlNode& node) {
     if (!node.exists_child("ComparisonMeasure")) return;
     const XmlNode cm = node.get_child("ComparisonMeasure");
     metric = parse_metric_type(cm);
@@ -160,37 +162,34 @@ class NearestNeighborModel : public InternalModel {
         minkowski_p = to_double(cm.get_child("minkowski").get_attribute("p"));
   }
 
-  static CompareFunc parse_compare_func(const std::string &s) {
+  static CompareFunc parse_compare_func(const std::string& s) {
     const std::string lower = to_lower(s);
     if (lower == "gausssim") return CompareFunc::GAUSS_SIM;
-    if (lower == "delta")    return CompareFunc::DELTA;
-    if (lower == "equal")    return CompareFunc::EQUAL;
+    if (lower == "delta") return CompareFunc::DELTA;
+    if (lower == "equal") return CompareFunc::EQUAL;
     return CompareFunc::ABS_DIFF;
   }
 
-  void parse_knn_inputs(const XmlNode &node, const std::shared_ptr<Indexer> &indexer) {
-    for (const auto &ki : node.get_child("KNNInputs").get_childs("KNNInput")) {
+  void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
+    for (const auto& ki : node.get_child("KNNInputs").get_childs("KNNInput")) {
       KnnInput input;
-      input.field_name  = ki.get_attribute("field");
+      input.field_name = ki.get_attribute("field");
       input.field_index = indexer->get_index(input.field_name);
       input.compare_func = parse_compare_func(ki.get_attribute("compareFunction"));
-      input.field_weight = ki.exists_attribute("fieldWeight")
-                               ? to_double(ki.get_attribute("fieldWeight"))
-                               : 1.0;
+      input.field_weight = ki.exists_attribute("fieldWeight") ? to_double(ki.get_attribute("fieldWeight")) : 1.0;
       knn_inputs.push_back(std::move(input));
     }
   }
 
-  void parse_training_instances(const XmlNode &node) {
+  void parse_training_instances(const XmlNode& node) {
     const XmlNode ti = node.get_child("TrainingInstances");
 
     // Build field → column mapping from InstanceFields
     std::unordered_map<std::string, std::string> field_to_col;
     std::string target_col;
-    for (const auto &f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
-      const std::string fname  = f.get_attribute("field");
-      const std::string col    = (f.get_attribute("column") == "null") ? fname
-                                                                       : f.get_attribute("column");
+    for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
+      const std::string fname = f.get_attribute("field");
+      const std::string col = (f.get_attribute("column") == "null") ? fname : f.get_attribute("column");
       field_to_col[fname] = col;
       if (f.get_bool_attribute("isTarget")) target_col = col;
     }
@@ -198,11 +197,11 @@ class NearestNeighborModel : public InternalModel {
     // Ordered feature columns matching knn_inputs
     std::vector<std::string> feat_cols;
     feat_cols.reserve(knn_inputs.size());
-    for (const auto &ki : knn_inputs) feat_cols.push_back(field_to_col.at(ki.field_name));
+    for (const auto& ki : knn_inputs) feat_cols.push_back(field_to_col.at(ki.field_name));
 
     // Read rows from InlineTable
     std::vector<Eigen::VectorXd> rows;
-    for (const auto &row : ti.get_child("InlineTable").get_childs("row")) {
+    for (const auto& row : ti.get_child("InlineTable").get_childs("row")) {
       Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
       for (size_t i = 0; i < feat_cols.size(); i++)
         fv[static_cast<Eigen::Index>(i)] = Value(row.get_child(feat_cols[i]).value()).value;
@@ -212,16 +211,14 @@ class NearestNeighborModel : public InternalModel {
 
     // Build training matrix
     if (!rows.empty()) {
-      training_features.resize(static_cast<Eigen::Index>(rows.size()),
-                                static_cast<Eigen::Index>(knn_inputs.size()));
-      for (size_t i = 0; i < rows.size(); i++)
-        training_features.row(static_cast<Eigen::Index>(i)) = rows[i];
+      training_features.resize(static_cast<Eigen::Index>(rows.size()), static_cast<Eigen::Index>(knn_inputs.size()));
+      for (size_t i = 0; i < rows.size(); i++) training_features.row(static_cast<Eigen::Index>(i)) = rows[i];
     }
   }
 
   // --- Query vector ---
 
-  Eigen::VectorXd build_query(const Sample &sample) const {
+  Eigen::VectorXd build_query(const Sample& sample) const {
     Eigen::VectorXd q(static_cast<Eigen::Index>(knn_inputs.size()));
     for (size_t i = 0; i < knn_inputs.size(); i++)
       q[static_cast<Eigen::Index>(i)] = sample[knn_inputs[i].field_index].value.value;
@@ -232,17 +229,21 @@ class NearestNeighborModel : public InternalModel {
 
   static double field_compare(double xi, double yi, CompareFunc cf) {
     switch (cf) {
-      case CompareFunc::ABS_DIFF:  return std::abs(xi - yi);
-      case CompareFunc::GAUSS_SIM: return 1.0 - std::exp(-(xi - yi) * (xi - yi));
-      case CompareFunc::DELTA:     return (xi != yi) ? 1.0 : 0.0;
-      case CompareFunc::EQUAL:     return (xi == yi) ? 1.0 : 0.0;
+      case CompareFunc::ABS_DIFF:
+        return std::abs(xi - yi);
+      case CompareFunc::GAUSS_SIM:
+        return 1.0 - std::exp(-(xi - yi) * (xi - yi));
+      case CompareFunc::DELTA:
+        return (xi != yi) ? 1.0 : 0.0;
+      case CompareFunc::EQUAL:
+        return (xi == yi) ? 1.0 : 0.0;
     }
     return std::abs(xi - yi);
   }
 
   // --- Distance computation ---
 
-  double compute_distance(const Eigen::VectorXd &query, Eigen::Index row) const {
+  double compute_distance(const Eigen::VectorXd& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
     const size_t n = knn_inputs.size();
 
@@ -258,15 +259,14 @@ class NearestNeighborModel : public InternalModel {
       case Metric::CITYBLOCK: {
         double sum = 0.0;
         for (size_t i = 0; i < n; i++)
-          sum += knn_inputs[i].field_weight *
-                 field_compare(query[i], train[i], knn_inputs[i].compare_func);
+          sum += knn_inputs[i].field_weight * field_compare(query[i], train[i], knn_inputs[i].compare_func);
         return sum;
       }
       case Metric::CHEBYSHEV: {
         double max_val = 0.0;
         for (size_t i = 0; i < n; i++)
-          max_val = std::max(max_val, knn_inputs[i].field_weight *
-                                         field_compare(query[i], train[i], knn_inputs[i].compare_func));
+          max_val = std::max(
+              max_val, knn_inputs[i].field_weight * field_compare(query[i], train[i], knn_inputs[i].compare_func));
         return max_val;
       }
       case Metric::MINKOWSKI: {
@@ -296,10 +296,14 @@ class NearestNeighborModel : public InternalModel {
         int a11 = 0, a10 = 0, a01 = 0, a00 = 0;
         for (size_t i = 0; i < n; i++) {
           const bool xi = query[i] > 0.5, yi = train[i] > 0.5;
-          if (xi && yi) a11++;
-          else if (xi) a10++;
-          else if (yi) a01++;
-          else a00++;
+          if (xi && yi)
+            a11++;
+          else if (xi)
+            a10++;
+          else if (yi)
+            a01++;
+          else
+            a00++;
         }
         const int denom = a11 + 2 * (a10 + a01) + a00;
         return (denom > 0) ? 1.0 - static_cast<double>(a11 + a00) / denom : 0.0;
@@ -313,11 +317,10 @@ class NearestNeighborModel : public InternalModel {
 
   // --- K-nearest neighbor search ---
 
-  std::vector<std::pair<double, int>> find_k_nearest(const Eigen::VectorXd &query) const {
+  std::vector<std::pair<double, int>> find_k_nearest(const Eigen::VectorXd& query) const {
     const int n = static_cast<int>(training_features.rows());
     std::vector<std::pair<double, int>> distances(n);
-    for (int i = 0; i < n; i++)
-      distances[i] = {compute_distance(query, i), i};
+    for (int i = 0; i < n; i++) distances[i] = {compute_distance(query, i), i};
     const int kk = std::min(k, n);
     std::partial_sort(distances.begin(), distances.begin() + kk, distances.end());
     return {distances.begin(), distances.begin() + kk};
@@ -325,25 +328,24 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Classification voting ---
 
-  std::string classify(const std::vector<std::pair<double, int>> &neighbors) const {
+  std::string classify(const std::vector<std::pair<double, int>>& neighbors) const {
     std::unordered_map<std::string, double> votes;
     const bool weighted = (categorical_method == "weightedmajorityvote");
-    for (const auto &[dist, idx] : neighbors) {
+    for (const auto& [dist, idx] : neighbors) {
       const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
       votes[training_targets[idx]] += w;
     }
     return std::max_element(votes.begin(), votes.end(),
-                            [](const auto &a, const auto &b) { return a.second < b.second; })
+                            [](const auto& a, const auto& b) { return a.second < b.second; })
         ->first;
   }
 
   // --- Regression aggregation ---
 
-  std::string regress(const std::vector<std::pair<double, int>> &neighbors) const {
+  std::string regress(const std::vector<std::pair<double, int>>& neighbors) const {
     if (continuous_method == "median") {
       std::vector<double> vals;
-      for (const auto &[dist, idx] : neighbors)
-        vals.push_back(to_double(training_targets[idx]));
+      for (const auto& [dist, idx] : neighbors) vals.push_back(to_double(training_targets[idx]));
       std::sort(vals.begin(), vals.end());
       const size_t mid = vals.size() / 2;
       const double med = (vals.size() % 2 == 0) ? (vals[mid - 1] + vals[mid]) / 2.0 : vals[mid];
@@ -352,7 +354,7 @@ class NearestNeighborModel : public InternalModel {
 
     const bool weighted = (continuous_method == "weightedaverage");
     double sum = 0.0, weight_sum = 0.0;
-    for (const auto &[dist, idx] : neighbors) {
+    for (const auto& [dist, idx] : neighbors) {
       const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
       sum += w * to_double(training_targets[idx]);
       weight_sum += w;

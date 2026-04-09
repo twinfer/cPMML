@@ -40,8 +40,8 @@ class Apply : public Expression {
 
   Apply() = default;
 
-  Apply(const XmlNode &node, const size_t &output_index, const DataType &output_type,
-        const std::shared_ptr<Indexer> &indexer)
+  Apply(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+        const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         function(BuiltInFunction(node.get_attribute("function"))),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
@@ -50,7 +50,7 @@ class Apply : public Expression {
         defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()),
         invalidValueTreatmentMethod(node.get_attribute("invalidValueTreatment")) {
     std::shared_ptr<Expression> expression;
-    for (const auto &n : node.get_childs()) {
+    for (const auto& n : node.get_childs()) {
       ExpressionType expression_type(n.name());
       switch (expression_type.value) {
         case ExpressionType::ExpressionTypeValue::CONSTANT:
@@ -78,17 +78,17 @@ class Apply : public Expression {
           throw cpmml::ParsingException("Expression " + expression_type.to_string() + " type not supported");
       }
 
-      for (const auto &input : expression->inputs) inputs.insert(input);
+      for (const auto& input : expression->inputs) inputs.insert(input);
 
       expressions.push_back(expression);
     }
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     std::vector<Value> input;
     Value tmp;
     bool missing_input = false;
-    for (const auto &expression : expressions) {
+    for (const auto& expression : expressions) {
       tmp = expression->eval(sample);
       input.push_back(tmp);
       if (tmp.missing) missing_input = true;
@@ -109,7 +109,7 @@ class Apply : public Expression {
            // invalid is like "division by zero"
       // thus it is captured with an exception
       result = function(input);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       std::cout << e.what() << std::endl;
       switch (invalidValueTreatmentMethod.value) {
         case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:

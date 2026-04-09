@@ -32,15 +32,15 @@ class CategoricalPredictor {
 
   CategoricalPredictor() = default;
 
-  CategoricalPredictor(const XmlNode &node,  // Regression table node
-                       const std::string &name, const size_t &index, const DataType &datatype)
+  CategoricalPredictor(const XmlNode& node,  // Regression table node
+                       const std::string& name, const size_t& index, const DataType& datatype)
       : name(name),
         index(index),
         datatype(datatype),
         coefficients(
             get_coefficients(node.get_childs_byattribute("CategoricalPredictor", "name", name), index, datatype)) {}
 
-  inline double get_term(const Sample &sample) const {
+  inline double get_term(const Sample& sample) const {
     Value value = sample[index].value;
 
     if (value.missing || coefficients.find(value) == coefficients.cend()) return 0;
@@ -48,27 +48,27 @@ class CategoricalPredictor {
     return coefficients.at(value);
   }
 
-  static std::unordered_map<Value, double, Value::ValueHash> get_coefficients(const std::vector<XmlNode> &nodes,
-                                                                              const size_t &index,
-                                                                              const DataType &datatype) {
+  static std::unordered_map<Value, double, Value::ValueHash> get_coefficients(const std::vector<XmlNode>& nodes,
+                                                                              const size_t& index,
+                                                                              const DataType& datatype) {
     std::unordered_map<Value, double, Value::ValueHash> result;
-    for (const auto &node : nodes)
+    for (const auto& node : nodes)
       result[Value(node.get_attribute("value"), datatype)] = ::to_double(node.get_attribute("coefficient"));
 
     return result;
   }
 
   static std::vector<CategoricalPredictor> to_categoricalpredictors(
-      const XmlNode &regressiontable_node,  // regression table node needed by
+      const XmlNode& regressiontable_node,  // regression table node needed by
                                             // each categorical predictor
-      const std::shared_ptr<Indexer> &indexer) {
+      const std::shared_ptr<Indexer>& indexer) {
     std::vector<CategoricalPredictor> result;
 
     std::string field_name;
     size_t field_index;
     DataType field_datatype;
     std::unordered_set<std::string> seen;
-    for (const auto &node : regressiontable_node.get_childs("CategoricalPredictor")) {
+    for (const auto& node : regressiontable_node.get_childs("CategoricalPredictor")) {
       field_name = node.get_attribute("name");
       if (seen.find(field_name) == seen.cend()) {
         field_index = indexer->get_index(field_name);

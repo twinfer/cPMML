@@ -35,37 +35,37 @@ class MiningSchema {
 
   MiningSchema() = default;
 
-  MiningSchema(const XmlNode &node, const DataDictionary &data_dictionary)
+  MiningSchema(const XmlNode& node, const DataDictionary& data_dictionary)
       : raw_miningfields(MiningField::to_miningfields(node.get_childs("MiningField"), data_dictionary)),
         miningfields(to_values<std::string, MiningField>(raw_miningfields)),
         target(get_target(miningfields)),
         target_index(target.index) {}
 
-  inline static MiningField get_target(const std::vector<MiningField> &miningfields) {
-    for (const auto &miningfield : miningfields) {
+  inline static MiningField get_target(const std::vector<MiningField>& miningfields) {
+    for (const auto& miningfield : miningfields) {
       if (miningfield.field_usage_type == FieldUsageType::FieldUsageTypeValue::TARGET) return miningfield;
     }
 
     return MiningField();
   }
 
-  inline const MiningField &operator[](const std::string &feature_name) const {
+  inline const MiningField& operator[](const std::string& feature_name) const {
     return raw_miningfields.at(feature_name);
   }
 
-  inline const MiningField &operator[](const size_t &feature_index) const { return miningfields[feature_index]; }
+  inline const MiningField& operator[](const size_t& feature_index) const { return miningfields[feature_index]; }
 
-  inline bool contains(const std::string &feature_name) const {
+  inline bool contains(const std::string& feature_name) const {
     return raw_miningfields.find(feature_name) != raw_miningfields.cend();
   }
 
-  inline MiningField at(const std::string &feature_name) const { return raw_miningfields.at(feature_name); }
+  inline MiningField at(const std::string& feature_name) const { return raw_miningfields.at(feature_name); }
 
-  const void prepare(Sample &sample, const std::unordered_map<std::string, std::string> &input) const {
+  const void prepare(Sample& sample, const std::unordered_map<std::string, std::string>& input) const {
 #ifdef DEBUG
     std::cout << "BEFORE MINING SCHEMA PREPARATION: " << sample << std::endl;
 #endif
-    for (const auto &miningfield : miningfields) {
+    for (const auto& miningfield : miningfields) {
       if (miningfield.index != target_index) {
         try {
           sample.change_value(miningfield.index, miningfield.createValue(input.at(miningfield.name)));
@@ -80,9 +80,9 @@ class MiningSchema {
                 sample.change_value(miningfield.index, miningfield.handle_outlier(tmp_value));
           }
 
-        } catch (const std::out_of_range &exception) {  // field is missing
+        } catch (const std::out_of_range& exception) {  // field is missing
           sample.change_value(miningfield.index, miningfield.handle_missing());
-        } catch (const cpmml::Exception &exception) {  // field cannot be converted to double
+        } catch (const cpmml::Exception& exception) {  // field cannot be converted to double
                                                        // because is missing
           sample.change_value(miningfield.index, miningfield.handle_missing());
         }
@@ -93,8 +93,8 @@ class MiningSchema {
 #endif
   }
 
-  bool validate(const Sample &sample) const {
-    for (const auto &mining_field : miningfields) {
+  bool validate(const Sample& sample) const {
+    for (const auto& mining_field : miningfields) {
       if (mining_field.index == target_index) continue;
       if (!mining_field.validate(sample)) return false;
     }

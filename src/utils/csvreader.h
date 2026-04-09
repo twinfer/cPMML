@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+
 #include "utils.h"
 
 #define MAX_LINE_LENGTH 8192
@@ -25,7 +26,7 @@
  */
 class CSVReader {
  public:
-  explicit CSVReader(const std::string &filename) : file(filename) {
+  explicit CSVReader(const std::string& filename) : file(filename) {
     this->file.getline(line, MAX_LINE_LENGTH);
     std::stringstream line_stream(line);
     std::string field;

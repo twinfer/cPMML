@@ -35,7 +35,7 @@ class CastInteger {
   std::function<double(const double)> cast_function;
 
   CastInteger() = default;
-  explicit CastInteger(const std::string &cast_integer) {
+  explicit CastInteger(const std::string& cast_integer) {
     static std::unordered_map<std::string, std::function<double(const double)>> cast_integer_converter = {
         {"round", _round},
         {"ceiling", _ceil},
@@ -71,7 +71,7 @@ class TargetValue {
         prior_probability(double_min()),
         default_value(double_min()) {}
 
-  TargetValue(const XmlNode &node)
+  TargetValue(const XmlNode& node)
       : value(node.get_attribute("value")),
         has_display_value(node.exists_attribute("displayValue")),
         display_value(node.get_attribute("displayValue")),
@@ -81,7 +81,7 @@ class TargetValue {
 
   static std::vector<TargetValue> to_targetvalues(std::vector<XmlNode> nodes) {
     std::vector<TargetValue> result;
-    for (const auto &node : nodes) result.push_back(TargetValue(node));
+    for (const auto& node : nodes) result.push_back(TargetValue(node));
 
     return result;
   }
@@ -103,12 +103,12 @@ class Target {
   double rescale_factor = double_min();
   OpType optype;
   std::vector<TargetValue> target_values;
-  std::function<void(InternalScore &)> transform_score;
+  std::function<void(InternalScore&)> transform_score;
 
   Target() = default;
 
-  explicit Target(const XmlNode &node, const MiningSchema &mining_schema,
-                  const TransformationDictionary &transformation_dictionary, const MiningFunction &mining_fuction)
+  explicit Target(const XmlNode& node, const MiningSchema& mining_schema,
+                  const TransformationDictionary& transformation_dictionary, const MiningFunction& mining_fuction)
       : mining_function(mining_fuction),
         has_field_name(node.exists_attribute("field")),
         field_name(node.get_attribute("field")),
@@ -123,15 +123,15 @@ class Target {
         rescale_factor(node.get_double_attribute("rescaleFactor")),
         target_values(TargetValue::to_targetvalues(node.get_childs("TargetValue"))) {}
 
-  inline void operator()(InternalScore &score) const {
+  inline void operator()(InternalScore& score) const {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
-        for (const auto &target_value : target_values) {
+        for (const auto& target_value : target_values) {
           if (score.score == target_value.value && target_value.has_display_value) {
             score.score = target_value.display_value;
             try {
               score.double_score = to_double(score.score);
-            } catch (const cpmml::ParsingException &e) {
+            } catch (const cpmml::ParsingException& e) {
               score.double_score = double_min();
             }
           }
@@ -174,12 +174,12 @@ class Target {
     }
   }
 
-  inline std::string operator()(const std::string &predicted) const {
+  inline std::string operator()(const std::string& predicted) const {
     double predicted_double = double_min();
 
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
-        for (const auto &target_value : target_values) {
+        for (const auto& target_value : target_values) {
           if (predicted == target_value.value && target_value.has_display_value) return target_value.display_value;
         }
         break;

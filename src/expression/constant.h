@@ -25,8 +25,8 @@ class Constant : public Expression {
 
   Constant() = default;
 
-  Constant(const XmlNode &node, const unsigned int &output_index, const DataType &output_type,
-           const std::shared_ptr<Indexer> &indexer)
+  Constant(const XmlNode& node, const unsigned int& output_index, const DataType& output_type,
+           const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         datatype_exists(node.exists_attribute("dataType")),
         value(datatype_exists ? Value(node.value(), node.get_attribute("dataType"))
@@ -34,7 +34,7 @@ class Constant : public Expression {
                                                       // says the type should be inferred
   {}
 
-  inline Value eval(Sample &sample) const override { return value; }
+  inline Value eval(Sample& sample) const override { return value; }
 };
 
 #endif

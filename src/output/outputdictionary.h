@@ -32,31 +32,31 @@ class OutputDictionary {
 
   OutputDictionary() : empty(true) {}
 
-  OutputDictionary(const XmlNode &node, const std::shared_ptr<Indexer> &indexer, const std::string &model_target)
+  OutputDictionary(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
       : empty(false),
         raw_outputfields(OutputField::to_outputfields(node.get_childs("OutputField"), indexer, model_target)),
         dag(build_dag(raw_outputfields)) {}
 
-  inline bool contains(const std::string &field_name) const {
+  inline bool contains(const std::string& field_name) const {
     return raw_outputfields.find(field_name) != raw_outputfields.cend();
   }
 
-  inline const OutputField &operator[](const std::string &feature_name) const {
+  inline const OutputField& operator[](const std::string& feature_name) const {
     return raw_outputfields.at(feature_name);
   }
 
-  static std::vector<OutputField> build_dag(const std::unordered_map<std::string, OutputField> &raw_outputfields) {
+  static std::vector<OutputField> build_dag(const std::unordered_map<std::string, OutputField>& raw_outputfields) {
     std::vector<OutputField> output_fields = ::to_values<std::string, OutputField>(raw_outputfields);
     std::vector<OutputField> dag;
 
-    for (const auto &output_field : output_fields) build_dagR(output_field, dag, raw_outputfields);
+    for (const auto& output_field : output_fields) build_dagR(output_field, dag, raw_outputfields);
 
     return dag;
   }
 
-  static void build_dagR(const OutputField &output_field, std::vector<OutputField> &dag,
-                         const std::unordered_map<std::string, OutputField> &raw_outputfields) {
-    for (const auto &input : output_field.expression->inputs) {
+  static void build_dagR(const OutputField& output_field, std::vector<OutputField>& dag,
+                         const std::unordered_map<std::string, OutputField>& raw_outputfields) {
+    for (const auto& input : output_field.expression->inputs) {
       if (raw_outputfields.find(input) != raw_outputfields.cend()) {
         OutputField tmp_input = raw_outputfields.at(input);
         if (tmp_input.derived) build_dagR(output_field, dag, raw_outputfields);
@@ -70,12 +70,12 @@ class OutputDictionary {
     return;
   }
 
-  inline void prepare(Sample &sample) const {
-    for (const auto &outputfield : dag) outputfield.prepare(sample);
+  inline void prepare(Sample& sample) const {
+    for (const auto& outputfield : dag) outputfield.prepare(sample);
   }
 
-  inline void add_output(Sample &sample, InternalScore &score) const {
-    for (const auto &outputfield : dag) outputfield.add_output(sample, score);
+  inline void add_output(Sample& sample, InternalScore& score) const {
+    for (const auto& outputfield : dag) outputfield.add_output(sample, score);
   }
 };
 

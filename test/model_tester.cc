@@ -14,15 +14,15 @@
 // errors are admitted in regression up to 0.1% of the actual prediction
 double regression_relative_error_tolerance = 0.001;
 
-inline double regression_error(const cpmml::Prediction &prediction,
-                               const std::unordered_map<std::string, std::string> &sample) {
+inline double regression_error(const cpmml::Prediction& prediction,
+                               const std::unordered_map<std::string, std::string>& sample) {
   if (prediction.as_double() != double_min())  // check double score available
     return std::abs(prediction.as_double() - to_double(sample.at("prediction"))) / to_double(sample.at("prediction"));
 
   return 0.0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   cpmml::Model model(argv[1], true);
   CSVReader reader(argv[2]);
   std::unordered_map<std::string, std::string> sample;

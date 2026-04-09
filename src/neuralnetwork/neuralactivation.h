@@ -36,26 +36,25 @@ enum class NeuralActivationType {
   RADIALBASIS
 };
 
-inline NeuralActivationType parse_activation(const std::string &s) {
+inline NeuralActivationType parse_activation(const std::string& s) {
   const std::string lower = to_lower(s);
-  if (lower == "threshold")   return NeuralActivationType::THRESHOLD;
-  if (lower == "logistic")    return NeuralActivationType::LOGISTIC;
-  if (lower == "tanh")        return NeuralActivationType::TANH;
+  if (lower == "threshold") return NeuralActivationType::THRESHOLD;
+  if (lower == "logistic") return NeuralActivationType::LOGISTIC;
+  if (lower == "tanh") return NeuralActivationType::TANH;
   if (lower == "exponential") return NeuralActivationType::EXPONENTIAL;
-  if (lower == "reciprocal")  return NeuralActivationType::RECIPROCAL;
-  if (lower == "square")      return NeuralActivationType::SQUARE;
-  if (lower == "gauss")       return NeuralActivationType::GAUSS;
-  if (lower == "sine")        return NeuralActivationType::SINE;
-  if (lower == "cosine")      return NeuralActivationType::COSINE;
-  if (lower == "elliott")     return NeuralActivationType::ELLIOTT;
-  if (lower == "arctan")      return NeuralActivationType::ARCTAN;
-  if (lower == "rectifier")   return NeuralActivationType::RECTIFIER;
+  if (lower == "reciprocal") return NeuralActivationType::RECIPROCAL;
+  if (lower == "square") return NeuralActivationType::SQUARE;
+  if (lower == "gauss") return NeuralActivationType::GAUSS;
+  if (lower == "sine") return NeuralActivationType::SINE;
+  if (lower == "cosine") return NeuralActivationType::COSINE;
+  if (lower == "elliott") return NeuralActivationType::ELLIOTT;
+  if (lower == "arctan") return NeuralActivationType::ARCTAN;
+  if (lower == "rectifier") return NeuralActivationType::RECTIFIER;
   if (lower == "radialbasis") return NeuralActivationType::RADIALBASIS;
   return NeuralActivationType::IDENTITY;
 }
 
-inline double apply_activation(double x, NeuralActivationType type,
-                                double threshold = 0.0, double width = 1.0) {
+inline double apply_activation(double x, NeuralActivationType type, double threshold = 0.0, double width = 1.0) {
   switch (type) {
     case NeuralActivationType::THRESHOLD:
       return x > threshold ? 1.0 : 0.0;

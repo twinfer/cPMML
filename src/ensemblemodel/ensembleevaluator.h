@@ -20,16 +20,16 @@ class EnsembleEvaluator : public InternalEvaluator {
  public:
   EnsembleModel model;
 
-  explicit EnsembleEvaluator(const XmlNode &node)
+  explicit EnsembleEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
-        model(node.get_child("MiningModel"), data_dictionary, transformation_dictionary, indexer){};
+        model(node.get_child("MiningModel"), data_dictionary, transformation_dictionary, indexer) {};
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return model.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return model.predict(sample);
   }
 

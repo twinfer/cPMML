@@ -12,7 +12,7 @@
 #include "utils/csvreader.h"
 #include "utils/utils.h"
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   auto start = std::chrono::steady_clock::now();
   cpmml::Model model(argv[1]);
   auto end = std::chrono::steady_clock::now();
@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
       end = std::chrono::steady_clock::now();
       elapsed_predict += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
       n_predict++;
-    } catch (const cpmml::Exception &exception) {
+    } catch (const cpmml::Exception& exception) {
     }
   }
 
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
       end = std::chrono::steady_clock::now();
       elapsed_score += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
       n_score++;
-    } catch (const cpmml::Exception &exception) {
+    } catch (const cpmml::Exception& exception) {
     }
   }
 

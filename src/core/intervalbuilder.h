@@ -18,8 +18,8 @@
  */
 class IntervalBuilder {
  public:
-  static Predicate build(const XmlNode &node, const size_t &index,
-                         const DataType &dataType = DataType::DataTypeValue::DOUBLE) {
+  static Predicate build(const XmlNode& node, const size_t& index,
+                         const DataType& dataType = DataType::DataTypeValue::DOUBLE) {
     std::vector<Predicate> tmp_constraints;
 
     Closure closure(node.get_attribute("closure"));

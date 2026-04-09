@@ -19,7 +19,7 @@
  *
  */
 //@{
-inline double closest0or1(const double &value) {
+inline double closest0or1(const double& value) {
   if (value < 0) return 0;
   if (value > 1) return 1;
 

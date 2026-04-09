@@ -40,8 +40,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   double sample_data_size = 256.0;
   bool is_iforest = true;
 
-  explicit AnomalyDetectionEvaluator(const XmlNode &pmml_root)
-      : InternalEvaluator(pmml_root) {
+  explicit AnomalyDetectionEvaluator(const XmlNode& pmml_root) : InternalEvaluator(pmml_root) {
     XmlNode ad = pmml_root.get_child("AnomalyDetectionModel");
     mean_threshold = ad.get_double_attribute("meanThreshold");
     sample_data_size = ad.get_double_attribute("sampleDataSize");
@@ -49,38 +48,37 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     is_iforest = (algo == "iforest");
 
     if (ad.exists_child("MiningModel")) {
-      inner = std::make_unique<EnsembleModel>(
-          ad.get_child("MiningModel"), data_dictionary, transformation_dictionary, indexer);
+      inner = std::make_unique<EnsembleModel>(ad.get_child("MiningModel"), data_dictionary, transformation_dictionary,
+                                              indexer);
     } else if (ad.exists_child("SupportVectorMachineModel")) {
-      inner = std::make_unique<SupportVectorMachineModel>(
-          ad.get_child("SupportVectorMachineModel"), data_dictionary, transformation_dictionary, indexer);
+      inner = std::make_unique<SupportVectorMachineModel>(ad.get_child("SupportVectorMachineModel"), data_dictionary,
+                                                          transformation_dictionary, indexer);
     } else if (ad.exists_child("ClusteringModel")) {
-      inner = std::make_unique<ClusteringModel>(
-          ad.get_child("ClusteringModel"), data_dictionary, transformation_dictionary, indexer);
+      inner = std::make_unique<ClusteringModel>(ad.get_child("ClusteringModel"), data_dictionary,
+                                                transformation_dictionary, indexer);
     } else {
       throw cpmml::ParsingException("AnomalyDetectionModel: unsupported or missing inner model");
     }
   }
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return inner->validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     double raw = to_double(inner->predict(sample));
     double s = is_iforest ? iforest_score(raw) : raw;
     return std::make_unique<InternalScore>(s);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     double raw = to_double(inner->predict(sample));
     double s = is_iforest ? iforest_score(raw) : raw;
     return std::to_string(s);
   }
 
   inline std::string get_target_name() const override { return inner->target_field.name; }
-
 
  private:
   double iforest_score(double avg_path) const {

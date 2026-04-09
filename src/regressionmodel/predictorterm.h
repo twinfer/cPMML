@@ -34,20 +34,20 @@ class PredictorTerm {
   DataType datatype;
   double coefficient = double_min();
   std::vector<SimpleFieldRef> fields;
-  std::function<double(const Value &)> predictor_term;
+  std::function<double(const Value&)> predictor_term;
 
   PredictorTerm() = default;
 
-  PredictorTerm(const XmlNode &node,  // PredictorTerm node
-                const std::shared_ptr<Indexer> &indexer)
+  PredictorTerm(const XmlNode& node,  // PredictorTerm node
+                const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
         coefficient(node.get_double_attribute("coefficient")),
         fields(SimpleFieldRef::to_simplefields(node.get_childs("FieldRef"), indexer)) {}
 
-  inline double get_term(const Sample &sample) const {
+  inline double get_term(const Sample& sample) const {
     double partial = 1;
-    for (const auto &field : fields) {
-      const Value &value = field.value(sample);
+    for (const auto& field : fields) {
+      const Value& value = field.value(sample);
       if (value.missing)
         throw cpmml::MissingValueException("missing value index: " + std::to_string(field.index) +
                                            " name: " + field.field_name);
@@ -58,11 +58,11 @@ class PredictorTerm {
     return coefficient * partial;
   }
 
-  static const std::vector<PredictorTerm> to_predictorterms(const std::vector<XmlNode> &nodes,
-                                                            const std::shared_ptr<Indexer> &indexer) {
+  static const std::vector<PredictorTerm> to_predictorterms(const std::vector<XmlNode>& nodes,
+                                                            const std::shared_ptr<Indexer>& indexer) {
     std::vector<PredictorTerm> result;
 
-    for (const auto &node : nodes) result.push_back(PredictorTerm(node, indexer));
+    for (const auto& node : nodes) result.push_back(PredictorTerm(node, indexer));
 
     return result;
   }

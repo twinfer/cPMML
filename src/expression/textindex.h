@@ -50,18 +50,17 @@ class TextIndex : public Expression {
 
   TextIndex() = default;
 
-  TextIndex(const XmlNode &node, const size_t &output_index, const DataType &output_type,
-            const std::shared_ptr<Indexer> &indexer)
+  TextIndex(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+            const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer) {
     std::string field_name = node.get_attribute("textField");
     field_index = indexer->get_or_set(field_name);
     inputs.insert(field_name);
 
-    if (node.exists_attribute("localTermWeights"))
-      local_weights = to_lower(node.get_attribute("localTermWeights"));
+    if (node.exists_attribute("localTermWeights")) local_weights = to_lower(node.get_attribute("localTermWeights"));
 
-    case_sensitive = node.exists_attribute("isCaseSensitive") &&
-                     to_lower(node.get_attribute("isCaseSensitive")) == "true";
+    case_sensitive =
+        node.exists_attribute("isCaseSensitive") && to_lower(node.get_attribute("isCaseSensitive")) == "true";
 
     // The child expression holds the search term. We support a Constant child;
     // evaluate it at construction time to extract the term string.
@@ -69,16 +68,19 @@ class TextIndex : public Expression {
       term = node.get_child("Constant").value();
     } else {
       // Fallback: look for any child element and use its text content
-      for (const auto &child : node.get_childs("Constant"))
-        if (!child.value().empty()) { term = child.value(); break; }
+      for (const auto& child : node.get_childs("Constant"))
+        if (!child.value().empty()) {
+          term = child.value();
+          break;
+        }
     }
 
     if (!case_sensitive) term = to_lower(term);
   }
 
-  inline Value eval(Sample &sample) const override {
+  inline Value eval(Sample& sample) const override {
     // Recover the original string for the text field via reverse lookup
-    const Value &fv = sample[field_index].value;
+    const Value& fv = sample[field_index].value;
     if (fv.missing) return Value();
 
 #ifdef STRING_OPTIMIZATION
@@ -94,8 +96,7 @@ class TextIndex : public Expression {
     std::string token;
     while (iss >> token) {
       // Strip non-alpha punctuation (same as TextModel)
-      token.erase(std::remove_if(token.begin(), token.end(),
-                                 [](unsigned char c) { return !std::isalpha(c); }),
+      token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char c) { return !std::isalpha(c); }),
                   token.end());
       if (!token.empty() && token == term) ++count;
     }

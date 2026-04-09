@@ -34,19 +34,19 @@ class DerivedField {
 
   DerivedField() = default;
 
-  explicit DerivedField(const XmlNode &node, const std::shared_ptr<Indexer> &indexer)
+  explicit DerivedField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
         optype(node.get_attribute("optype")),
         datatype(node.get_attribute("dataType")),
         index(indexer->get_or_set(name, datatype).first),
         expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)) {}
 
-  inline void prepare(Sample &sample) const { sample.change_value(index, expression->eval(sample)); }
+  inline void prepare(Sample& sample) const { sample.change_value(index, expression->eval(sample)); }
 
   inline static std::unordered_map<std::string, DerivedField> to_derivedfields(
-      const std::vector<XmlNode> &nodes, const std::shared_ptr<Indexer> &indexer) {
+      const std::vector<XmlNode>& nodes, const std::shared_ptr<Indexer>& indexer) {
     std::unordered_map<std::string, DerivedField> result;
-    for (const auto &node : nodes)
+    for (const auto& node : nodes)
       result.insert(std::make_pair(node.get_attribute("name"), DerivedField(node, indexer)));
 
     return result;

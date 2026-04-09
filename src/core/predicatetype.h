@@ -31,9 +31,9 @@ class PredicateType {
 
   PredicateType() = default;
 
-  explicit PredicateType(const std::string &predicatetype) : value(from_string(predicatetype)) {}
+  explicit PredicateType(const std::string& predicatetype) : value(from_string(predicatetype)) {}
 
-  static PredicateTypeValue from_string(const std::string &predicate_type) {
+  static PredicateTypeValue from_string(const std::string& predicate_type) {
     const static std::unordered_map<std::string, PredicateTypeValue> predicatetype_converter = {
         {"true", PredicateTypeValue::TRUE},
         {"false", PredicateTypeValue::FALSE},
@@ -43,7 +43,7 @@ class PredicateType {
 
     try {
       return predicatetype_converter.at(to_lower(predicate_type));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException("unsupported predicate type: " + predicate_type);
     }
   }

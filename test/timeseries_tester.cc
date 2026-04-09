@@ -27,7 +27,7 @@
 static const double REL_TOL = 0.001;
 static const double ABS_TOL = 1e-9;
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc < 3) {
     std::cerr << "usage: timeseries_tester.exe model.zip forecast.csv\n";
     return -1;
@@ -39,8 +39,7 @@ int main(int argc, char **argv) {
   CSVReader reader(argv[2]);
   std::vector<double> expected;
   std::unordered_map<std::string, std::string> row;
-  while ((row = reader.read()).size() > 0)
-    expected.push_back(to_double(row.at("forecast")));
+  while ((row = reader.read()).size() > 0) expected.push_back(to_double(row.at("forecast")));
 
   if (expected.empty()) {
     std::cerr << "no forecast rows in " << argv[2] << "\n";
@@ -50,8 +49,7 @@ int main(int argc, char **argv) {
   std::vector<double> actual = model.forecast(static_cast<int>(expected.size()));
 
   if (actual.size() != expected.size()) {
-    std::cerr << "size mismatch: got " << actual.size()
-              << " expected " << expected.size() << "\n";
+    std::cerr << "size mismatch: got " << actual.size() << " expected " << expected.size() << "\n";
     return -1;
   }
 
@@ -60,10 +58,7 @@ int main(int argc, char **argv) {
     double err = std::abs(act - exp);
     double rel = (std::abs(exp) > ABS_TOL) ? (err / std::abs(exp)) : err;
     if (rel > REL_TOL) {
-      std::cerr << "h=" << (i + 1)
-                << "  predicted=" << act
-                << "  expected=" << exp
-                << "  rel_err=" << rel << "\n";
+      std::cerr << "h=" << (i + 1) << "  predicted=" << act << "  expected=" << exp << "  rel_err=" << rel << "\n";
       return -1;
     }
   }

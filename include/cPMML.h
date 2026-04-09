@@ -30,12 +30,12 @@ class Exception : public std::exception {
    * Constructs a new Exception object.
    * @param message explanatory string providing more details about the error.
    */
-  explicit Exception(const std::string &message);
+  explicit Exception(const std::string& message);
 
   /**
    * @return an explanatory string providing more details about the error.
    */
-  virtual const char *what() const noexcept;
+  virtual const char* what() const noexcept;
 
  private:
   /**
@@ -58,7 +58,7 @@ class MissingValueException : public Exception {
    * Constructs a new MissingValueException object.
    * @param message explanatory string providing more details about the error.
    */
-  explicit MissingValueException(const std::string &message);
+  explicit MissingValueException(const std::string& message);
 };
 
 /**
@@ -76,7 +76,7 @@ class InvalidValueException : public Exception {
    * Constructs a new InvalidValueException object.
    * @param message explanatory string providing more details about the error.
    */
-  explicit InvalidValueException(const std::string &message);
+  explicit InvalidValueException(const std::string& message);
 };
 
 /**
@@ -91,7 +91,7 @@ class MathException : public Exception {
    * Constructs a new MathException object.
    * @param message explanatory string providing more details about the error.
    */
-  explicit MathException(const std::string &message);
+  explicit MathException(const std::string& message);
 };
 
 /**
@@ -110,7 +110,7 @@ class ParsingException : public Exception {
    * Constructs a new ParsingException object.
    * @param message explanatory string providing more details about the error.
    */
-  explicit ParsingException(const std::string &message);
+  explicit ParsingException(const std::string& message);
 };
 }  // namespace cpmml
 
@@ -135,7 +135,7 @@ class Prediction {
  public:
   Prediction() = default;
 
-  explicit Prediction(const std::shared_ptr<InternalScore> &score);
+  explicit Prediction(const std::shared_ptr<InternalScore>& score);
 
   /**
    * @brief It returns the predicted value as a string.
@@ -229,7 +229,7 @@ class Model {
  public:
   Model() = default;
 
-  explicit Model(const std::string &model_filepath);
+  explicit Model(const std::string& model_filepath);
 
   /**
    * @brief Constructs a cpmml::Model instance representing the PMML model
@@ -267,7 +267,7 @@ class Model {
    * cpmml::Model model("AuditRandomForest.zip", true);
    * @endcode
    */
-  Model(const std::string &model_filepath, const bool zipped);
+  Model(const std::string& model_filepath, const bool zipped);
 
   /**
    * @brief Validates user input in *sample* against the constraints defined in
@@ -306,7 +306,7 @@ class Model {
    * std::endl;
    * @endcode
    */
-  bool validate(const std::unordered_map<std::string, std::string> &sample) const;
+  bool validate(const std::unordered_map<std::string, std::string>& sample) const;
 
   /**
    * @brief Scores the model against the user input in *sample*.
@@ -339,7 +339,7 @@ class Model {
    * cpmml::Prediction prediction = model.score(sample);
    * @endcode
    */
-  Prediction score(const std::unordered_map<std::string, std::string> &sample) const;
+  Prediction score(const std::unordered_map<std::string, std::string>& sample) const;
 
   /**
    * @brief Scores the model against the user input in *sample*.
@@ -380,7 +380,7 @@ class Model {
    * std::cout << model.predict(sample); // "Iris-versicolor"
    * @endcode
    */
-  std::string predict(const std::unordered_map<std::string, std::string> &sample) const;
+  std::string predict(const std::unordered_map<std::string, std::string>& sample) const;
 
   /**
    * @brief Generates an h-step-ahead forecast for TimeSeriesModel.
@@ -402,6 +402,41 @@ class Model {
    * @endcode
    */
   std::vector<double> forecast(int horizon) const;
+
+  /**
+   * @brief Generates an h-step-ahead forecast with user-supplied regressor values.
+   *
+   * Required when the model contains a DynamicRegressor with
+   * futureValuesMethod="userSupplied". Provide future values for each
+   * regressor field as a vector of length >= horizon.
+   *
+   * @param horizon Number of steps to forecast (must be > 0).
+   * @param regressors Map of {field_name: [x(T+1), x(T+2), ..., x(T+horizon)]}.
+   * @return std::vector<double> of length *horizon*.
+   */
+  std::vector<double> forecast(int horizon,
+                               const std::unordered_map<std::string, std::vector<double>>& regressors) const;
+
+  /**
+   * @brief Generates an h-step-ahead forecast with prediction variance for TimeSeriesModel.
+   *
+   * Returns a vector of length *horizon* where each element is a pair
+   * {point_forecast, variance}.  Variance is computed via MA(∞) psi-weight
+   * expansion (ARIMA CLS), Kalman P propagation (ARIMA Kalman), or RMSE²×h
+   * approximation (ETS/SSM).
+   *
+   * @param horizon Number of steps to forecast (must be > 0).
+   * @return std::vector<std::pair<double,double>> of length *horizon*.
+   *
+   * @throws cpmml::ParsingException if the model does not support forecasting.
+   */
+  std::vector<std::pair<double, double>> forecast_with_variance(int horizon) const;
+
+  /**
+   * @brief forecast_with_variance with user-supplied regressor values.
+   */
+  std::vector<std::pair<double, double>> forecast_with_variance(
+      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const;
 
  private:
   std::shared_ptr<InternalEvaluator> evaluator;

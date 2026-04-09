@@ -38,15 +38,15 @@ class OutputExpressionType {
 
   OutputExpressionType() : value(OutputExpressionTypeValue::PREDICTED_VALUE) {}
 
-  explicit OutputExpressionType(const OutputExpressionTypeValue &value) : value(value) {}
+  explicit OutputExpressionType(const OutputExpressionTypeValue& value) : value(value) {}
 
-  explicit OutputExpressionType(const std::string &value) : value(from_string(to_lower(value))) {}
+  explicit OutputExpressionType(const std::string& value) : value(from_string(to_lower(value))) {}
 
-  inline bool operator==(const OutputExpressionType &other) const { return value == other.value; };
+  inline bool operator==(const OutputExpressionType& other) const { return value == other.value; };
 
-  inline bool operator!=(const OutputExpressionType &other) const { return value != other.value; };
+  inline bool operator!=(const OutputExpressionType& other) const { return value != other.value; };
 
-  static OutputExpressionTypeValue from_string(const std::string &expressiontype) {
+  static OutputExpressionTypeValue from_string(const std::string& expressiontype) {
     const static std::unordered_map<std::string, OutputExpressionTypeValue> expressiontype_converter = {
         {"predictedvalue", OutputExpressionTypeValue::PREDICTED_VALUE},
         {"predicteddisplayvalue", OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE},
@@ -55,7 +55,7 @@ class OutputExpressionType {
 
     try {
       return expressiontype_converter.at(to_lower(expressiontype));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return OutputExpressionTypeValue::PASS_VALUE;
     }
   }

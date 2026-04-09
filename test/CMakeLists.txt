@@ -65,9 +65,15 @@ macro(add_timeseries_test TARGET)
 endmacro()
 
 add_timeseries_test(ETS_AddTrend)
+add_timeseries_test(ETS_SeasonalAddAdd)
 add_timeseries_test(SSM_LinearTrend)
+add_timeseries_test(SSM_Intercept)
+add_timeseries_test(SSM_PsiVector)
 add_timeseries_test(ARIMA_AR1)
 add_timeseries_test(ARIMA_Kalman)
+add_timeseries_test(ARIMA_SARIMA)
+add_timeseries_test(GARCH_AR1_GARCH11)
+add_timeseries_test(ARIMA_DynReg)
 
 add_custom_command(
         TARGET unit_tests

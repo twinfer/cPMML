@@ -36,27 +36,27 @@ class TreeModel : public InternalModel {
 
   TreeModel() = default;
 
-  TreeModel(const XmlNode &node, const DataDictionary &data_dictionary, const PredicateBuilder &predicate_builder,
-            const std::shared_ptr<Indexer> &indexer)
+  TreeModel(const XmlNode& node, const DataDictionary& data_dictionary, const PredicateBuilder& predicate_builder,
+            const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, indexer),
         return_last_prediction(node.get_attribute("noTrueChildStrategy") == "returnLastPrediction"),
-        root_node(Node(node.get_child("Node"), true, predicate_builder, target_field.datatype)){};
+        root_node(Node(node.get_child("Node"), true, predicate_builder, target_field.datatype)) {};
 
-  TreeModel(const XmlNode &node, const DataDictionary &data_dictionary,
-            const TransformationDictionary &transformationDictionary, const std::shared_ptr<Indexer> &indexer)
+  TreeModel(const XmlNode& node, const DataDictionary& data_dictionary,
+            const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),
         return_last_prediction(node.get_attribute("noTrueChildStrategy") == "returnLastPrediction"),
-        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)){};
+        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)) {};
 
-  inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
+  inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     return std::make_unique<TreeScore>(scoreR(sample, root_node));
   };
 
-  inline std::string predict_raw(const Sample &sample) const override {
+  inline std::string predict_raw(const Sample& sample) const override {
     return std::string(simple_scoreR(sample, root_node));
   };
 
-  inline TreeScore scoreR(const Sample &sample, const Node &current_node) const {
+  inline TreeScore scoreR(const Sample& sample, const Node& current_node) const {
 #ifdef DEBUG
     static int depth = 0;
     //        depth++;
@@ -70,7 +70,7 @@ class TreeModel : public InternalModel {
 
     if (current_node.leaf) return current_node.score;
 
-    for (const auto &child : current_node.children)
+    for (const auto& child : current_node.children)
       if (child.match(sample)) {
 #ifdef DEBUG
         depth++;
@@ -89,7 +89,7 @@ class TreeModel : public InternalModel {
     return TreeScore();
   }
 
-  inline std::string_view simple_scoreR(const Sample &sample, const Node &current_node) const {
+  inline std::string_view simple_scoreR(const Sample& sample, const Node& current_node) const {
 #ifdef DEBUG
     static int depth = 0;
     depth++;
@@ -102,7 +102,7 @@ class TreeModel : public InternalModel {
 
     if (current_node.leaf) return std::string_view(current_node.simple_score);
 
-    for (const auto &child : current_node.children)
+    for (const auto& child : current_node.children)
       if (child.match(sample)) {
         result = simple_scoreR(sample, child);
 #ifdef DEBUG

@@ -47,14 +47,14 @@ class MultipleModelMethod {
   };
 
   MultipleModelMethodType value;
-  std::function<std::unique_ptr<InternalScore>(const Sample &, const std::vector<Segment> &)> function;
+  std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)> function;
 
   MultipleModelMethod() = default;
 
-  explicit MultipleModelMethod(const std::string &multiplemodelmethod, const MiningFunction &mining_function)
+  explicit MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function)
       : value(from_string(multiplemodelmethod)), function(to_function(multiplemodelmethod, mining_function)) {}
 
-  static MultipleModelMethodType from_string(const std::string &multiplemodelmethod) {
+  static MultipleModelMethodType from_string(const std::string& multiplemodelmethod) {
     static const std::unordered_map<std::string, MultipleModelMethodType> multiplemodelmethod_converter = {
         {"majorityvote", MultipleModelMethodType::MAJORITY_VOTE},
         {"weightedmajorityvote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE},
@@ -69,13 +69,13 @@ class MultipleModelMethod {
 
     try {
       return multiplemodelmethod_converter.at(::to_lower(multiplemodelmethod));
-    } catch (const std::out_of_range &e) {
+    } catch (const std::out_of_range& e) {
       throw cpmml::ParsingException(multiplemodelmethod + " not supported");
     }
   }
 
-  static std::function<std::unique_ptr<InternalScore>(const Sample &, const std::vector<Segment> &)> to_function(
-      const std::string &multiplemodelmethod, const MiningFunction &mining_function) {
+  static std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)> to_function(
+      const std::string& multiplemodelmethod, const MiningFunction& mining_function) {
     switch (from_string(multiplemodelmethod)) {
       case MultipleModelMethodType::MAJORITY_VOTE:
         return majority_vote;
@@ -101,15 +101,15 @@ class MultipleModelMethod {
 
 #ifndef MULTITHREADING
 
-  static std::unique_ptr<InternalScore> majority_vote(const Sample &sample, const std::vector<Segment> &ensemble) {
+  static std::unique_ptr<InternalScore> majority_vote(const Sample& sample, const std::vector<Segment>& ensemble) {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
 
     std::string score;
-    for (const auto &segment : ensemble)
+    for (const auto& segment : ensemble)
       if (segment.predicate(sample)) probabilities[segment.predict(sample)] += 1.0 / ensemble.size();
 
     double max_prob = 0;
-    for (const auto &probability : probabilities) {
+    for (const auto& probability : probabilities) {
       if (max_prob > 0.5) break;
 
       if (probability.second > max_prob && probability.first != "") {
@@ -122,8 +122,8 @@ class MultipleModelMethod {
   }
 
 #else
-  inline static std::unique_ptr<InternalScore> majority_vote(const Sample &sample,
-                                                             const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> majority_vote(const Sample& sample,
+                                                             const std::vector<Segment>& ensemble) {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
     std::unordered_map<std::string, double> tmp_probabilities[NUM_THREADS];
 
@@ -134,10 +134,10 @@ class MultipleModelMethod {
         tmp_probabilities[omp_get_thread_num()][ensemble[i].predict(sample)] += 1.0 / ensemble.size();
 
     for (auto i = 0u; i < NUM_THREADS; i++)
-      for (const auto &pair : tmp_probabilities[i]) probabilities[pair.first] += pair.second;
+      for (const auto& pair : tmp_probabilities[i]) probabilities[pair.first] += pair.second;
 
     double max_prob = 0;
-    for (const auto &probability : probabilities) {
+    for (const auto& probability : probabilities) {
       if (max_prob > 0.5) break;
 
       if (probability.second > max_prob && probability.first != "") {
@@ -151,17 +151,17 @@ class MultipleModelMethod {
 
 #endif
 
-  inline static std::unique_ptr<InternalScore> weighted_majority_vote(const Sample &sample,
-                                                                      const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> weighted_majority_vote(const Sample& sample,
+                                                                      const std::vector<Segment>& ensemble) {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
 
-    for (const auto &segment : ensemble)
+    for (const auto& segment : ensemble)
       if (segment.predicate(sample)) probabilities[segment.predict(sample)] += 1.0 * segment.weight / ensemble.size();
 
     double max_prob = 0;
     std::string score;
     double winning_threshold = 1.0 / ensemble[0].model->target_field.n_values;
-    for (const auto &probability : probabilities) {
+    for (const auto& probability : probabilities) {
       if (max_prob > winning_threshold) break;
 
       if (probability.second > max_prob && probability.first != "") {
@@ -173,24 +173,24 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(score, probabilities);
   }
 
-  inline static std::unique_ptr<InternalScore> classification_average(const Sample &sample,
-                                                                      const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> classification_average(const Sample& sample,
+                                                                      const std::vector<Segment>& ensemble) {
     std::unique_ptr<InternalScore> first_score(ensemble[0].score(sample));
     std::unordered_map<std::string, double> probabilities = first_score->probabilities;
 
     for (auto i = 1u; i < ensemble.size(); i++)
       if (ensemble[i].predicate(sample)) {
         std::unique_ptr<InternalScore> tmp_score(ensemble[i].score(sample));
-        for (const auto &probability : tmp_score->probabilities) probabilities[probability.first] += probability.second;
+        for (const auto& probability : tmp_score->probabilities) probabilities[probability.first] += probability.second;
       }
 
-    for (const auto &probability : probabilities)
+    for (const auto& probability : probabilities)
       probabilities[probability.first] = probability.second / ensemble.size();
 
     double max_prob = 0;
     std::string score;
     double winning_threshold = 1.0;  // / ensemble[0].model->target_field.n_values;
-    for (const auto &probability : probabilities) {
+    for (const auto& probability : probabilities) {
       if (max_prob >= winning_threshold) break;
 
       if (probability.second > max_prob && probability.first != "") {
@@ -203,11 +203,11 @@ class MultipleModelMethod {
   }
 
 #ifndef MULTITHREADING
-  static std::unique_ptr<InternalScore> regression_average(const Sample &sample, const std::vector<Segment> &ensemble) {
+  static std::unique_ptr<InternalScore> regression_average(const Sample& sample, const std::vector<Segment>& ensemble) {
     double score = 0;
     double count = 0;
 
-    for (const auto &segment : ensemble)
+    for (const auto& segment : ensemble)
       if (segment.predicate(sample)) {
         count++;
         score += to_double(segment.predict(sample));
@@ -218,8 +218,8 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(score);
   }
 #else
-  inline static std::unique_ptr<InternalScore> regression_average(const Sample &sample,
-                                                                  const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> regression_average(const Sample& sample,
+                                                                  const std::vector<Segment>& ensemble) {
     double score = 0;
     double scores[NUM_THREADS];
     double count = 0;
@@ -241,25 +241,25 @@ class MultipleModelMethod {
   }
 #endif
 
-  inline static std::unique_ptr<InternalScore> classification_weighted_average(const Sample &sample,
-                                                                               const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> classification_weighted_average(const Sample& sample,
+                                                                               const std::vector<Segment>& ensemble) {
     std::unique_ptr<InternalScore> first_score(ensemble[0].score(sample));
     std::unordered_map<std::string, double> probabilities = first_score->probabilities;
 
     for (auto i = 1u; i < ensemble.size(); i++)
       if (ensemble[i].predicate(sample)) {
         std::unique_ptr<InternalScore> tmp_score(ensemble[i].score(sample));
-        for (const auto &probability : tmp_score->probabilities)
+        for (const auto& probability : tmp_score->probabilities)
           probabilities[probability.first] += probability.second * ensemble[i].weight;
       }
 
-    for (const auto &probability : probabilities)
+    for (const auto& probability : probabilities)
       probabilities[probability.first] = probability.second / ensemble.size();
 
     double max_prob = 0;
     std::string score;
     double winning_threshold = 1.0 / ensemble[0].model->target_field.n_values;
-    for (const auto &probability : probabilities) {
+    for (const auto& probability : probabilities) {
       if (max_prob >= winning_threshold) break;
 
       if (probability.second > max_prob && probability.first != "") {
@@ -273,17 +273,17 @@ class MultipleModelMethod {
 
 #ifndef MULTITHREADING
 
-  inline static std::unique_ptr<InternalScore> sum(const Sample &sample, const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> sum(const Sample& sample, const std::vector<Segment>& ensemble) {
     double score = 0;
 
-    for (const auto &segment : ensemble)
+    for (const auto& segment : ensemble)
       if (segment.predicate(sample)) score += std::unique_ptr<InternalScore>(segment.score(sample))->double_score;
 
     return std::make_unique<InternalScore>(score);
   }
 
 #else
-  inline static std::unique_ptr<InternalScore> sum(const Sample &sample, const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> sum(const Sample& sample, const std::vector<Segment>& ensemble) {
     double score = 0;
     double scores[NUM_THREADS];
 
@@ -300,7 +300,7 @@ class MultipleModelMethod {
   }
 #endif
 
-  inline static std::unique_ptr<InternalScore> model_chain(const Sample &sample, const std::vector<Segment> &ensemble) {
+  inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble) {
     Sample tmp_sample = sample;
     bool first = true;
 

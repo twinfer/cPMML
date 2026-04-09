@@ -49,9 +49,9 @@ class MiningField : public DataField {
 
   MiningField() = default;
 
-  MiningField(const std::string &name, const DataType &datatype) : DataField(name, datatype), empty(false) {}
+  MiningField(const std::string& name, const DataType& datatype) : DataField(name, datatype), empty(false) {}
 
-  MiningField(XmlNode node, const DataField &data_field)
+  MiningField(XmlNode node, const DataField& data_field)
       : DataField(data_field),
         empty(false),
         field_usage_type(node.get_attribute("usageType")),
@@ -72,10 +72,10 @@ class MiningField : public DataField {
         hasInvalidTreatment(node.exists_attribute("invalidValueTreatmentMethod")),
         invalidvalue_treatmentmethod(
             hasInvalidTreatment ? InvalidValueTreatmentMethod(node.get_attribute("invalidValueTreatmentMethod"))
-                                : InvalidValueTreatmentMethod()){};
+                                : InvalidValueTreatmentMethod()) {};
 
   static std::unordered_map<std::string, MiningField> to_miningfields(std::vector<XmlNode> nodes,
-                                                                      const DataDictionary &data_dictionary) {
+                                                                      const DataDictionary& data_dictionary) {
     std::unordered_map<std::string, MiningField> result;
     for (auto it = nodes.cbegin(); it != nodes.cend(); it++) {
       if (data_dictionary.datafields.find(it->get_attribute("name")) == data_dictionary.datafields.cend())
@@ -90,7 +90,7 @@ class MiningField : public DataField {
 
   inline Value handle_missing() const { return hasMissingReplacement ? missingvalue_replacement : Value(); }
 
-  inline bool is_outlier(const Value &value) const {
+  inline bool is_outlier(const Value& value) const {
     // if it doesn't have low or high value it must be treated "asIs"
     // since other treatment methods imply low and high value. If treated "asIs"
     // then it's not considered an outlier
@@ -98,7 +98,7 @@ class MiningField : public DataField {
     return hasOutlierTreatment && hasLowValue && hasHighValue && (value < low_value || value > high_value);
   }
 
-  inline Value handle_outlier(const Value &value) const {
+  inline Value handle_outlier(const Value& value) const {
     switch (outliertreatmentmethod.value) {  // in this two cases it must have low or high value
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
         return handle_missing();
@@ -110,9 +110,9 @@ class MiningField : public DataField {
     }
   }
 
-  inline bool is_invalid(const Value &value) const { return !constraints(value); }
+  inline bool is_invalid(const Value& value) const { return !constraints(value); }
 
-  inline Value handle_invalid(const Value &value) const {
+  inline Value handle_invalid(const Value& value) const {
     switch (invalidvalue_treatmentmethod.value) {
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:
         throw cpmml::InvalidValueException("Invalid value for field: " + name);

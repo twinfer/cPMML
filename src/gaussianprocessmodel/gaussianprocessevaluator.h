@@ -18,22 +18,22 @@
  */
 class GaussianProcessEvaluator : public InternalEvaluator {
  public:
-  explicit GaussianProcessEvaluator(const XmlNode &node)
+  explicit GaussianProcessEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         gp(node.get_child("GaussianProcessModel"), data_dictionary, transformation_dictionary, indexer) {}
 
   GaussianProcessModel gp;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return gp.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return gp.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return gp.predict(sample);
   }
 

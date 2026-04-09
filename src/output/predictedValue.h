@@ -28,15 +28,15 @@ class PredictedValue : public OutputExpression {
 
   PredictedValue() : index(std::numeric_limits<size_t>::max()) {}
 
-  PredictedValue(const std::string &field_name, const std::shared_ptr<Indexer> &indexer, const size_t &output_index,
-                 const DataType &output_type)
+  PredictedValue(const std::string& field_name, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
+                 const DataType& output_type)
       : OutputExpression(output_index, output_type, indexer),
         field_name(field_name),
         index(indexer->get_or_set(field_name)) {}
 
-  inline Value eval(Sample &sample) const override { return sample[index].value; }
+  inline Value eval(Sample& sample) const override { return sample[index].value; }
 
-  inline virtual std::string eval_str(Sample &sample, const InternalScore &score) const override {
+  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const override {
     return score.score;
   };
 };

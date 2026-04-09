@@ -51,7 +51,7 @@ class InternalModel {
 
   InternalModel() = default;
 
-  InternalModel(const XmlNode &node, const DataDictionary &data_dictionary, const std::shared_ptr<Indexer> &indexer)
+  InternalModel(const XmlNode& node, const DataDictionary& data_dictionary, const std::shared_ptr<Indexer>& indexer)
       : indexer(indexer),
         mining_function(node.get_attribute("functionName")),
         mining_schema(MiningSchema(node.get_child("MiningSchema"), data_dictionary)),
@@ -62,8 +62,8 @@ class InternalModel {
     check_scorable(node);
   }
 
-  InternalModel(const XmlNode &node, const DataDictionary &data_dictionary,
-                const TransformationDictionary &transformation_dictionary, const std::shared_ptr<Indexer> &indexer)
+  InternalModel(const XmlNode& node, const DataDictionary& data_dictionary,
+                const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : indexer(indexer),
         mining_function(node.get_attribute("functionName")),
         mining_schema(MiningSchema(node.get_child("MiningSchema"), data_dictionary)),
@@ -77,19 +77,19 @@ class InternalModel {
     check_scorable(node);
   }
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) const {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) const {
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
-      for (const auto &derivedfield_name : derivedfields_dag)
+      for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
     return mining_schema.validate(internal_sample);
   }
 
-  inline void augment_first(Sample &sample) const {
+  inline void augment_first(Sample& sample) const {
     if (!transformation_dictionary.empty)
-      for (const auto &derivedfield_name : derivedfields_dag)
+      for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(sample);
 
     sample.change_value(indexer->get_index(target_field.name),
@@ -98,14 +98,14 @@ class InternalModel {
     output.prepare(sample);
   };
 
-  inline void augment(Sample &sample) const {
+  inline void augment(Sample& sample) const {
     sample.change_value(indexer->get_index(target_field.name),
                         Value(target(predict_raw(sample)), target_field.datatype));
 
     output.prepare(sample);
   };
 
-  inline std::unique_ptr<InternalScore> augment_last(Sample &sample) const {
+  inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {
     std::unique_ptr<InternalScore> score = score_raw(sample);
     target(*score);
     output.add_output(sample, *score);
@@ -113,11 +113,11 @@ class InternalModel {
     return score;
   };
 
-  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string> &sample) const {
+  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const {
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
-      for (const auto &derivedfield_name : derivedfields_dag)
+      for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
     if (!mining_schema.validate(internal_sample))
@@ -130,13 +130,13 @@ class InternalModel {
     return score;
   };
 
-  virtual std::unique_ptr<InternalScore> score_raw(const Sample &sample) const = 0;
+  virtual std::unique_ptr<InternalScore> score_raw(const Sample& sample) const = 0;
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const {
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
-      for (const auto &derivedfield_name : derivedfields_dag)
+      for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
     if (!mining_schema.validate(internal_sample))
@@ -145,9 +145,9 @@ class InternalModel {
     return target(predict_raw(internal_sample));
   };
 
-  static inline Target get_target(const XmlNode &node, const MiningSchema &mining_schema,
-                                  const TransformationDictionary &transformation_dictionary,
-                                  const MiningFunction &mining_function) {
+  static inline Target get_target(const XmlNode& node, const MiningSchema& mining_schema,
+                                  const TransformationDictionary& transformation_dictionary,
+                                  const MiningFunction& mining_function) {
     if (node.exists_child("Targets"))
       if (node.get_child("Targets").exists_child("Target"))
         return Target(node.get_child("Targets").get_child("Target"), mining_schema, transformation_dictionary,
@@ -156,21 +156,21 @@ class InternalModel {
     return Target();
   }
 
-  static inline OutputDictionary get_output(const XmlNode &node, const std::shared_ptr<Indexer> &indexer,
-                                            const std::string &target_field_name) {
+  static inline OutputDictionary get_output(const XmlNode& node, const std::shared_ptr<Indexer>& indexer,
+                                            const std::string& target_field_name) {
     return node.exists_child("Output") ? OutputDictionary(node.get_child("Output"), indexer, target_field_name)
                                        : OutputDictionary();
   }
 
-  static inline void check_scorable(const XmlNode &node) {
+  static inline void check_scorable(const XmlNode& node) {
     if (node.exists_attribute("isScorable") && node.get_bool_attribute("isScorable") == false)
       throw cpmml::ParsingException("The model is defined as non-scorable");
   }
 
-  static inline bool add_local_transformations(const XmlNode &node, TransformationDictionary &transformation_dictionary,
-                                               const std::shared_ptr<Indexer> &indexer) {
+  static inline bool add_local_transformations(const XmlNode& node, TransformationDictionary& transformation_dictionary,
+                                               const std::shared_ptr<Indexer>& indexer) {
     if (node.exists_child("LocalTransformations")) {
-      for (auto const &n : node.get_child("LocalTransformations").get_childs("DerivedField"))
+      for (auto const& n : node.get_child("LocalTransformations").get_childs("DerivedField"))
         transformation_dictionary.add_derived_field(DerivedField(n, indexer));
       return true;
     }
@@ -178,15 +178,15 @@ class InternalModel {
     return false;
   }
 
-  static Sample create_basesample(const std::shared_ptr<Indexer> &indexer) {
+  static Sample create_basesample(const std::shared_ptr<Indexer>& indexer) {
     Sample sample(indexer->size());
-    for (const auto &index : *indexer) sample[index.second] = Feature(index.first, Value());
+    for (const auto& index : *indexer) sample[index.second] = Feature(index.first, Value());
 
     return sample;
   }
 
-  static MiningField get_target(const MiningFunction &mining_function, const MiningSchema &mining_schema,
-                                const std::shared_ptr<Indexer> &indexer) {
+  static MiningField get_target(const MiningFunction& mining_function, const MiningSchema& mining_schema,
+                                const std::shared_ptr<Indexer>& indexer) {
     if (mining_schema.target.empty) {
       DataType datatype = mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION
                               ? DataType::DataTypeValue::STRING
@@ -200,15 +200,15 @@ class InternalModel {
     return mining_schema.target;
   }
 
-  virtual std::string predict_raw(const Sample &sample) const = 0;
+  virtual std::string predict_raw(const Sample& sample) const = 0;
 
-  InternalModel(const InternalModel &) = default;
+  InternalModel(const InternalModel&) = default;
 
-  InternalModel(InternalModel &&) = default;
+  InternalModel(InternalModel&&) = default;
 
-  InternalModel &operator=(const InternalModel &) = default;
+  InternalModel& operator=(const InternalModel&) = default;
 
-  InternalModel &operator=(InternalModel &&) = default;
+  InternalModel& operator=(InternalModel&&) = default;
 
   virtual ~InternalModel() = default;
 };

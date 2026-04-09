@@ -28,11 +28,11 @@ class Probability : public OutputExpression {
 
   Probability() : index(std::numeric_limits<size_t>::max()) {}
 
-  Probability(const XmlNode &node, const std::shared_ptr<Indexer> &indexer, const size_t &output_index,
-              const DataType &output_type)
+  Probability(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
+              const DataType& output_type)
       : OutputExpression(output_index, output_type, indexer), target_value(node.get_attribute("value")) {}
 
-  inline virtual double eval_double(Sample &sample, const InternalScore &score) const override {
+  inline virtual double eval_double(Sample& sample, const InternalScore& score) const override {
     if (score.probabilities.find(target_value) != score.probabilities.cend())
       return score.probabilities.at(target_value);
 

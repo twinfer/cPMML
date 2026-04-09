@@ -30,13 +30,13 @@ class DataDictionary {
 
   DataDictionary() = default;
 
-  DataDictionary(const XmlNode &node, const std::shared_ptr<Indexer> &indexer)
+  DataDictionary(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : number_of_fields(node.get_long_attribute("numberOfFields")),
         datafields(DataField::to_datafields(node.get_childs("DataField"), indexer)) {}
 
-  inline const DataField &operator[](const std::string &feature_name) const { return datafields.at(feature_name); }
+  inline const DataField& operator[](const std::string& feature_name) const { return datafields.at(feature_name); }
 
-  inline const DataField &at(const std::string &feature_name) const { return datafields.at(feature_name); }
+  inline const DataField& at(const std::string& feature_name) const { return datafields.at(feature_name); }
 };
 
 #endif

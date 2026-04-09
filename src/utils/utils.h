@@ -19,9 +19,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "options.h"
 
 #include "miniz.h"
+#include "options.h"
 
 /**
  * @defgroup Utils
@@ -35,18 +35,18 @@ inline std::string to_lower(std::string value) {
   return value;
 }
 
-inline static double to_double(const std::string &value) {
+inline static double to_double(const std::string& value) {
   try {
     return std::stod(value);
-  } catch (const std::invalid_argument &exception) {
+  } catch (const std::invalid_argument& exception) {
     throw cpmml::ParsingException(value + " cannot be converted to double (invalid argument)");
-  } catch (const std::out_of_range &exception) {
+  } catch (const std::out_of_range& exception) {
     throw cpmml::ParsingException(value + " cannot be converted to double (overflow)");
   }
 }
 
 template <class T>
-T parse_string(const std::string &value) {
+T parse_string(const std::string& value) {
   std::istringstream is(to_lower(value));
   T parsed_value;
   is >> parsed_value;
@@ -54,7 +54,7 @@ T parse_string(const std::string &value) {
 }
 
 template <class T>
-std::string to_string(const T &value) {
+std::string to_string(const T& value) {
   std::stringstream buffer;
 
   buffer << value;
@@ -63,7 +63,7 @@ std::string to_string(const T &value) {
 }
 
 template <class T>
-std::string mkstring(const std::vector<T> &values, const std::string &separator = ",") {
+std::string mkstring(const std::vector<T>& values, const std::string& separator = ",") {
   std::stringstream buffer;
 
   buffer << "[";
@@ -78,7 +78,7 @@ std::string mkstring(const std::vector<T> &values, const std::string &separator 
 }
 
 template <class T>
-std::string mkstring(const std::set<T> &values, const std::string &separator = ",") {
+std::string mkstring(const std::set<T>& values, const std::string& separator = ",") {
   std::stringstream buffer;
 
   buffer << "[";
@@ -93,7 +93,7 @@ std::string mkstring(const std::set<T> &values, const std::string &separator = "
 }
 
 template <class T, class H>
-std::string mkstring(const std::unordered_set<T, H> &values, const std::string &separator = ",") {
+std::string mkstring(const std::unordered_set<T, H>& values, const std::string& separator = ",") {
   std::stringstream buffer;
 
   buffer << "[";
@@ -108,7 +108,7 @@ std::string mkstring(const std::unordered_set<T, H> &values, const std::string &
 }
 
 template <class K, class V, class H>
-std::string to_string(const std::unordered_map<K, V, H> &values, const std::string &separator = ",") {
+std::string to_string(const std::unordered_map<K, V, H>& values, const std::string& separator = ",") {
   std::stringstream buffer;
 
   buffer << "{";
@@ -123,7 +123,7 @@ std::string to_string(const std::unordered_map<K, V, H> &values, const std::stri
 }
 
 template <class T, class U>
-std::string mkstring(const std::vector<std::pair<T, U>> &values, const std::string &separator = ",") {
+std::string mkstring(const std::vector<std::pair<T, U>>& values, const std::string& separator = ",") {
   std::stringstream buffer;
 
   buffer << "[";
@@ -138,7 +138,7 @@ std::string mkstring(const std::vector<std::pair<T, U>> &values, const std::stri
 }
 
 template <class T, class V>
-std::string to_string(const std::pair<T, V> &value) {
+std::string to_string(const std::pair<T, V>& value) {
   std::stringstream buffer;
 
   buffer << "{";
@@ -149,33 +149,33 @@ std::string to_string(const std::pair<T, V> &value) {
 }
 
 template <class K, class V>
-std::vector<V> to_values(const std::unordered_map<K, V> &values) {
+std::vector<V> to_values(const std::unordered_map<K, V>& values) {
   std::vector<V> result;
   result.reserve(values.size());
-  for (const auto &value : values) result.push_back(value.second);
+  for (const auto& value : values) result.push_back(value.second);
 
   return result;
 }
 
 template <class K, class V>
-std::vector<V> to_values(const std::map<K, V> &values) {
+std::vector<V> to_values(const std::map<K, V>& values) {
   std::vector<V> result;
   result.reserve(values.size());
-  for (const auto &value : values) result.push_back(value.second);
+  for (const auto& value : values) result.push_back(value.second);
 
   return result;
 }
 
 template <class K, class V>
-std::vector<K> to_keys(const std::unordered_map<K, V> &values) {
+std::vector<K> to_keys(const std::unordered_map<K, V>& values) {
   std::vector<K> result;
   result.reserve(values.size());
-  for (const auto &value : values) result.push_back(value.first);
+  for (const auto& value : values) result.push_back(value.first);
 
   return result;
 }
 
-inline std::vector<std::string> split(std::string value, const std::string &separator) {
+inline std::vector<std::string> split(std::string value, const std::string& separator) {
   size_t pos = 0;
   std::string token;
   std::vector<std::string> tokens;
@@ -197,25 +197,25 @@ inline std::string remove_all(std::string value, char to_remove) {
   return value;
 }
 
-inline bool parse_boolstring(const std::string &value) { return value == "true"; }
+inline bool parse_boolstring(const std::string& value) { return value == "true"; }
 
 inline double double_min() { return std::numeric_limits<double>::min(); }
 
-static inline std::string &ltrim(std::string &s) {
+static inline std::string& ltrim(std::string& s) {
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isspace(c); }));
   return s;
 }
 
 // trim from end
-static inline std::string &rtrim(std::string &s) {
+static inline std::string& rtrim(std::string& s) {
   s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), s.end());
   return s;
 }
 
 // trim from both ends
-static inline std::string &trim(std::string &s) { return ltrim(rtrim(s)); }
+static inline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
-static inline std::vector<char> read_xml(const std::string &filepath) {
+static inline std::vector<char> read_xml(const std::string& filepath) {
   std::ifstream file(filepath);
   std::vector<char> data((std::istreambuf_iterator<char>(file)), {});
   data.push_back('\0');
@@ -223,15 +223,15 @@ static inline std::vector<char> read_xml(const std::string &filepath) {
   return data;
 }
 
-static inline void mz_reader_error(mz_zip_archive *zip_archive, const std::string &message) {
+static inline void mz_reader_error(mz_zip_archive* zip_archive, const std::string& message) {
   mz_zip_reader_end(zip_archive);
   throw cpmml::ParsingException("unzip - err: " + message);
 }
 
-static inline std::vector<char> read_zip(const std::string &filepath) {
+static inline std::vector<char> read_zip(const std::string& filepath) {
   mz_zip_archive zip_archive;
   size_t inflated_size;
-  void *p;
+  void* p;
 
   memset(&zip_archive, 0, sizeof(zip_archive));
   if (mz_zip_reader_init_file(&zip_archive, filepath.c_str(), 0) != MZ_STREAM_END)
@@ -240,7 +240,7 @@ static inline std::vector<char> read_zip(const std::string &filepath) {
   if (mz_zip_reader_is_file_a_directory(&zip_archive, 0)) mz_reader_error(&zip_archive, "directory in archive");
   if ((p = mz_zip_reader_extract_to_heap(&zip_archive, 0, &inflated_size, 0)) == NULL)
     mz_reader_error(&zip_archive, "decompressing");
-  std::vector<char> data((char *)p, (char *)p + inflated_size);
+  std::vector<char> data((char*)p, (char*)p + inflated_size);
   data.push_back('\0');
 
   mz_free(p);
@@ -249,12 +249,12 @@ static inline std::vector<char> read_zip(const std::string &filepath) {
   return data;
 }
 
-static inline bool file_exists(const std::string &name) {
+static inline bool file_exists(const std::string& name) {
   std::ifstream f(name.c_str());
   return f.good();
 }
 
-static inline std::vector<char> read_file(const std::string &filepath, const bool zipped) {
+static inline std::vector<char> read_file(const std::string& filepath, const bool zipped) {
   if (!file_exists(filepath)) throw cpmml::ParsingException("Input file " + filepath + " does not exist");
 
   if (zipped) return read_zip(filepath);
@@ -263,7 +263,7 @@ static inline std::vector<char> read_file(const std::string &filepath, const boo
 }
 
 template <class T>
-inline std::string format_num(const T &value) {
+inline std::string format_num(const T& value) {
   std::stringstream sstr_value;
   std::string str_value;
   std::stringstream res;
@@ -285,7 +285,7 @@ inline std::string format_num(const T &value) {
   return res_str + (parts.size() > 1 ? "." + (parts[1].size() > 3 ? parts[1].substr(0, 3) : parts[1]) : "");
 }
 
-inline std::string format_int(const int &value) {
+inline std::string format_int(const int& value) {
   std::stringstream sstr_value;
   std::string str_value;
   std::stringstream res;

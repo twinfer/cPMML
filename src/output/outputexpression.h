@@ -28,22 +28,22 @@ class OutputExpression : public Expression {
  public:
   OutputExpression() {}
 
-  OutputExpression(const size_t &output_index, const DataType &output_type, const std::shared_ptr<Indexer> &indexer)
+  OutputExpression(const size_t& output_index, const DataType& output_type, const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer) {}
 
-  inline virtual Value eval(Sample &sample) const override { return Value(); };
+  inline virtual Value eval(Sample& sample) const override { return Value(); };
 
-  inline virtual std::string eval_str(Sample &sample, const InternalScore &score) const { return ""; };
+  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const { return ""; };
 
-  inline virtual double eval_double(Sample &sample, const InternalScore &score) const { return double_min(); };
+  inline virtual double eval_double(Sample& sample, const InternalScore& score) const { return double_min(); };
 
-  OutputExpression(const OutputExpression &) = default;
+  OutputExpression(const OutputExpression&) = default;
 
-  OutputExpression(OutputExpression &&) = default;
+  OutputExpression(OutputExpression&&) = default;
 
-  OutputExpression &operator=(const OutputExpression &) = default;
+  OutputExpression& operator=(const OutputExpression&) = default;
 
-  OutputExpression &operator=(OutputExpression &&) = default;
+  OutputExpression& operator=(OutputExpression&&) = default;
 
   virtual ~OutputExpression() = default;
 };

@@ -28,9 +28,9 @@ class TreeTable {
 
   TreeTable() = default;
 
-  void add(const std::vector<K> &keys, const V &value) { root.add(keys, value); }
+  void add(const std::vector<K>& keys, const V& value) { root.add(keys, value); }
 
-  inline V get(const std::vector<K> &keys) const { return root.get(keys); }
+  inline V get(const std::vector<K>& keys) const { return root.get(keys); }
 };
 
 #endif

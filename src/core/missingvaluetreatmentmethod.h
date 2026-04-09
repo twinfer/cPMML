@@ -9,6 +9,7 @@
 
 #include <map>
 #include <string>
+
 #include "utils/utils.h"
 
 /**
@@ -29,13 +30,13 @@ class MissingValueTreatmentMethod {
 
   MissingValueTreatmentMethod() = default;
 
-  explicit MissingValueTreatmentMethod(const std::string &value) : value(from_string(to_lower(value))) {}
+  explicit MissingValueTreatmentMethod(const std::string& value) : value(from_string(to_lower(value))) {}
 
-  inline bool operator==(const MissingValueTreatmentMethod &other) const { return value == other.value; };
+  inline bool operator==(const MissingValueTreatmentMethod& other) const { return value == other.value; };
 
-  inline bool operator!=(const MissingValueTreatmentMethod &other) const { return value != other.value; };
+  inline bool operator!=(const MissingValueTreatmentMethod& other) const { return value != other.value; };
 
-  static MissingValueTreatmentMethodValue from_string(const std::string &missingvaluetreatmentmethod) {
+  static MissingValueTreatmentMethodValue from_string(const std::string& missingvaluetreatmentmethod) {
     const static std::unordered_map<std::string, MissingValueTreatmentMethodValue>
         missingvaluetreatmentmethod_converter = {{"asis", MissingValueTreatmentMethodValue::AS_IS},
                                                  {"asmean", MissingValueTreatmentMethodValue::AS_MEAN},
@@ -45,7 +46,7 @@ class MissingValueTreatmentMethod {
 
     try {
       return missingvaluetreatmentmethod_converter.at(to_lower(missingvaluetreatmentmethod));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       return MissingValueTreatmentMethodValue::AS_IS;
     }
   }

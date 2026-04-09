@@ -22,22 +22,22 @@
  */
 class NeuralNetworkEvaluator : public InternalEvaluator {
  public:
-  explicit NeuralNetworkEvaluator(const XmlNode &node)
+  explicit NeuralNetworkEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
         nn(node.get_child("NeuralNetwork"), data_dictionary, transformation_dictionary, indexer) {}
 
   NeuralNetworkModel nn;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
     return nn.validate(sample);
   }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return nn.score(sample);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return nn.predict(sample);
   }
 

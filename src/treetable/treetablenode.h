@@ -26,9 +26,9 @@ class TreeTableNode {
 
   TreeTableNode() = default;
 
-  explicit TreeTableNode(const V &value) : value(value) {}
+  explicit TreeTableNode(const V& value) : value(value) {}
 
-  void add(const std::vector<K> &keys, const V &value) {
+  void add(const std::vector<K>& keys, const V& value) {
     if (keys.size() == 0) {
       this->value = value;
       return;
@@ -37,12 +37,12 @@ class TreeTableNode {
     children[keys.front()]->add(std::vector<K>(keys.begin() + 1, keys.end()), value);
   }
 
-  inline V get(const std::vector<K> &keys) const {
+  inline V get(const std::vector<K>& keys) const {
     if (children.size() == 0) return value;
     return children.at(keys.front())->get(std::vector<K>(keys.begin() + 1, keys.end()));
   }
 
-  inline V get(const std::vector<K> &keys, const size_t &level) const {
+  inline V get(const std::vector<K>& keys, const size_t& level) const {
     if (children.size() == 0) return value;
     return children.at(keys[level])->get(keys, level + 1);
   }

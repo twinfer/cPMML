@@ -23,21 +23,23 @@
  */
 class TreeEvaluator : public InternalEvaluator {
  public:
-  explicit TreeEvaluator(const XmlNode &node)
+  explicit TreeEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
-        tree(node.get_child("TreeModel"), data_dictionary, transformation_dictionary, indexer){};
+        tree(node.get_child("TreeModel"), data_dictionary, transformation_dictionary, indexer) {};
 
   TreeModel tree;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override { return tree.validate(sample); }
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
+    return tree.validate(sample);
+  }
 
   inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string> &sample) const override {
+      const std::unordered_map<std::string, std::string>& sample) const override {
     return tree.score(sample);
   }
 
   // Simple score, due to the type of value returned is 2/300 ns faster
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
+  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return tree.predict(sample);
   }
 

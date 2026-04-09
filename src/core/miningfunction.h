@@ -42,9 +42,9 @@ class MiningFunction {
 
   MiningFunction() = default;
 
-  explicit MiningFunction(const std::string &mining_function) : value(from_string(mining_function)) {}
+  explicit MiningFunction(const std::string& mining_function) : value(from_string(mining_function)) {}
 
-  static MiningFunctionType from_string(const std::string &mining_function) {
+  static MiningFunctionType from_string(const std::string& mining_function) {
     const static std::map<std::string, MiningFunctionType> mining_function_converter = {
         //        {"associationRules", MiningFunctionType::ASSOCIATION_RULES},
         //        {"sequences", MiningFunctionType::SEQUENCES},
@@ -57,7 +57,7 @@ class MiningFunction {
 
     try {
       return mining_function_converter.at(to_lower(mining_function));
-    } catch (const std::out_of_range &exception) {
+    } catch (const std::out_of_range& exception) {
       throw cpmml::ParsingException("unsupported mining function: " + mining_function);
     }
   }

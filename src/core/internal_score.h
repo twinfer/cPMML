@@ -8,6 +8,7 @@
 #define CPMML_SCORE_H
 
 #include <string>
+
 #include "core/value.h"
 #include "utils/utils.h"
 
@@ -31,35 +32,35 @@ class InternalScore {
 
   InternalScore() = default;
 
-  explicit InternalScore(const double &score) : empty(false), score(std::to_string(score)), double_score(score) {}
+  explicit InternalScore(const double& score) : empty(false), score(std::to_string(score)), double_score(score) {}
 
-  explicit InternalScore(const std::string &score) : empty(false), score(score) {
+  explicit InternalScore(const std::string& score) : empty(false), score(score) {
     try {
       double_score = ::to_double(score);
-    } catch (const cpmml::ParsingException &exception) {
+    } catch (const cpmml::ParsingException& exception) {
       double_score = double_min();
     }
   }
 
-  InternalScore(const double &score, const std::unordered_map<std::string, double> &probabilities)
+  InternalScore(const double& score, const std::unordered_map<std::string, double>& probabilities)
       : empty(false), score(std::to_string(score)), double_score(score), probabilities(probabilities) {}
 
-  InternalScore(const std::string &score, const std::unordered_map<std::string, double> &probabilities)
+  InternalScore(const std::string& score, const std::unordered_map<std::string, double>& probabilities)
       : empty(false), score(score), probabilities(probabilities) {
     try {
       double_score = ::to_double(score);
-    } catch (const cpmml::ParsingException &exception) {
+    } catch (const cpmml::ParsingException& exception) {
       double_score = double_min();
     }
   }
 
-  InternalScore(const InternalScore &) = default;
+  InternalScore(const InternalScore&) = default;
 
-  InternalScore(InternalScore &&) = default;
+  InternalScore(InternalScore&&) = default;
 
-  InternalScore &operator=(const InternalScore &) = default;
+  InternalScore& operator=(const InternalScore&) = default;
 
-  InternalScore &operator=(InternalScore &&) = default;
+  InternalScore& operator=(InternalScore&&) = default;
 
   virtual ~InternalScore() = default;
 };

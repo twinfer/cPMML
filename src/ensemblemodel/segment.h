@@ -32,15 +32,15 @@ class Segment {
 
   Segment() = default;
 
-  Segment(const XmlNode &node, const PredicateBuilder &predicate_builder, const std::shared_ptr<InternalModel> &model)
+  Segment(const XmlNode& node, const PredicateBuilder& predicate_builder, const std::shared_ptr<InternalModel>& model)
       : id(node.get_attribute("id")),
         weight(node.get_double_attribute("weight")),
         predicate(predicate_builder.build(node.get_child_bypattern("Predicate"))),
         model(model) {}
 
-  inline std::unique_ptr<InternalScore> score(const Sample &sample) const { return model->score_raw(sample); }
+  inline std::unique_ptr<InternalScore> score(const Sample& sample) const { return model->score_raw(sample); }
 
-  inline std::string predict(const Sample &sample) const { return model->predict_raw(sample); }
+  inline std::string predict(const Sample& sample) const { return model->predict_raw(sample); }
 };
 
 #endif
