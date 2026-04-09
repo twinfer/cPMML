@@ -7,7 +7,7 @@ set(AUTHOR "Paolo Iannino")
 # PROJECT NAME/VERSION
 set(PROJECT_NAME cPMML)
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 1)
+set(PROJECT_VERSION_MINOR 2)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
@@ -19,9 +19,21 @@ include(cmake/CPM.cmake)
 CPMAddPackage("gh:zeux/pugixml@1.14")
 
 # COMPRESSION
-CPMAddPackage(NAME miniz 
-GIT_REPOSITORY https://github.com/richgel999/miniz.git 
+CPMAddPackage(NAME miniz
+GIT_REPOSITORY https://github.com/richgel999/miniz.git
 GIT_TAG 3.1.1
+)
+
+# LINEAR ALGEBRA (neural networks)
+CPMAddPackage(
+    NAME Eigen3
+    GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
+    GIT_TAG 5.0.1
+    OPTIONS
+        "EIGEN_BUILD_DOC OFF"
+        "BUILD_TESTING OFF"
+        "EIGEN_BUILD_PKGCONFIG OFF"
+        "EIGEN_BUILD_BTL OFF"
 )
 
 # BUILD OPTIONS
@@ -170,6 +182,9 @@ add_library(
         src/output/predictedValue.h
         src/output/probability.h
         src/output/transformedvalue.h
+        src/neuralnetwork/neuralactivation.h
+        src/neuralnetwork/neuralnetworkmodel.h
+        src/neuralnetwork/neuralnetworkevaluator.h
         # third_party/miniz/miniz.h
         # third_party/miniz/miniz.cc
         third_party/boost/integral.h)
@@ -186,7 +201,7 @@ set_target_properties(
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PRIVATE third_party)
-target_link_libraries(${PROJECT_NAME} PUBLIC pugixml::pugixml miniz ${ADDITIONAL_LINK_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PUBLIC pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
 
 install(
         TARGETS ${PROJECT_NAME}

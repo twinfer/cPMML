@@ -15,6 +15,7 @@
 #include "ensemblemodel/ensembleevaluator.h"
 #include "header.h"
 #include "internal_evaluator.h"
+#include "neuralnetwork/neuralnetworkevaluator.h"
 #include "regressionmodel/regressionevaluator.h"
 #include "treemodel/treeevaluator.h"
 #include "treemodel/treemodel.h"
@@ -42,6 +43,8 @@ class ModelBuilder {
       evaluator = std::make_unique<RegressionEvaluator>(xmlNode);
     else if (xmlNode.exists_child("TreeModel"))
       evaluator = std::make_unique<TreeEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("NeuralNetwork"))
+      evaluator = std::make_unique<NeuralNetworkEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 
