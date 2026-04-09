@@ -9,6 +9,7 @@
 
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "datadictionary.h"
 #include "header.h"
@@ -61,6 +62,10 @@ class InternalEvaluator {
   virtual std::string predict(const std::unordered_map<std::string, std::string> &sample) const = 0;
 
   virtual inline std::string get_target_name() const { return ""; }
+
+  virtual std::vector<double> forecast(int /*horizon*/) const {
+    throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
+  }
 
   InternalEvaluator(const InternalEvaluator &) = default;
 

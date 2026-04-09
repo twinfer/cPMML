@@ -28,4 +28,8 @@ Prediction Model::score(const std::unordered_map<std::string, std::string> &samp
 std::string Model::predict(const std::unordered_map<std::string, std::string> &sample) const {
   return evaluator->predict(sample);
 }
+
+std::vector<double> Model::forecast(int horizon) const {
+  return evaluator->forecast(horizon);
+}
 }  // namespace cpmml

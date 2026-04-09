@@ -21,6 +21,7 @@
 #include "anomalydetectionmodel/anomalydetectionevaluator.h"
 #include "gaussianprocessmodel/gaussianprocessevaluator.h"
 #include "textmodel/textmodel.h"
+#include "timeseriesmodel/timeseriesevaluator.h"
 #include "generalregressionmodel/generalregressionevaluator.h"
 #include "knnmodel/knnevaluator.h"
 #include "naivebayesmodel/naivebayesevaluator.h"
@@ -78,6 +79,8 @@ class ModelBuilder {
       evaluator = std::make_unique<GaussianProcessEvaluator>(xmlNode);
     else if (xmlNode.exists_child("TextModel"))
       evaluator = std::make_unique<TextEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("TimeSeriesModel"))
+      evaluator = std::make_unique<TimeSeriesEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 

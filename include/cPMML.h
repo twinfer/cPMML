@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace cpmml {
 /**
@@ -380,6 +381,27 @@ class Model {
    * @endcode
    */
   std::string predict(const std::unordered_map<std::string, std::string> &sample) const;
+
+  /**
+   * @brief Generates an h-step-ahead forecast for TimeSeriesModel.
+   *
+   * Returns a vector of length *horizon* where element i is the (i+1)-step
+   * ahead prediction.  Throws cpmml::ParsingException if the loaded model is
+   * not a TimeSeriesModel.
+   *
+   * @param horizon Number of steps to forecast (must be > 0).
+   * @return std::vector<double> of length *horizon*.
+   *
+   * @throws cpmml::ParsingException if the model does not support forecasting.
+   *
+   * <br><p><b>Example</b></p>
+   * @code{.cpp}
+   * cpmml::Model model("AirPassengers_ETS.zip", true);
+   * auto forecast = model.forecast(12);  // 12-step-ahead
+   * for (auto v : forecast) std::cout << v << "\n";
+   * @endcode
+   */
+  std::vector<double> forecast(int horizon) const;
 
  private:
   std::shared_ptr<InternalEvaluator> evaluator;

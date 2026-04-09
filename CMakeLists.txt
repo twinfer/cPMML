@@ -207,6 +207,8 @@ add_library(
         src/gaussianprocessmodel/gaussianprocessmodel.h
         src/gaussianprocessmodel/gaussianprocessevaluator.h
         src/textmodel/textmodel.h
+        src/timeseriesmodel/timeseriesmodel.h
+        src/timeseriesmodel/timeseriesevaluator.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY

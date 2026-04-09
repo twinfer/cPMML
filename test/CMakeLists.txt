@@ -52,6 +52,22 @@ add_model_test(IrisGP)
 add_model_test(IrisText)
 add_model_test(IrisTextIndex)
 
+# Time series tests (separate executable using forecast() API)
+add_executable(timeseries_tester.exe timeseries_tester.cc)
+target_include_directories(timeseries_tester.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(timeseries_tester.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(timeseries_tester.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(timeseries_tester.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests timeseries_tester.exe)
+
+macro(add_timeseries_test TARGET)
+    add_test(${TARGET} timeseries_tester.exe data/model/${TARGET}.zip data/dataset/${TARGET}.csv)
+endmacro()
+
+add_timeseries_test(ETS_AddTrend)
+add_timeseries_test(SSM_LinearTrend)
+add_timeseries_test(ARIMA_AR1)
+
 add_custom_command(
         TARGET unit_tests
         COMMENT "Running unit tests..."
