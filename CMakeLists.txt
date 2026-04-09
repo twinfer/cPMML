@@ -7,7 +7,7 @@ set(AUTHOR "Paolo Iannino")
 # PROJECT NAME/VERSION
 set(PROJECT_NAME cPMML)
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 3)
+set(PROJECT_VERSION_MINOR 4)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
@@ -188,6 +188,8 @@ add_library(
         src/svmmodel/svmkernel.h
         src/svmmodel/svmmodel.h
         src/svmmodel/svmevaluator.h
+        src/knnmodel/knnmodel.h
+        src/knnmodel/knnevaluator.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY

@@ -15,6 +15,7 @@
 #include "ensemblemodel/ensembleevaluator.h"
 #include "header.h"
 #include "internal_evaluator.h"
+#include "knnmodel/knnevaluator.h"
 #include "neuralnetwork/neuralnetworkevaluator.h"
 #include "regressionmodel/regressionevaluator.h"
 #include "svmmodel/svmevaluator.h"
@@ -48,6 +49,8 @@ class ModelBuilder {
       evaluator = std::make_unique<NeuralNetworkEvaluator>(xmlNode);
     else if (xmlNode.exists_child("SupportVectorMachineModel"))
       evaluator = std::make_unique<SvmEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("NearestNeighborModel"))
+      evaluator = std::make_unique<KnnEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 
