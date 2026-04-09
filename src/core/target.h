@@ -52,7 +52,7 @@ class CastInteger {
     }
   }
 
-  constexpr double operator()(const double value) { return cast_function(value); }
+  constexpr double operator()(const double value) const { return cast_function(value); }
 };
 
 class TargetValue {

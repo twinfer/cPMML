@@ -49,11 +49,11 @@ class TreeModel : public InternalModel {
         root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)){};
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample &sample) const override {
-    return make_unique<TreeScore>(scoreR(sample, root_node));
+    return std::make_unique<TreeScore>(scoreR(sample, root_node));
   };
 
   inline std::string predict_raw(const Sample &sample) const override {
-    return simple_scoreR(sample, root_node).to_string();
+    return std::string(simple_scoreR(sample, root_node));
   };
 
   inline TreeScore scoreR(const Sample &sample, const Node &current_node) const {
@@ -89,7 +89,7 @@ class TreeModel : public InternalModel {
     return TreeScore();
   }
 
-  inline string_view simple_scoreR(const Sample &sample, const Node &current_node) const {
+  inline std::string_view simple_scoreR(const Sample &sample, const Node &current_node) const {
 #ifdef DEBUG
     static int depth = 0;
     depth++;
@@ -98,9 +98,9 @@ class TreeModel : public InternalModel {
     if (current_node.leaf) depth--;
 #endif
 
-    string_view result;
+    std::string_view result;
 
-    if (current_node.leaf) return string_view(current_node.simple_score);
+    if (current_node.leaf) return std::string_view(current_node.simple_score);
 
     for (const auto &child : current_node.children)
       if (child.match(sample)) {
@@ -108,10 +108,10 @@ class TreeModel : public InternalModel {
 #ifdef DEBUG
         if (result != "") depth--;
 #endif
-        if (result != string_view()) return result;
+        if (!result.empty()) return result;
       }
 
-    if (return_last_prediction) return string_view(current_node.simple_score);
+    if (return_last_prediction) return std::string_view(current_node.simple_score);
 
     return result;
   }

@@ -7,9 +7,9 @@
 #ifndef CPMML_MODELBUILDER_H
 #define CPMML_MODELBUILDER_H
 
-#include <fstream>
-#include <sstream>
 #include <string>
+
+#include <pugixml.hpp>
 
 #include "datadictionary.h"
 #include "ensemblemodel/ensembleevaluator.h"
@@ -29,20 +29,21 @@ class ModelBuilder {
  public:
   inline static std::unique_ptr<InternalEvaluator> build(const std::string &filename, const bool zipped) {
     std::vector<char> file_data = read_file(filename, zipped);
-    rapidxml::xml_document<> document;
-    document.parse<0>(file_data.data());
-    XmlNode xmlNode(document.first_node("PMML"));
+    pugi::xml_document document;
+    pugi::xml_parse_result result = document.load_buffer(file_data.data(), file_data.size());
+    if (!result)
+      throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
+
+    XmlNode xmlNode(document.child("PMML"));
     std::unique_ptr<InternalEvaluator> evaluator;
     if (xmlNode.exists_child("MiningModel"))
-      evaluator = make_unique<EnsembleEvaluator>(xmlNode);
+      evaluator = std::make_unique<EnsembleEvaluator>(xmlNode);
     else if (xmlNode.exists_child("RegressionModel"))
-      evaluator = make_unique<RegressionEvaluator>(xmlNode);
+      evaluator = std::make_unique<RegressionEvaluator>(xmlNode);
     else if (xmlNode.exists_child("TreeModel"))
-      evaluator = make_unique<TreeEvaluator>(xmlNode);
+      evaluator = std::make_unique<TreeEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
-
-    document.clear();
 
     return evaluator;
   }

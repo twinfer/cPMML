@@ -63,14 +63,14 @@ class EnsembleModel : public InternalModel {
                                                             const PredicateBuilder &predicate_builder,
                                                             const std::shared_ptr<Indexer> &indexer) {
     if (node.exists_child("MiningModel")) {
-      return make_unique<EnsembleModel>(node.get_child("MiningModel"), data_dictionary, transformation_dictionary,
+      return std::make_unique<EnsembleModel>(node.get_child("MiningModel"), data_dictionary, transformation_dictionary,
                                         indexer);
     } else {
       if (node.exists_child("TreeModel")) {
-        return make_unique<TreeModel>(node.get_child("TreeModel"), data_dictionary, predicate_builder, indexer);
+        return std::make_unique<TreeModel>(node.get_child("TreeModel"), data_dictionary, predicate_builder, indexer);
       } else {
         if (node.exists_child("RegressionModel")) {
-          return make_unique<RegressionModel>(node.get_child("RegressionModel"), data_dictionary, indexer);
+          return std::make_unique<RegressionModel>(node.get_child("RegressionModel"), data_dictionary, indexer);
         }
       }
     }

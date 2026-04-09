@@ -118,7 +118,7 @@ class MultipleModelMethod {
       }
     }
 
-    return make_unique<InternalScore>(score, probabilities);
+    return std::make_unique<InternalScore>(score, probabilities);
   }
 
 #else
@@ -146,7 +146,7 @@ class MultipleModelMethod {
       }
     }
 
-    return make_unique<InternalScore>(score, probabilities);
+    return std::make_unique<InternalScore>(score, probabilities);
   }
 
 #endif
@@ -170,7 +170,7 @@ class MultipleModelMethod {
       }
     }
 
-    return make_unique<InternalScore>(score, probabilities);
+    return std::make_unique<InternalScore>(score, probabilities);
   }
 
   inline static std::unique_ptr<InternalScore> classification_average(const Sample &sample,
@@ -199,7 +199,7 @@ class MultipleModelMethod {
       }
     }
 
-    return make_unique<InternalScore>(score, probabilities);
+    return std::make_unique<InternalScore>(score, probabilities);
   }
 
 #ifndef MULTITHREADING
@@ -215,7 +215,7 @@ class MultipleModelMethod {
 
     score /= count;
 
-    return make_unique<InternalScore>(score);
+    return std::make_unique<InternalScore>(score);
   }
 #else
   inline static std::unique_ptr<InternalScore> regression_average(const Sample &sample,
@@ -237,7 +237,7 @@ class MultipleModelMethod {
 
     score /= count;
 
-    return make_unique<InternalScore>(score);
+    return std::make_unique<InternalScore>(score);
   }
 #endif
 
@@ -268,7 +268,7 @@ class MultipleModelMethod {
       }
     }
 
-    return make_unique<InternalScore>(score, probabilities);
+    return std::make_unique<InternalScore>(score, probabilities);
   }
 
 #ifndef MULTITHREADING
@@ -279,7 +279,7 @@ class MultipleModelMethod {
     for (const auto &segment : ensemble)
       if (segment.predicate(sample)) score += std::unique_ptr<InternalScore>(segment.score(sample))->double_score;
 
-    return make_unique<InternalScore>(score);
+    return std::make_unique<InternalScore>(score);
   }
 
 #else
@@ -296,7 +296,7 @@ class MultipleModelMethod {
 
     for (auto i = 0u; i < NUM_THREADS; i++) score += scores[i];
 
-    return make_unique<InternalScore>(score);
+    return std::make_unique<InternalScore>(score);
   }
 #endif
 

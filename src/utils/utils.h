@@ -21,7 +21,7 @@
 #include <vector>
 #include "options.h"
 
-#include "miniz/miniz.h"
+#include "miniz.h"
 
 /**
  * @defgroup Utils
@@ -202,13 +202,13 @@ inline bool parse_boolstring(const std::string &value) { return value == "true";
 inline double double_min() { return std::numeric_limits<double>::min(); }
 
 static inline std::string &ltrim(std::string &s) {
-  s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isspace(c); }));
   return s;
 }
 
 // trim from end
 static inline std::string &rtrim(std::string &s) {
-  s.erase(std::find_if(s.rbegin(), s.rend(), std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+  s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), s.end());
   return s;
 }
 
@@ -306,9 +306,5 @@ inline std::string format_int(const int &value) {
   return res_str;
 }
 
-template <typename T, typename... Args>
-inline std::unique_ptr<T> make_unique(Args &&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
 //}@
 #endif

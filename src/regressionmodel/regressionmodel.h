@@ -71,11 +71,11 @@ class RegressionModel : public InternalModel {
       case MiningFunction::MiningFunctionType::REGRESSION:
         scores.push_back(regression_normalization(regression_tables[0].score(sample)));
         regressed_value = scores[0];
-        return make_unique<RegressionScore>(std::to_string(regressed_value), regressed_value, classes, scores);
+        return std::make_unique<RegressionScore>(std::to_string(regressed_value), regressed_value, classes, scores);
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         scores = classification_normalization(get_scores(sample));
         regressed_value = *std::max_element(scores.begin(), scores.end());
-        return make_unique<RegressionScore>(get_class(scores), regressed_value, classes, scores);
+        return std::make_unique<RegressionScore>(get_class(scores), regressed_value, classes, scores);
     }
 
     throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.1)
+cmake_minimum_required(VERSION 3.14)
 
 # CREDITS
 set(COPYRIGHT "2019 AMADEUS. All rights reserved.")
@@ -11,15 +11,30 @@ set(PROJECT_VERSION_MINOR 1)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
+include(cmake/CPM.cmake)
+
+# DEPENDENCIES
+
+# XML PARSING
+CPMAddPackage("gh:zeux/pugixml@1.14")
+
+# COMPRESSION
+CPMAddPackage(NAME miniz 
+GIT_REPOSITORY https://github.com/richgel999/miniz.git 
+GIT_TAG 3.1.1
+)
+
 # BUILD OPTIONS
 if(NOT DEFINED BUILD_TYPE)
     set(BUILD_TYPE Release)
 endif()
-set(RELEASE_FLAGS "-std=c++11 -Wall -Ofast -flto")
-set(DEBUG_FLAGS "-std=c++11 -Wall -g -Og")
+set(RELEASE_FLAGS "-std=c++20 -Wall -O3 -ffast-math -flto")
+set(DEBUG_FLAGS "-std=c++20 -Wall -g -Og")
 set(VERBOSE OFF)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE ${BUILD_TYPE})
 set(CMAKE_CXX_FLAGS_RELEASE ${RELEASE_FLAGS})
 set(CMAKE_CXX_FLAGS_DEBUG ${DEBUG_FLAGS})
@@ -155,9 +170,8 @@ add_library(
         src/output/predictedValue.h
         src/output/probability.h
         src/output/transformedvalue.h
-        third_party/rapidxml-1.13/rapidxml.hpp
-        third_party/miniz/miniz.h
-        third_party/miniz/miniz.cc
+        # third_party/miniz/miniz.h
+        # third_party/miniz/miniz.cc
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY
@@ -172,7 +186,7 @@ set_target_properties(
 target_include_directories(${PROJECT_NAME} PUBLIC include)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PRIVATE third_party)
-target_link_libraries(${PROJECT_NAME} PUBLIC ${ADDITIONAL_LINK_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PUBLIC pugixml::pugixml miniz ${ADDITIONAL_LINK_LIBRARIES})
 
 install(
         TARGETS ${PROJECT_NAME}
@@ -189,4 +203,3 @@ add_subdirectory(test)
 
 # DOCUMENTATION
 add_subdirectory(docsrc)
-

@@ -30,16 +30,16 @@ class RegressionEvaluator : public InternalEvaluator {
 
   RegressionModel regression;
 
-  inline bool validate(const std::unordered_map<std::string, std::string> &sample) {
+  inline bool validate(const std::unordered_map<std::string, std::string> &sample) override {
     return regression.validate(sample);
   }
 
-  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string> &sample) const {
+  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string> &sample) const override {
     return regression.score(sample);
   }
 
   // Simple score, due to the type of value returned is 2/300 ns faster
-  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const {
+  inline std::string predict(const std::unordered_map<std::string, std::string> &sample) const override {
     return regression.predict(sample);
   }
 

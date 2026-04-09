@@ -37,7 +37,7 @@ class TransformedValue : public OutputExpression {
 
   inline Value eval(Sample &sample) const override { return expression->eval(sample); }
 
-  inline virtual std::string eval_str(Sample &sample, const InternalScore &score) const {
+  inline std::string eval_str(Sample &sample, const InternalScore &score) const override {
 #ifndef REGEX_SUPPORT
     return std::to_string(expression->eval(sample).value);
 #else
