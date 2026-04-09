@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import re
 import subprocess
@@ -200,6 +201,7 @@ def find_primary_output(pmml_path: Path) -> Optional[str]:
     Search order (most- to least-specific):
       1. OutputField with feature="predictedValue" in the TOP-LEVEL model's Output section
       2. First OutputField in the TOP-LEVEL model's Output section
+      2.5. targetFieldName model attribute (older PMML 3.x format)
       3. Predicted/target MiningField in the TOP-LEVEL model's MiningSchema;
          for regression models with multiple targets, prefer numeric dataType
       4. Any OutputField feature="predictedValue" anywhere in the PMML (sub-models)
@@ -220,6 +222,12 @@ def find_primary_output(pmml_path: Path) -> Optional[str]:
                     return of.get("name")
             if ofs:
                 return ofs[0].get("name")
+
+    # 2.5: targetFieldName model attribute (older PMML 3.x format)
+    if top_model is not None:
+        tfn = top_model.get("targetFieldName")
+        if tfn and tfn not in ("", "NA"):
+            return tfn
 
     # 3: top-level MiningSchema targets (regression models prefer numeric types)
     if top_model is not None:
@@ -319,11 +327,17 @@ def extract_model_verification(
     if mv is None:
         return None
 
-    # Build XML-column → PMML-field mapping
+    # Build XML-column → PMML-field mapping.
+    # Both the @field and @column attributes may be hex-encoded by jpmml
+    # (e.g. "petal_x0020_length" for field "petal length").  Decode the
+    # field name so that input/output row keys match the real PMML names;
+    # keep the raw (possibly encoded) column name as the lookup key since
+    # that is what the InlineTable element tags use.
     col_to_field: dict[str, str] = {}
     for vf in mv.findall(f"{ns}VerificationFields/{ns}VerificationField"):
-        field = vf.get("field", "")
-        col = vf.get("column", field)
+        raw_field = vf.get("field", "")
+        field = _decode_jpmml_col(raw_field)
+        col = vf.get("column", raw_field)  # raw InlineTable tag name
         col_to_field[col] = field
 
     output_names = get_output_field_names(pmml_path)
@@ -399,7 +413,18 @@ def generate_synthetic_inputs(pmml_path: Path, n: int = 5) -> list[dict]:
         elif dtype == "boolean":
             pool = (["true", "false"] * (n // 2 + 1))[:n]
         else:
-            pool = [""] * n
+            # Categorical field with no declared Values: look for equality
+            # predicate values in the PMML so generated rows match a predicate
+            # (avoids UndefinedResultException in scorecards/rule sets)
+            pred_vals = list(dict.fromkeys(
+                sp.get("value", "")
+                for sp in _find_all(root, "SimplePredicate", ns)
+                if sp.get("field") == name and sp.get("operator") == "equal" and sp.get("value")
+            ))
+            if pred_vals:
+                pool = (pred_vals * (n // len(pred_vals) + 1))[:n]
+            else:
+                pool = [""] * n
 
         for i, row in enumerate(rows):
             row[name] = pool[i]
@@ -438,6 +463,23 @@ def read_csv_file(path: Path) -> tuple[list[str], list[dict]]:
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
+    fieldnames = list(reader.fieldnames or [])
+    return fieldnames, rows
+
+
+def _read_jpmml_output(path: Path) -> tuple[list[str], list[dict]]:
+    """
+    Read a jpmml-evaluator output CSV, handling the case where the model
+    has no named output field and jpmml emits an empty header line.
+
+    When the first line is empty (no column names), we inject a synthetic
+    column name "__output__" so the rows can be parsed normally.
+    """
+    raw = path.read_text(encoding="utf-8")
+    if raw.startswith("\n") or raw.startswith("\r\n"):
+        raw = "__output__" + raw
+    reader = csv.DictReader(io.StringIO(raw))
+    rows = list(reader)
     fieldnames = list(reader.fieldnames or [])
     return fieldnames, rows
 
@@ -634,6 +676,62 @@ def cmd_generate_all(force: bool = False) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Residual output helpers
+# ---------------------------------------------------------------------------
+
+def _get_residual_target_field(pmml_path: Path) -> Optional[str]:
+    """
+    Return the target MiningField name if the model contains any
+    OutputField with feature="residual", else None.
+
+    Residual OutputFields require the observed target value as an active
+    input column so jpmml can compute (actual - predicted).
+    """
+    root = ET.parse(pmml_path).getroot()
+    ns = _ns(root)
+    if not any(of.get("feature") == "residual" for of in _find_all(root, "OutputField", ns)):
+        return None
+    top = _find_top_model(root, ns)
+    if top is None:
+        return None
+    ms = top.find(f"{ns}MiningSchema")
+    if ms is None:
+        return None
+    for mf in ms.findall(f"{ns}MiningField"):
+        if mf.get("usageType") in ("predicted", "target"):
+            return mf.get("name")
+    return None
+
+
+def _synth_value(pmml_path: Path, field_name: str) -> str:
+    """Return a single synthetic value string for a named DataField."""
+    root = ET.parse(pmml_path).getroot()
+    ns = _ns(root)
+    for df in _find_all(root, "DataField", ns):
+        if df.get("name") != field_name:
+            continue
+        dtype = df.get("dataType", "string")
+        values = [v.get("value", "") for v in df.findall(f"{ns}Value")]
+        interval = df.find(f"{ns}Interval")
+        if values:
+            return values[0]
+        if dtype in ("double", "float"):
+            if interval is not None:
+                lo = float(interval.get("leftMargin") or 0)
+                hi = float(interval.get("rightMargin") or lo + 1)
+                return str(round((lo + hi) / 2, 6))
+            return "0.0"
+        if dtype == "integer":
+            if interval is not None:
+                lo = int(float(interval.get("leftMargin") or 0))
+                hi = int(float(interval.get("rightMargin") or lo + 1))
+                return str((lo + hi) // 2)
+            return "0"
+        return ""
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # cross-validate subcommand
 # ---------------------------------------------------------------------------
 
@@ -699,18 +797,38 @@ def cmd_cross_validate(
                 # primary_col may be None for models with no OutputField;
                 # we will derive it from the jpmml output CSV below.
 
-                input_names = get_input_field_names(pmml_file)
+                input_names = list(get_input_field_names(pmml_file))
+
+                # Detect residual OutputFields: they require the observed target
+                # value as an active input column so jpmml can compute residuals.
+                residual_target = _get_residual_target_field(pmml_file)
+                if residual_target and residual_target not in input_names:
+                    input_names = input_names + [residual_target]
 
                 # Prefer ModelVerification data; fall back to synthetic inputs
                 mv = extract_model_verification(pmml_file)
                 if mv is not None:
                     input_rows, _ = mv
-                    # Keep only input-field keys
+                    # Keep input-field keys (including residual target if present)
                     input_set = set(input_names)
                     input_rows = [{k: v for k, v in r.items() if k in input_set}
                                   for r in input_rows]
+                    # Drop rows where any required input field is absent or empty.
+                    # ModelVerification rows may intentionally omit a field to test
+                    # missing-value strategies, but jpmml-evaluator CLI rejects
+                    # empty CSV cells for typed (continuous/integer) fields.
+                    required = input_set - ({residual_target} if residual_target else set())
+                    input_rows = [r for r in input_rows
+                                  if all(r.get(f, "") != "" for f in required)]
                 else:
                     input_rows = generate_synthetic_inputs(pmml_file)
+
+                # Ensure residual target column is present in every row
+                if residual_target is not None:
+                    synth_val = _synth_value(pmml_file, residual_target)
+                    for row in input_rows:
+                        if residual_target not in row:
+                            row[residual_target] = synth_val
 
                 if not input_rows:
                     print("SKIP  (no input data)")
@@ -742,7 +860,7 @@ def cmd_cross_validate(
                     skipped += 1
                     continue
 
-                _, jpmml_rows = read_csv_file(jpmml_out)
+                _, jpmml_rows = _read_jpmml_output(jpmml_out)
 
                 # Derive primary output column from jpmml CSV when PMML has none
                 if primary_col is None:
