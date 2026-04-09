@@ -67,6 +67,7 @@ endmacro()
 add_timeseries_test(ETS_AddTrend)
 add_timeseries_test(SSM_LinearTrend)
 add_timeseries_test(ARIMA_AR1)
+add_timeseries_test(ARIMA_Kalman)
 
 add_custom_command(
         TARGET unit_tests
