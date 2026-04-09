@@ -7,7 +7,7 @@ set(AUTHOR "Paolo Iannino")
 # PROJECT NAME/VERSION
 set(PROJECT_NAME cPMML)
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 2)
+set(PROJECT_VERSION_MINOR 3)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
@@ -185,8 +185,9 @@ add_library(
         src/neuralnetwork/neuralactivation.h
         src/neuralnetwork/neuralnetworkmodel.h
         src/neuralnetwork/neuralnetworkevaluator.h
-        # third_party/miniz/miniz.h
-        # third_party/miniz/miniz.cc
+        src/svmmodel/svmkernel.h
+        src/svmmodel/svmmodel.h
+        src/svmmodel/svmevaluator.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY
