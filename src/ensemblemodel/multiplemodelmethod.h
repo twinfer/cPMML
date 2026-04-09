@@ -42,7 +42,7 @@ class MultipleModelMethod {
     //    MAX,
     SUM,
     //    SELECT_FIRST,
-    //    SELECT_ALL,
+    SELECT_ALL,
     MODEL_CHAIN
   };
 
@@ -64,7 +64,7 @@ class MultipleModelMethod {
         //        {"max", MultipleModelMethodType::MAX},
         {"sum", MultipleModelMethodType::SUM},
         //        {"selectfirst", MultipleModelMethodType::SELECT_FIRST},
-        //        {"selectall", MultipleModelMethodType::SELECT_ALL},
+        {"selectall", MultipleModelMethodType::SELECT_ALL},
         {"modelchain", MultipleModelMethodType::MODEL_CHAIN}};
 
     try {
@@ -92,6 +92,8 @@ class MultipleModelMethod {
         return classification_weighted_average;
       case MultipleModelMethodType::SUM:
         return sum;
+      case MultipleModelMethodType::SELECT_ALL:
+        return majority_vote;
       case MultipleModelMethodType::MODEL_CHAIN:
         return model_chain;
     }

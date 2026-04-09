@@ -92,17 +92,17 @@ class InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(sample);
 
+    std::unique_ptr<InternalScore> score = score_raw(sample);
     sample.change_value(indexer->get_index(target_field.name),
-                        Value(target(predict_raw(sample)), target_field.datatype));
-
-    output.prepare(sample);
+                        Value(target(score->score), target_field.datatype));
+    _write_outputs_to_sample(sample, *score);
   };
 
   inline void augment(Sample& sample) const {
+    std::unique_ptr<InternalScore> score = score_raw(sample);
     sample.change_value(indexer->get_index(target_field.name),
-                        Value(target(predict_raw(sample)), target_field.datatype));
-
-    output.prepare(sample);
+                        Value(target(score->score), target_field.datatype));
+    _write_outputs_to_sample(sample, *score);
   };
 
   inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {
@@ -111,6 +111,26 @@ class InternalModel {
     output.add_output(sample, *score);
 
     return score;
+  };
+
+  // Write each OutputField value into the sample so downstream chain segments
+  // can read them.  Probability-type OutputFields require the InternalScore
+  // (which has score.probabilities); PredictedValue-type OutputFields read
+  // from the sample directly via eval().
+  inline void _write_outputs_to_sample(Sample& sample, const InternalScore& score) const {
+    for (const auto& of : output.dag) {
+      if (of.datatype.value == DataType::DataTypeValue::STRING) {
+        sample.change_value_if_missing(of.index, of.expression->eval(sample));
+      } else {
+        const double v = of.expression->eval_double(sample, score);
+        if (v != double_min()) {
+          sample.change_value(of.index, Value(v));
+        } else {
+          const Value sv = of.expression->eval(sample);
+          if (!sv.missing) sample.change_value(of.index, sv);
+        }
+      }
+    }
   };
 
   inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const {
