@@ -30,6 +30,8 @@ class PredicateOpType {
     LESS_OR_EQUAL,
     IS_IN,
     IS_NOT_IN,
+    IS_MISSING,
+    IS_NOT_MISSING,
     AND,
     OR,
     XOR,
@@ -54,6 +56,8 @@ class PredicateOpType {
         {"lessorequal", PredicateOpTypeValue::LESS_OR_EQUAL},
         {"isin", PredicateOpTypeValue::IS_IN},
         {"isnotin", PredicateOpTypeValue::IS_NOT_IN},
+        {"ismissing", PredicateOpTypeValue::IS_MISSING},
+        {"isnotmissing", PredicateOpTypeValue::IS_NOT_MISSING},
         {"and", PredicateOpTypeValue::AND},
         {"or", PredicateOpTypeValue::OR},
         {"xor", PredicateOpTypeValue::XOR},
@@ -86,6 +90,10 @@ class PredicateOpType {
         return "isIn";
       case PredicateOpTypeValue::IS_NOT_IN:
         return "isNotIn";
+      case PredicateOpTypeValue::IS_MISSING:
+        return "isMissing";
+      case PredicateOpTypeValue::IS_NOT_MISSING:
+        return "isNotMissing";
       case PredicateOpTypeValue::AND:
         return "AND";
       case PredicateOpTypeValue::OR:

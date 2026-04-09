@@ -107,7 +107,7 @@ class NaiveBayesModel : public InternalModel {
       if (bi.exists_child("PairCounts")) {
         DiscreteInput di;
         di.field_index = idx;
-        for (const auto& pvc : bi.get_child("PairCounts").get_childs("PairValueCounts")) {
+        for (const auto& pvc : bi.get_childs("PairCounts")) {
           const Value input_val(pvc.get_attribute("value"), data_dictionary.at(field).datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
             di.counts[input_val.value][tvc.get_attribute("value")] = to_double(tvc.get_attribute("count"));
@@ -161,14 +161,16 @@ class NaiveBayesModel : public InternalModel {
 
     // Gaussian likelihoods
     for (const auto& gi : gaussian_inputs) {
+      if (sample[gi.field_index].value.missing) continue;
       const double x = sample[gi.field_index].value.value;
       for (size_t i = 0; i < classes.size(); i++) {
         const auto it = gi.params.find(classes[i]);
         if (it == gi.params.end()) continue;
         const double mean = it->second.first;
         const double var = it->second.second > 0 ? it->second.second : threshold;
-        // log of Gaussian pdf
-        log_posts[i] += -0.5 * std::log(2.0 * M_PI * var) - (x - mean) * (x - mean) / (2.0 * var);
+        // Gaussian pdf, clipped at threshold to avoid log(0)
+        const double pdf = (1.0 / std::sqrt(2.0 * M_PI * var)) * std::exp(-(x - mean) * (x - mean) / (2.0 * var));
+        log_posts[i] += std::log(std::max(pdf, threshold));
       }
     }
 

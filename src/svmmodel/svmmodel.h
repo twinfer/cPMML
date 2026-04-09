@@ -165,12 +165,15 @@ class SupportVectorMachineModel : public InternalModel {
 
     if (vi.exists_child("REAL-SparseArray")) {
       const XmlNode sa = vi.get_child("REAL-SparseArray");
-      const std::vector<std::string> indices = split(sa.get_child("Indices").value(), " ");
-      const std::vector<std::string> entries = split(sa.get_child("REAL-Entries").value(), " ");
-      for (size_t k = 0; k < indices.size() && k < entries.size(); k++) {
-        // PMML sparse array indices are 1-based
-        const size_t idx = static_cast<size_t>(std::stoul(indices[k])) - 1;
-        if (idx < n) vec[static_cast<Eigen::Index>(idx)] = to_double(entries[k]);
+      if (sa.exists_child("Indices") && sa.exists_child("REAL-Entries")) {
+        const std::vector<std::string> raw_indices = split(sa.get_child("Indices").value(), " ");
+        const std::vector<std::string> entries = split(sa.get_child("REAL-Entries").value(), " ");
+        for (size_t k = 0; k < raw_indices.size() && k < entries.size(); k++) {
+          if (raw_indices[k].empty()) continue;
+          // PMML sparse array indices are 1-based
+          const size_t idx = static_cast<size_t>(std::stoul(raw_indices[k])) - 1;
+          if (idx < n) vec[static_cast<Eigen::Index>(idx)] = to_double(entries[k]);
+        }
       }
     } else if (vi.exists_child("REAL-Array")) {
       const std::vector<std::string> entries = split(vi.get_child("REAL-Array").value(), " ");

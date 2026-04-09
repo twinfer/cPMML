@@ -67,6 +67,10 @@ class Predicate {
         return XOR(other);
       case PredicateOpType::PredicateOpTypeValue::SURROGATE:
         return SURROGATE(other);
+      case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
+        return other[feature].value.missing;
+      case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
+        return !other[feature].value.missing;
       default:
         try {
           return operator()(other[feature].value);
@@ -107,6 +111,10 @@ class Predicate {
         if (is_hash_set) return other.is_not_in(values_hash);
         return other.is_not_in(values);
       }
+      case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
+        return other.missing;
+      case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
+        return !other.missing;
       case PredicateOpType::PredicateOpTypeValue::AND:
         return AND(other);
       case PredicateOpType::PredicateOpTypeValue::OR:

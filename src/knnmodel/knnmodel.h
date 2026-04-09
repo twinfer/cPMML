@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "core/datadictionary.h"
+#include "core/fieldusagetype.h"
 #include "core/internal_model.h"
 #include "core/miningfunction.h"
 #include "core/transformationdictionary.h"
@@ -186,13 +187,24 @@ class NearestNeighborModel : public InternalModel {
 
     // Build field → column mapping from InstanceFields
     std::unordered_map<std::string, std::string> field_to_col;
-    std::string target_col;
     for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
       const std::string fname = f.get_attribute("field");
       const std::string col = (f.get_attribute("column") == "null") ? fname : f.get_attribute("column");
       field_to_col[fname] = col;
-      if (f.get_bool_attribute("isTarget")) target_col = col;
     }
+    // Target column: prefer the first continuous target (MIXED models may have several)
+    std::string primary_target_field = mining_schema.target.name;
+    if (indexer->get_type(primary_target_field).value == DataType::DataTypeValue::STRING) {
+      for (const auto& mf : mining_schema.miningfields) {
+        if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::TARGET &&
+            indexer->get_type(mf.name).value != DataType::DataTypeValue::STRING) {
+          primary_target_field = mf.name;
+          break;
+        }
+      }
+    }
+    std::string target_col =
+        field_to_col.count(primary_target_field) ? field_to_col.at(primary_target_field) : primary_target_field;
 
     // Ordered feature columns matching knn_inputs
     std::vector<std::string> feat_cols;

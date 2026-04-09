@@ -36,9 +36,15 @@ class PredicateBuilder {
         return Predicate("true");
       case PredicateType::PredicateTypeValue::FALSE:
         return Predicate("false");
-      case PredicateType::PredicateTypeValue::SIMPLE:
-        return Predicate(indexer->get_index(node.get_attribute("field")), node.get_attribute("operator"),
+      case PredicateType::PredicateTypeValue::SIMPLE: {
+        const std::string op = node.get_attribute("operator");
+        const std::string lower_op = to_lower(op);
+        // isMissing / isNotMissing have no value attribute
+        if (lower_op == "ismissing" || lower_op == "isnotmissing")
+          return Predicate(indexer->get_index(node.get_attribute("field")), op, Value());
+        return Predicate(indexer->get_index(node.get_attribute("field")), op,
                          Value(node.get_attribute("value"), indexer->get_type(node.get_attribute("field"))));
+      }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         std::vector<std::string> values = split(node.get_child("Array").value(), " ");
         if (values.size() > SET_THRESHOLD)

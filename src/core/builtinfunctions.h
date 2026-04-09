@@ -36,6 +36,15 @@ class BuiltInFunction {  // inputs are mapped by position
     SUM,
     AVG,
     EXP,
+    LOG,
+    LOG10,
+    SQRT,
+    ABS,
+    ROUND,
+    FLOOR,
+    CEIL,
+    POW,
+    IF,
     IS_MISSING,
     IS_NOT_MISSING,
     EQUAL,
@@ -76,6 +85,15 @@ class BuiltInFunction {  // inputs are mapped by position
         {"sum", BuiltInFunctionType::SUM},
         {"avg", BuiltInFunctionType::AVG},
         {"exp", BuiltInFunctionType::EXP},
+        {"log", BuiltInFunctionType::LOG},
+        {"log10", BuiltInFunctionType::LOG10},
+        {"sqrt", BuiltInFunctionType::SQRT},
+        {"abs", BuiltInFunctionType::ABS},
+        {"round", BuiltInFunctionType::ROUND},
+        {"floor", BuiltInFunctionType::FLOOR},
+        {"ceiling", BuiltInFunctionType::CEIL},
+        {"pow", BuiltInFunctionType::POW},
+        {"if", BuiltInFunctionType::IF},
         {"ismissing", BuiltInFunctionType::IS_MISSING},
         {"isnotmissing", BuiltInFunctionType::IS_NOT_MISSING},
         {"equal", BuiltInFunctionType::EQUAL},
@@ -108,6 +126,10 @@ class BuiltInFunction {  // inputs are mapped by position
         return 2;
       case BuiltInFunctionType::DIV:
         return 2;
+      case BuiltInFunctionType::POW:
+        return 2;
+      case BuiltInFunctionType::IF:
+        return 3;
       case BuiltInFunctionType::IS_MISSING:
         return 1;
       case BuiltInFunctionType::IS_NOT_MISSING:
@@ -145,6 +167,24 @@ class BuiltInFunction {  // inputs are mapped by position
         return avg;
       case BuiltInFunctionType::EXP:
         return exp;
+      case BuiltInFunctionType::LOG:
+        return log;
+      case BuiltInFunctionType::LOG10:
+        return log10;
+      case BuiltInFunctionType::SQRT:
+        return sqrt;
+      case BuiltInFunctionType::ABS:
+        return abs;
+      case BuiltInFunctionType::ROUND:
+        return round;
+      case BuiltInFunctionType::FLOOR:
+        return floor;
+      case BuiltInFunctionType::CEIL:
+        return ceil;
+      case BuiltInFunctionType::POW:
+        return pow;
+      case BuiltInFunctionType::IF:
+        return if_then_else;
       case BuiltInFunctionType::IS_MISSING:
         return is_missing;
       case BuiltInFunctionType::IS_NOT_MISSING:
@@ -213,6 +253,34 @@ class BuiltInFunction {  // inputs are mapped by position
   }
   inline static Value exp(const std::vector<Value>& input) {
     return Value(std::exp(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value log(const std::vector<Value>& input) {
+    return Value(std::log(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value log10(const std::vector<Value>& input) {
+    return Value(std::log10(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value sqrt(const std::vector<Value>& input) {
+    return Value(std::sqrt(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value abs(const std::vector<Value>& input) {
+    return Value(std::abs(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value round(const std::vector<Value>& input) {
+    return Value(std::round(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value floor(const std::vector<Value>& input) {
+    return Value(std::floor(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value ceil(const std::vector<Value>& input) {
+    return Value(std::ceil(input[0].value), DataType::DataTypeValue::DOUBLE);
+  }
+  inline static Value pow(const std::vector<Value>& input) {
+    return Value(std::pow(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
+  }
+  // PMML if(condition, then-value, else-value)
+  inline static Value if_then_else(const std::vector<Value>& input) {
+    return (input[0].value != 0.0 && !input[0].missing) ? input[1] : input[2];
   }
   inline static Value is_in(const std::vector<Value>& input) {
     auto found = std::find(input.begin() + 1, input.end(), input[0]);

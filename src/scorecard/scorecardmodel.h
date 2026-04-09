@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,8 @@
 #include "core/predicatebuilder.h"
 #include "core/transformationdictionary.h"
 #include "core/xmlnode.h"
+#include "expression/expression.h"
+#include "expression/expressionbuilder.h"
 
 /**
  * @class ScorecardModel
@@ -27,6 +30,7 @@
  * href="http://dmg.org/pmml/v4-4/Scorecard.html">PMML Scorecard</a>.
  *
  * Scoring: initialScore + Σ partialScore of first matching Attribute per Characteristic.
+ * Supports both static partialScore and ComplexPartialScore (expression-computed).
  * Reason codes ranked by pointsBelow (baseline - partial) or pointsAbove (partial - baseline).
  */
 class ScorecardModel : public InternalModel {
@@ -34,7 +38,8 @@ class ScorecardModel : public InternalModel {
   struct Attribute {
     Predicate predicate;
     double partial_score;
-    std::string reason_code;  // may be empty → inherits from Characteristic
+    std::shared_ptr<Expression> complex_score;  // non-null → use expression instead of partial_score
+    std::string reason_code;                    // may be empty → inherits from Characteristic
   };
 
   struct Characteristic {
@@ -83,6 +88,9 @@ class ScorecardModel : public InternalModel {
  private:
   void parse_characteristics(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     PredicateBuilder pb(indexer);
+    const DataType double_type(DataType::DataTypeValue::DOUBLE);
+    const size_t dummy_index = 0;
+
     for (const auto& ch_node : node.get_child("Characteristics").get_childs("Characteristic")) {
       Characteristic ch;
       ch.name = ch_node.get_attribute("name");
@@ -92,11 +100,20 @@ class ScorecardModel : public InternalModel {
 
       for (const auto& attr_node : ch_node.get_childs("Attribute")) {
         Attribute attr;
-        attr.partial_score = to_double(attr_node.get_attribute("partialScore"));
+        attr.partial_score =
+            attr_node.exists_attribute("partialScore") ? to_double(attr_node.get_attribute("partialScore")) : 0.0;
         attr.reason_code = attr_node.exists_attribute("reasonCode") ? attr_node.get_attribute("reasonCode") : "";
-        // Predicate is first child element of Attribute
+
+        // ComplexPartialScore: expression-computed partial score
+        if (attr_node.exists_child("ComplexPartialScore")) {
+          const XmlNode cps = attr_node.get_child("ComplexPartialScore");
+          const std::vector<XmlNode> expr_children = cps.get_childs();
+          if (!expr_children.empty())
+            attr.complex_score = ExpressionBuilder::build(expr_children[0], dummy_index, double_type, indexer);
+        }
+
+        // Predicate: first child element of Attribute
         attr.predicate = pb.build(attr_node.get_child_bypattern("Predicate"));
-        // Fallback: check for True/False/Simple/Compound children directly
         if (attr.predicate.is_empty) {
           for (const auto& child : attr_node.get_childs()) {
             Predicate p = pb.build(child);
@@ -120,13 +137,18 @@ class ScorecardModel : public InternalModel {
     for (const auto& ch : characteristics) {
       for (const auto& attr : ch.attributes) {
         if (attr.predicate.is_empty || attr.predicate(sample)) {
-          total += attr.partial_score;
+          double ps;
+          if (attr.complex_score)
+            ps = attr.complex_score->eval(const_cast<Sample&>(sample)).value;
+          else
+            ps = attr.partial_score;
+
+          total += ps;
 
           if (use_reason_codes) {
             const std::string code = attr.reason_code.empty() ? ch.reason_code : attr.reason_code;
             if (!code.empty() && code != "null") {
-              const double diff =
-                  points_below ? (ch.baseline_score - attr.partial_score) : (attr.partial_score - ch.baseline_score);
+              const double diff = points_below ? (ch.baseline_score - ps) : (ps - ch.baseline_score);
               reason_codes.emplace_back(code, diff);
             }
           }

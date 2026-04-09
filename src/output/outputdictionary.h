@@ -7,6 +7,8 @@
 #ifndef CPMML_OUTPUT_H
 #define CPMML_OUTPUT_H
 
+#include <unordered_set>
+
 #include "core/derivedfield.h"
 #include "core/xmlnode.h"
 #include "outputfield.h"
@@ -49,25 +51,30 @@ class OutputDictionary {
     std::vector<OutputField> output_fields = ::to_values<std::string, OutputField>(raw_outputfields);
     std::vector<OutputField> dag;
 
-    for (const auto& output_field : output_fields) build_dagR(output_field, dag, raw_outputfields);
+    std::unordered_set<std::string> visited;
+    for (const auto& output_field : output_fields) build_dagR(output_field, dag, raw_outputfields, visited);
 
     return dag;
   }
 
   static void build_dagR(const OutputField& output_field, std::vector<OutputField>& dag,
-                         const std::unordered_map<std::string, OutputField>& raw_outputfields) {
+                         const std::unordered_map<std::string, OutputField>& raw_outputfields,
+                         std::unordered_set<std::string>& visited) {
+    if (visited.count(output_field.name)) return;
+    visited.insert(output_field.name);
+
     for (const auto& input : output_field.expression->inputs) {
       if (raw_outputfields.find(input) != raw_outputfields.cend()) {
         OutputField tmp_input = raw_outputfields.at(input);
-        if (tmp_input.derived) build_dagR(output_field, dag, raw_outputfields);
-
-        dag.push_back(tmp_input);
+        if (tmp_input.derived) build_dagR(tmp_input, dag, raw_outputfields, visited);
+        if (!visited.count(tmp_input.name)) {
+          visited.insert(tmp_input.name);
+          dag.push_back(tmp_input);
+        }
       }
     }
 
     dag.push_back(output_field);
-
-    return;
   }
 
   inline void prepare(Sample& sample) const {
