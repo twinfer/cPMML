@@ -17,6 +17,10 @@
 #include "internal_evaluator.h"
 #include "clusteringmodel/clusteringevaluator.h"
 #include "rulesetmodel/rulesetevaluator.h"
+#include "baselinemodel/baselineevaluator.h"
+#include "anomalydetectionmodel/anomalydetectionevaluator.h"
+#include "gaussianprocessmodel/gaussianprocessevaluator.h"
+#include "textmodel/textmodel.h"
 #include "generalregressionmodel/generalregressionevaluator.h"
 #include "knnmodel/knnevaluator.h"
 #include "naivebayesmodel/naivebayesevaluator.h"
@@ -66,6 +70,14 @@ class ModelBuilder {
       evaluator = std::make_unique<ClusteringEvaluator>(xmlNode);
     else if (xmlNode.exists_child("RuleSetModel"))
       evaluator = std::make_unique<RuleSetEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("BaselineModel"))
+      evaluator = std::make_unique<BaselineEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("AnomalyDetectionModel"))
+      evaluator = std::make_unique<AnomalyDetectionEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("GaussianProcessModel"))
+      evaluator = std::make_unique<GaussianProcessEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("TextModel"))
+      evaluator = std::make_unique<TextEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 

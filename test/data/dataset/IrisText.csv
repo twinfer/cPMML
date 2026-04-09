@@ -1,0 +1,6 @@
+review,prediction
+good,positive
+bad,negative
+average,neutral
+good good,positive
+bad bad,negative

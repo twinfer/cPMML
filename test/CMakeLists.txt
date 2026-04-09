@@ -46,6 +46,10 @@ add_model_test(IrisScorecard)
 add_model_test(IrisNaiveBayes)
 add_model_test(IrisClustering)
 add_model_test(IrisRuleSet)
+add_model_test(IrisBaseline)
+add_model_test(IrisAnomaly)
+add_model_test(IrisGP)
+add_model_test(IrisText)
 
 add_custom_command(
         TARGET unit_tests

@@ -200,6 +200,12 @@ add_library(
         src/clusteringmodel/clusteringevaluator.h
         src/rulesetmodel/rulesetmodel.h
         src/rulesetmodel/rulesetevaluator.h
+        src/baselinemodel/baselinemodel.h
+        src/baselinemodel/baselineevaluator.h
+        src/anomalydetectionmodel/anomalydetectionevaluator.h
+        src/gaussianprocessmodel/gaussianprocessmodel.h
+        src/gaussianprocessmodel/gaussianprocessevaluator.h
+        src/textmodel/textmodel.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY
