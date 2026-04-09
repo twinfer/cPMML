@@ -373,26 +373,47 @@ class TimeSeriesModel {
   }
 
   void parse_ets(const XmlNode &node) {
-    ets.trend    = node.exists_attribute("trend")       ? to_lower(node.get_attribute("trend"))       : "none";
-    ets.seasonal = node.exists_attribute("seasonality") ? to_lower(node.get_attribute("seasonality")) : "none";
+    // Spec: trend type lives on Trend_ExpoSmooth/@trend (NOT ExponentialSmoothing/@trend)
+    // Spec: seasonal type lives on Seasonality_ExpoSmooth/@type (NOT ExponentialSmoothing/@seasonality)
+    ets.trend    = "none";
+    ets.seasonal = "none";
 
+    // Level (required by spec)
     XmlNode lv = node.get_child("Level");
-    ets.alpha = lv.get_double_attribute("alpha");
+    ets.alpha = lv.exists_attribute("alpha") ? lv.get_double_attribute("alpha") : 0.0;
     ets.l     = lv.get_double_attribute("smoothedValue");
 
+    // Trend_ExpoSmooth (optional)
     ets.b = 0.0; ets.phi = 1.0; ets.gamma = 0.0;
-    if (ets.trend != "none" && node.exists_child("Trend")) {
-      XmlNode tr = node.get_child("Trend");
+    if (node.exists_child("Trend_ExpoSmooth")) {
+      XmlNode tr = node.get_child("Trend_ExpoSmooth");
+      ets.trend = tr.exists_attribute("trend") ? to_lower(tr.get_attribute("trend")) : "additive";
       ets.gamma = tr.exists_attribute("gamma") ? tr.get_double_attribute("gamma") : 0.0;
       ets.phi   = tr.exists_attribute("phi")   ? tr.get_double_attribute("phi")   : 1.0;
       ets.b     = tr.get_double_attribute("smoothedValue");
     }
 
-    if (ets.seasonal != "none" && node.exists_child("Seasonality")) {
-      XmlNode se = node.get_child("Seasonality");
-      ets.delta  = se.exists_attribute("delta") ? se.get_double_attribute("delta") : 0.0;
-      ets.period = static_cast<int>(se.get_long_attribute("period"));
-      if (se.exists_child("Array")) ets.s = parse_array(se.get_child("Array"));
+    // Seasonality_ExpoSmooth (optional)
+    // Seasonal components stored as Array child or as TimeValue children (index-ordered)
+    if (node.exists_child("Seasonality_ExpoSmooth")) {
+      XmlNode se = node.get_child("Seasonality_ExpoSmooth");
+      ets.seasonal = se.exists_attribute("type") ? to_lower(se.get_attribute("type")) : "additive";
+      ets.delta    = se.exists_attribute("delta") ? se.get_double_attribute("delta") : 0.0;
+      ets.period   = static_cast<int>(se.get_long_attribute("period"));
+      if (se.exists_child("Array")) {
+        ets.s = parse_array(se.get_child("Array"));
+      } else {
+        // Fallback: TimeValue children (1-indexed by convention)
+        auto tvs = se.get_childs("TimeValue");
+        if (!tvs.empty()) {
+          ets.s.resize(tvs.size(), 0.0);
+          for (const auto &tv : tvs) {
+            int idx = static_cast<int>(tv.get_long_attribute("index")) - 1;
+            if (idx >= 0 && idx < static_cast<int>(ets.s.size()))
+              ets.s[idx] = tv.get_double_attribute("value");
+          }
+        }
+      }
     }
   }
 
@@ -422,24 +443,42 @@ class TimeSeriesModel {
   }
 
   void parse_arima(const XmlNode &node, const XmlNode &ts_node) {
-    int p = node.exists_attribute("p") ? static_cast<int>(node.get_long_attribute("p")) : 0;
-    int d = node.exists_attribute("d") ? static_cast<int>(node.get_long_attribute("d")) : 0;
-    int q = node.exists_attribute("q") ? static_cast<int>(node.get_long_attribute("q")) : 0;
+    // Spec: p, d, q are attributes of NonseasonalComponent (NOT of ARIMA)
+    // Spec: constantTerm (NOT constant) on ARIMA; predictionMethod on ARIMA
+    int p = 0, d = 0, q = 0;
+    std::vector<double> phi, theta, residuals;
 
-    std::vector<double> phi, theta;
     if (node.exists_child("NonseasonalComponent")) {
       XmlNode ns = node.get_child("NonseasonalComponent");
+      p = ns.exists_attribute("p") ? static_cast<int>(ns.get_long_attribute("p")) : 0;
+      d = ns.exists_attribute("d") ? static_cast<int>(ns.get_long_attribute("d")) : 0;
+      q = ns.exists_attribute("q") ? static_cast<int>(ns.get_long_attribute("q")) : 0;
+
       if (ns.exists_child("AR") && ns.get_child("AR").exists_child("Array"))
-        phi   = parse_array(ns.get_child("AR").get_child("Array"));
-      if (ns.exists_child("MA") && ns.get_child("MA").exists_child("Array"))
-        theta = parse_array(ns.get_child("MA").get_child("Array"));
+        phi = parse_array(ns.get_child("AR").get_child("Array"));
+
+      // Spec: MA/MACoefficients/Array for coefficients; MA/Residuals/Array for last q residuals
+      if (ns.exists_child("MA")) {
+        XmlNode ma = ns.get_child("MA");
+        if (ma.exists_child("MACoefficients") &&
+            ma.get_child("MACoefficients").exists_child("Array"))
+          theta = parse_array(ma.get_child("MACoefficients").get_child("Array"));
+        if (ma.exists_child("Residuals") &&
+            ma.get_child("Residuals").exists_child("Array"))
+          residuals = parse_array(ma.get_child("Residuals").get_child("Array"));
+      }
     }
+
+    // Spec: constantTerm attribute on ARIMA (default 0)
+    double constant_val = node.exists_attribute("constantTerm")
+                              ? node.get_double_attribute("constantTerm") : 0.0;
+    bool include_const = (constant_val != 0.0);
 
     std::string method = "conditionalleastsquares";
     if (node.exists_attribute("predictionMethod"))
       method = to_lower(node.get_attribute("predictionMethod"));
 
-    // Collect training series (ascending time order)
+    // Collect training series from <TimeSeries usage="original">, ascending order
     auto pts = collect_timeseries(ts_node);
     std::sort(pts.begin(), pts.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
@@ -456,9 +495,10 @@ class TimeSeriesModel {
       // ---- Conditional LS path ----
       algorithm = Algorithm::ARIMA_CLS;
       arima.p = p; arima.d = d; arima.q = q;
-      arima.phi = phi; arima.theta = theta;
-      arima.constant = node.exists_attribute("constant") ? node.get_double_attribute("constant") : 0.0;
-      arima.include_constant = node.exists_attribute("includeConstant") ? node.get_bool_attribute("includeConstant") : false;
+      arima.phi   = phi;
+      arima.theta = theta;
+      arima.constant         = constant_val;
+      arima.include_constant = include_const;
 
       // Sort descending (most-recent first) for CLS history
       std::reverse(pts.begin(), pts.end());
@@ -472,7 +512,12 @@ class TimeSeriesModel {
         for (int i = 0; i < p && i + 1 < static_cast<int>(pts.size()); ++i)
           arima.y_diff.push_back(pts[i].second - pts[i + 1].second);
       }
-      arima.eps.assign(q, 0.0);
+
+      // Use stored residuals from MA/Residuals if present, else default 0
+      if (!residuals.empty())
+        arima.eps = residuals;
+      else
+        arima.eps.assign(q, 0.0);
     }
   }
 };
