@@ -176,44 +176,107 @@ def _find_all(root: ET.Element, local_tag: str, ns: str) -> list[ET.Element]:
     return root.findall(f".//{ns}{local_tag}")
 
 
+_TOP_MODEL_TAGS = {
+    "TreeModel", "RegressionModel", "MiningModel", "NearestNeighborModel",
+    "NaiveBayesModel", "SupportVectorMachineModel", "Scorecard", "ClusteringModel",
+    "RuleSetModel", "GeneralRegressionModel", "NeuralNetwork", "BaselineModel",
+    "AnomalyDetectionModel", "GaussianProcessModel", "TimeSeriesModel", "TextModel",
+}
+
+
+def _find_top_model(root: ET.Element, ns: str) -> Optional[ET.Element]:
+    """Return the first top-level PMML model element (direct child of PMML root)."""
+    for child in root:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag in _TOP_MODEL_TAGS:
+            return child
+    return None
+
+
 def find_primary_output(pmml_path: Path) -> Optional[str]:
     """
     Return the name of the primary output field.
 
-    Search order:
-      1. First <OutputField feature="predictedValue"> (or feature absent)
-      2. First <OutputField> regardless of feature
-      3. First <MiningField usageType="predicted"|"target">
+    Search order (most- to least-specific):
+      1. OutputField with feature="predictedValue" in the TOP-LEVEL model's Output section
+      2. First OutputField in the TOP-LEVEL model's Output section
+      3. Predicted/target MiningField in the TOP-LEVEL model's MiningSchema;
+         for regression models with multiple targets, prefer numeric dataType
+      4. Any OutputField feature="predictedValue" anywhere in the PMML (sub-models)
+      5. Any OutputField anywhere in the PMML
     """
     root = ET.parse(pmml_path).getroot()
     ns = _ns(root)
 
-    output_fields = _find_all(root, "OutputField", ns)
-    for of in output_fields:
+    top_model = _find_top_model(root, ns)
+
+    # 1 & 2: top-level Output section only
+    if top_model is not None:
+        out_node = top_model.find(f"{ns}Output")
+        if out_node is not None:
+            ofs = out_node.findall(f"{ns}OutputField")
+            for of in ofs:
+                if of.get("feature", "predictedValue") == "predictedValue":
+                    return of.get("name")
+            if ofs:
+                return ofs[0].get("name")
+
+    # 3: top-level MiningSchema targets (regression models prefer numeric types)
+    if top_model is not None:
+        function_name = top_model.get("functionName", "")
+        ms = top_model.find(f"{ns}MiningSchema")
+        if ms is not None:
+            targets = [mf for mf in ms.findall(f"{ns}MiningField")
+                       if mf.get("usageType") in ("predicted", "target")]
+            if targets:
+                if function_name == "regression" and len(targets) > 1:
+                    dt_map = {df.get("name", ""): df.get("dataType", "string")
+                              for df in _find_all(root, "DataField", ns)}
+                    for mf in targets:
+                        if dt_map.get(mf.get("name", ""), "string") in ("double", "float", "integer"):
+                            return mf.get("name")
+                return targets[0].get("name")
+
+    # 4 & 5: recursive fallback into sub-models
+    all_ofs = _find_all(root, "OutputField", ns)
+    for of in all_ofs:
         if of.get("feature", "predictedValue") == "predictedValue":
             return of.get("name")
-    if output_fields:
-        return output_fields[0].get("name")
+    if all_ofs:
+        return all_ofs[0].get("name")
 
-    for mf in _find_all(root, "MiningField", ns):
-        if mf.get("usageType") in ("predicted", "target"):
-            return mf.get("name")
     return None
 
 
 def get_input_field_names(pmml_path: Path) -> list[str]:
     """
-    Return the ordered list of input MiningField names (active + supplementary).
-    These are the columns the evaluator accepts.
+    Return the ordered, deduplicated list of input MiningField names
+    (active + supplementary).  Mining models (MiningModel) collect
+    MiningFields from every sub-model, so duplicates are common.
     """
     root = ET.parse(pmml_path).getroot()
     ns = _ns(root)
-    return [
-        mf.get("name", "")
-        for mf in _find_all(root, "MiningField", ns)
-        if mf.get("usageType", "active") in ("active", "supplementary")
-        and mf.get("name") is not None
-    ]
+    seen: dict[str, None] = {}
+    for mf in _find_all(root, "MiningField", ns):
+        if mf.get("usageType", "active") in ("active", "supplementary"):
+            name = mf.get("name")
+            if name is not None:
+                seen[name] = None
+    return list(seen.keys())
+
+
+def _derive_primary_from_output(jpmml_cols: list[str], input_fields: list[str]) -> Optional[str]:
+    """
+    When the PMML has no explicit OutputField, find the primary output column
+    by returning the first jpmml output column that is not an input field.
+    This handles regression/transformation models where jpmml emits the target
+    field name directly (e.g. TransformationDictionaryTest, DefaultValueTest).
+    """
+    input_set = set(input_fields)
+    for col in jpmml_cols:
+        if col not in input_set:
+            return col
+    return None
 
 
 def get_output_field_names(pmml_path: Path) -> set[str]:
@@ -322,11 +385,15 @@ def generate_synthetic_inputs(pmml_path: Path, n: int = 5) -> list[dict]:
             pool = (values * (n // len(values) + 1))[:n]
         elif dtype in ("double", "float") and interval is not None:
             lo = float(interval.get("leftMargin") or 0)
-            hi = float(interval.get("rightMargin") or 1)
+            hi = float(interval.get("rightMargin") or lo + 1)
             mid = round((lo + hi) / 2, 6)
             pool = [str(mid)] * n
         elif dtype in ("double", "float"):
             pool = ["0.0"] * n
+        elif dtype == "integer" and interval is not None:
+            lo = int(float(interval.get("leftMargin") or 0))
+            hi = int(float(interval.get("rightMargin") or lo + 1))
+            pool = [str((lo + hi) // 2)] * n
         elif dtype == "integer":
             pool = ["0"] * n
         elif dtype == "boolean":
@@ -629,10 +696,8 @@ def cmd_cross_validate(
                     continue
 
                 primary_col = find_primary_output(pmml_file)
-                if primary_col is None:
-                    print("SKIP  (no output field)")
-                    skipped += 1
-                    continue
+                # primary_col may be None for models with no OutputField;
+                # we will derive it from the jpmml output CSV below.
 
                 input_names = get_input_field_names(pmml_file)
 
@@ -678,6 +743,15 @@ def cmd_cross_validate(
                     continue
 
                 _, jpmml_rows = read_csv_file(jpmml_out)
+
+                # Derive primary output column from jpmml CSV when PMML has none
+                if primary_col is None:
+                    jpmml_cols = list(jpmml_rows[0].keys()) if jpmml_rows else []
+                    primary_col = _derive_primary_from_output(jpmml_cols, input_fields)
+                    if primary_col is None:
+                        print("SKIP  (no output column)")
+                        skipped += 1
+                        continue
 
                 # Build fixture for cPMML
                 fieldnames, fixture_rows = build_fixture_csv(
