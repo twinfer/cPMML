@@ -192,6 +192,12 @@ add_library(
         src/knnmodel/knnevaluator.h
         src/generalregressionmodel/generalregressionmodel.h
         src/generalregressionmodel/generalregressionevaluator.h
+        src/scorecard/scorecardmodel.h
+        src/scorecard/scorecardevaluator.h
+        src/naivebayesmodel/naivebayesmodel.h
+        src/naivebayesmodel/naivebayesevaluator.h
+        src/clusteringmodel/clusteringmodel.h
+        src/clusteringmodel/clusteringevaluator.h
         third_party/boost/integral.h)
 
 # INSTALL LIBRARY

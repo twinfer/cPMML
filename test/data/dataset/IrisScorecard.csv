@@ -1,0 +1,11 @@
+dept,age,prediction
+engineering,35,28.0
+engineering,25,23.0
+engineering,15,18.0
+sales,35,23.0
+sales,22,18.0
+sales,10,13.0
+other,40,20.0
+other,25,15.0
+other,18,10.0
+engineering,30,28.0

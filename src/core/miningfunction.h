@@ -32,7 +32,7 @@ class MiningFunction {
     //    SEQUENCES,
     CLASSIFICATION,
     REGRESSION,
-    //    CLUSTERING,
+    CLUSTERING,
     //    TIMESERIES,
     //    MIXED,
     //    UNDEFINED
@@ -50,7 +50,7 @@ class MiningFunction {
         //        {"sequences", MiningFunctionType::SEQUENCES},
         {"classification", MiningFunctionType::CLASSIFICATION},
         {"regression", MiningFunctionType::REGRESSION},
-        //        {"clustering", MiningFunctionType::CLUSTERING},
+        {"clustering", MiningFunctionType::CLUSTERING},
         //        {"timeSeries", MiningFunctionType::TIMESERIES},
         //        {"mixed", MiningFunctionType::MIXED}
     };
@@ -72,8 +72,8 @@ class MiningFunction {
         return "CLASSIFICATION";
       case MiningFunctionType::REGRESSION:
         return "REGRESSION";
-        //      case MiningFunctionType::CLUSTERING:
-        //        return "CLUSTERING";
+      case MiningFunctionType::CLUSTERING:
+        return "CLUSTERING";
         //      case MiningFunctionType::TIMESERIES:
         //        return "TIMESERIES";
         //      case MiningFunctionType::MIXED:

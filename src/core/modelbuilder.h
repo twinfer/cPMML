@@ -15,10 +15,13 @@
 #include "ensemblemodel/ensembleevaluator.h"
 #include "header.h"
 #include "internal_evaluator.h"
+#include "clusteringmodel/clusteringevaluator.h"
 #include "generalregressionmodel/generalregressionevaluator.h"
 #include "knnmodel/knnevaluator.h"
+#include "naivebayesmodel/naivebayesevaluator.h"
 #include "neuralnetwork/neuralnetworkevaluator.h"
 #include "regressionmodel/regressionevaluator.h"
+#include "scorecard/scorecardevaluator.h"
 #include "svmmodel/svmevaluator.h"
 #include "treemodel/treeevaluator.h"
 #include "treemodel/treemodel.h"
@@ -54,6 +57,12 @@ class ModelBuilder {
       evaluator = std::make_unique<KnnEvaluator>(xmlNode);
     else if (xmlNode.exists_child("GeneralRegressionModel"))
       evaluator = std::make_unique<GeneralRegressionEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("Scorecard"))
+      evaluator = std::make_unique<ScorecardEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("NaiveBayesModel"))
+      evaluator = std::make_unique<NaiveBayesEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("ClusteringModel"))
+      evaluator = std::make_unique<ClusteringEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 
