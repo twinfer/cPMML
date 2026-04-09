@@ -36,6 +36,13 @@ add_model_test(HousingGBTRegressor_PCA)
 add_model_test(HousingRFRegressor_PCA)
 add_model_test(HousingLinearRegressor_PCA)
 
+# New model types
+add_model_test(GRM_Linear)
+add_model_test(GRM_MultinomLogistic)
+add_model_test(IrisNN)
+add_model_test(IrisSVM)
+add_model_test(IrisKNN)
+
 add_custom_command(
         TARGET unit_tests
         COMMENT "Running unit tests..."
