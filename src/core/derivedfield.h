@@ -41,7 +41,14 @@ class DerivedField {
         index(indexer->get_or_set(name, datatype).first),
         expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)) {}
 
-  inline void prepare(Sample& sample) const { sample.change_value(index, expression->eval(sample)); }
+  inline void prepare(Sample& sample) const {
+    Value v = expression->eval(sample);
+    // Quantize to float32 when DerivedField declares dataType="float", to avoid precision issues in case of float32
+    // quantization in the original model
+    if (datatype.value == DataType::DataTypeValue::FLOAT && !v.missing)
+      v.value = static_cast<double>(static_cast<float>(v.value));
+    sample.change_value(index, v);
+  }
 
   inline static std::unordered_map<std::string, DerivedField> to_derivedfields(
       const std::vector<XmlNode>& nodes, const std::shared_ptr<Indexer>& indexer) {

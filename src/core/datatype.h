@@ -49,9 +49,10 @@ class DataType {
   static DataTypeValue from_string(const std::string& data_type) {
     const static std::unordered_map<std::string, DataTypeValue> datatype_converter = {
         {"string", DataTypeValue::STRING},
-        {"integer", DataTypeValue::DOUBLE},  // every numeric type is
-                                             // treated as a double
-        {"float", DataTypeValue::DOUBLE},
+        {"integer", DataTypeValue::DOUBLE},  // every numeric type is treated as
+                                             // a double, except float which
+                                             // preserves float32 quantization
+        {"float", DataTypeValue::FLOAT},
         {"double", DataTypeValue::DOUBLE},
         {"boolean", DataTypeValue::BOOLEAN},
     };

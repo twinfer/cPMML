@@ -189,12 +189,11 @@ class MultipleModelMethod {
     for (const auto& probability : probabilities)
       probabilities[probability.first] = probability.second / ensemble.size();
 
+    std::vector<std::pair<std::string, double>> sorted_probs(probabilities.begin(), probabilities.end());
+    std::sort(sorted_probs.begin(), sorted_probs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     double max_prob = 0;
     std::string score;
-    double winning_threshold = 1.0;  // / ensemble[0].model->target_field.n_values;
-    for (const auto& probability : probabilities) {
-      if (max_prob >= winning_threshold) break;
-
+    for (const auto& probability : sorted_probs) {
       if (probability.second > max_prob && probability.first != "") {
         max_prob = probability.second;
         score = probability.first;

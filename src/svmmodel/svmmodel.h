@@ -99,6 +99,26 @@ class SupportVectorMachineModel : public InternalModel {
       for (const auto& m : machines) classes.push_back(m.target_category);
     else
       classes.push_back(mining_schema.target.name);
+
+    // Infer alternate_category for binary OVA when not specified in PMML
+    if (!is_ovo && machines.size() == 1 && machines[0].alternate_category == "null") {
+      auto it = data_dictionary.datafields.find(mining_schema.target.name);
+      if (it != data_dictionary.datafields.end()) {
+        const Predicate& c = it->second.constraints;
+        for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
+          if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
+            for (const auto& v : pred.values) {
+              std::string lbl = Value::double_to_string(v.value);
+              if (!lbl.empty() && lbl != machines[0].target_category) {
+                machines[0].alternate_category = lbl;
+                break;
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
   }
 
   // --- Scoring ---
@@ -226,6 +246,8 @@ class SupportVectorMachineModel : public InternalModel {
   // --- Classification methods ---
 
   std::string predict_ova(const std::vector<double>& scores) const {
+    if (machines.size() == 1)
+      return scores[0] > machines[0].threshold ? machines[0].target_category : machines[0].alternate_category;
     size_t best = 0;
     for (size_t i = 1; i < scores.size(); i++)
       if (scores[i] > scores[best]) best = i;
@@ -233,6 +255,10 @@ class SupportVectorMachineModel : public InternalModel {
   }
 
   std::string predict_ova_str(const Eigen::VectorXd& x) const {
+    if (machines.size() == 1) {
+      const double score = machines[0].decision(x, kernel);
+      return score > machines[0].threshold ? machines[0].target_category : machines[0].alternate_category;
+    }
     double best_score = -std::numeric_limits<double>::max();
     std::string best_class;
     for (const auto& m : machines) {
