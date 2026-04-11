@@ -31,6 +31,7 @@ class OutputExpressionType {
     PREDICTED_DISPLAY_VALUE,
     TRANSFORMED_VALUE,
     PROBABILITY,
+    ENTITY_ID,
     PASS_VALUE
   };
 
@@ -54,7 +55,8 @@ class OutputExpressionType {
         {"predictedvalue", OutputExpressionTypeValue::PREDICTED_VALUE},
         {"predicteddisplayvalue", OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE},
         {"transformedvalue", OutputExpressionTypeValue::TRANSFORMED_VALUE},
-        {"probability", OutputExpressionTypeValue::PROBABILITY}};
+        {"probability", OutputExpressionTypeValue::PROBABILITY},
+        {"entityid", OutputExpressionTypeValue::ENTITY_ID}};
 
     try {
       return expressiontype_converter.at(to_lower(expressiontype));

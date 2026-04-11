@@ -23,12 +23,14 @@ class TreeScore : public InternalScore {
 
   TreeScore() = default;
 
-  TreeScore(const std::string& simple_score, const DataType& target_type,
+  TreeScore(const std::string& simple_score, const std::string& node_id, const DataType& target_type,
             const std::vector<XmlNode>& score_distribution_nodes)
       : InternalScore(simple_score, get_probabilities(ScoreDistribution::to_score_distributions(
                                         score_distribution_nodes, target_type))),
         is_score(true),
-        target_type(target_type) {}
+        target_type(target_type) {
+    entity_id = node_id;
+  }
 
   static std::unordered_map<std::string, double> get_probabilities(
       const std::vector<ScoreDistribution>& score_distributions) {

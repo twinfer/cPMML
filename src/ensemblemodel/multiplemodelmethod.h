@@ -41,7 +41,7 @@ class MultipleModelMethod {
     //    MEDIAN,
     //    MAX,
     SUM,
-    //    SELECT_FIRST,
+    SELECT_FIRST,
     SELECT_ALL,
     MODEL_CHAIN
   };
@@ -63,7 +63,7 @@ class MultipleModelMethod {
         //        {"median", MultipleModelMethodType::MEDIAN},
         //        {"max", MultipleModelMethodType::MAX},
         {"sum", MultipleModelMethodType::SUM},
-        //        {"selectfirst", MultipleModelMethodType::SELECT_FIRST},
+        {"selectfirst", MultipleModelMethodType::SELECT_FIRST},
         {"selectall", MultipleModelMethodType::SELECT_ALL},
         {"modelchain", MultipleModelMethodType::MODEL_CHAIN}};
 
@@ -94,6 +94,8 @@ class MultipleModelMethod {
         return classification_weighted_average;
       case MultipleModelMethodType::SUM:
         return sum;
+      case MultipleModelMethodType::SELECT_FIRST:
+        return select_first;
       case MultipleModelMethodType::SELECT_ALL:
         return majority_vote;
       case MultipleModelMethodType::MODEL_CHAIN:
@@ -302,6 +304,16 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(score);
   }
 #endif
+
+  inline static std::unique_ptr<InternalScore> select_first(const Sample& sample, const std::vector<Segment>& ensemble) {
+    for (const auto& segment : ensemble) {
+      if (segment.predicate(sample)) {
+        auto score = segment.score(sample);
+        if (!score->empty) return score;
+      }
+    }
+    return std::make_unique<InternalScore>();
+  }
 
   inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble) {
     Sample tmp_sample = sample;

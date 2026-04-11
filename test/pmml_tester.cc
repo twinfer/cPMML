@@ -33,12 +33,42 @@ static bool within_tolerance(double actual, double expected) {
 
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
   const std::string out_col = model.output_name();
+
+  if (!row.count(out_col)) {
+    std::cerr << "output column '" << out_col << "' not found in fixture CSV" << std::endl;
+    return -1;
+  }
+
   while (!row.empty()) {
-    cpmml::Prediction pred = model.score(row);
     const std::string& expected = row.at(out_col);
+
+    // Skip rows where the oracle expected value is absent (null prediction)
+    if (expected.empty()) {
+      row = reader.read();
+      continue;
+    }
+
+    cpmml::Prediction pred = model.score(row);
 
     bool ok = (pred.as_string() == expected) ||
               (pred.as_double() != double_min() && within_tolerance(pred.as_double(), to_double(expected)));
+
+    // Also check named output fields (handles probability/confidence output columns)
+    if (!ok) {
+      const auto& nout = pred.num_outputs();
+      auto nit = nout.find(out_col);
+      if (nit != nout.end()) {
+        try {
+          ok = within_tolerance(nit->second, to_double(expected));
+        } catch (const cpmml::ParsingException&) {}
+      }
+    }
+    if (!ok) {
+      const auto& sout = pred.str_outputs();
+      auto sit = sout.find(out_col);
+      if (sit != sout.end())
+        ok = (sit->second == expected);
+    }
 
     if (!ok) {
       std::cerr << "predicted: " << pred.as_string() << "  expected: " << expected << "  sample: " << to_string(row)

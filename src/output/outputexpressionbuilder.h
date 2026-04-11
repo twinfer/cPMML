@@ -11,6 +11,7 @@
 
 #include <memory>
 
+#include "entityid.h"
 #include "expression/expression.h"
 #include "expression/fieldref.h"
 #include "outputexpressiontype.h"
@@ -38,6 +39,8 @@ class OutputExpressionBuilder {
         return std::make_shared<TransformedValue>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PROBABILITY:
         return std::make_shared<Probability>(node, indexer, output_index, output_type);
+      case OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID:
+        return std::make_shared<EntityId>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PASS_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       default:

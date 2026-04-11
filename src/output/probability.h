@@ -30,11 +30,15 @@ class Probability : public OutputExpression {
 
   Probability(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
               const DataType& output_type)
-      : OutputExpression(output_index, output_type, indexer), target_value(node.get_attribute("value")) {}
+      : OutputExpression(output_index, output_type, indexer),
+        target_value(node.exists_attribute("value") ? node.get_attribute("value") : "") {}
 
   inline virtual double eval_double(Sample& sample, const InternalScore& score) const override {
-    if (score.probabilities.find(target_value) != score.probabilities.cend())
-      return score.probabilities.at(target_value);
+    // When no value attribute is specified, return the probability of the
+    // predicted (winning) class.
+    const std::string& key = target_value.empty() ? score.score : target_value;
+    auto it = score.probabilities.find(key);
+    if (it != score.probabilities.cend()) return it->second;
 
     return double_min();
   };

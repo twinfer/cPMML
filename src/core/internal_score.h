@@ -29,6 +29,7 @@ class InternalScore {
   std::unordered_map<std::string, double> probabilities;
   std::unordered_map<std::string, double> num_outputs;
   std::unordered_map<std::string, std::string> str_outputs;
+  std::string entity_id;
 
   InternalScore() = default;
 

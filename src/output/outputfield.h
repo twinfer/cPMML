@@ -43,10 +43,18 @@ class OutputField {
   //      target_field(node.get_attribute("targetField")),
   {
     if (!node.exists_attribute("dataType")) {
-      if (indexer->contains(model_target))
+      // Probability features are always numeric; entityId is always string —
+      // both regardless of the target field's datatype.
+      const auto feat = OutputExpressionType(node.get_attribute("feature")).value;
+      if (feat == OutputExpressionType::OutputExpressionTypeValue::PROBABILITY) {
+        datatype = DataType::DataTypeValue::DOUBLE;
+      } else if (feat == OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID) {
+        datatype = DataType::DataTypeValue::STRING;
+      } else if (indexer->contains(model_target)) {
         datatype = indexer->get_type(model_target);
-      else
+      } else {
         throw cpmml::ParsingException("Impossible to determine datatype for output: " + name);
+      }
     } else
       datatype = node.get_attribute("dataType");
 

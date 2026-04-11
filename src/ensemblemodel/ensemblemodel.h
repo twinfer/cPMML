@@ -58,6 +58,19 @@ class EnsembleModel : public InternalModel {
     return score->score;
   }
 
+  // For modelChain, when the outer model has no Output element, delegate to
+  // the last segment's output_name() so that the primary output of the chain
+  // is surfaced correctly (predictedValue first, then first OutputField).
+  std::string output_name() const {
+    if (multiplemodelmethod.value == MultipleModelMethod::MultipleModelMethodType::MODEL_CHAIN
+        && !ensemble.empty() && output.empty) {
+      const auto& last_model = ensemble.back().model;
+      if (!last_model->output.empty)
+        return last_model->output_name();
+    }
+    return InternalModel::output_name();
+  }
+
   static std::unique_ptr<InternalModel> build_segment_model(const XmlNode& node, const DataDictionary& data_dictionary,
                                                             const TransformationDictionary& transformation_dictionary,
                                                             const PredicateBuilder& predicate_builder,

@@ -30,7 +30,7 @@
  */
 class Node {
  public:
-  //    std::string id;
+  std::string id;
   std::string simple_score;
   double record_count = double_min();
   //    std::string default_child;
@@ -44,7 +44,7 @@ class Node {
 
   Node(const XmlNode& node, bool root, const PredicateBuilder& predicate_builder,
        const DataType& target_datatype)
-      :  //        id(node.get_attribute("id")),
+      : id(node.exists_attribute("id") ? node.get_attribute("id") : ""),
         simple_score(node.exists_attribute("score") ? node.get_attribute("score") : ""),
         record_count(node.get_double_attribute("recordCount")),
         //        default_child(node.get_attribute("defaultChild")),
@@ -52,7 +52,7 @@ class Node {
         predicate(to_function(predicate_builder.build(node.get_child_bypattern("Predicate")))),
         root(root),
         leaf(children.size() == 0),
-        score(simple_score, target_datatype, node.get_childs("ScoreDistribution")) {};
+        score(simple_score, id, target_datatype, node.get_childs("ScoreDistribution")) {};
 
   constexpr bool match(const Sample& sample) const { return predicate(sample); }
 
