@@ -11,6 +11,7 @@
 #include <string>
 
 #include "anomalydetectionmodel/anomalydetectionevaluator.h"
+#include "associationmodel/associationevaluator.h"
 #include "baselinemodel/baselineevaluator.h"
 #include "clusteringmodel/clusteringevaluator.h"
 #include "datadictionary.h"
@@ -79,6 +80,8 @@ class ModelBuilder {
       evaluator = std::make_unique<TextEvaluator>(xmlNode);
     else if (xmlNode.exists_child("TimeSeriesModel"))
       evaluator = std::make_unique<TimeSeriesEvaluator>(xmlNode);
+    else if (xmlNode.exists_child("AssociationModel"))
+      evaluator = std::make_unique<AssociationEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
 

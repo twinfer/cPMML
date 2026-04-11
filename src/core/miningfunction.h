@@ -28,7 +28,7 @@
 class MiningFunction {
  public:
   enum class MiningFunctionType {
-    //    ASSOCIATION_RULES,
+    ASSOCIATION_RULES,
     //    SEQUENCES,
     CLASSIFICATION,
     REGRESSION,
@@ -46,7 +46,7 @@ class MiningFunction {
 
   static MiningFunctionType from_string(const std::string& mining_function) {
     const static std::map<std::string, MiningFunctionType> mining_function_converter = {
-        //        {"associationRules", MiningFunctionType::ASSOCIATION_RULES},
+        {"associationrules", MiningFunctionType::ASSOCIATION_RULES},
         //        {"sequences", MiningFunctionType::SEQUENCES},
         {"classification", MiningFunctionType::CLASSIFICATION},
         {"regression", MiningFunctionType::REGRESSION},
@@ -63,8 +63,8 @@ class MiningFunction {
 
   std::string to_string() const {
     switch (value) {
-        //      case MiningFunctionType::ASSOCIATION_RULES:
-        //        return "ASSOCIATION_RULES";
+      case MiningFunctionType::ASSOCIATION_RULES:
+        return "ASSOCIATION_RULES";
         //      case MiningFunctionType::SEQUENCES:
         //        return "SEQUENCES";
       case MiningFunctionType::CLASSIFICATION:

@@ -14,6 +14,7 @@ It exposes a minimalist and user-friendly API targeting high performance, with a
 
 | PMML Element | Description |
 |---|---|
+|`AssociationModel`| Supports all three rule-selection algorithms (recommendation, exclusiveRecommendation, ruleAssociation)|
 | `TreeModel` | Decision trees |
 | `MiningModel` | Ensembles (random forests, gradient boosting, stacking) |
 | `RegressionModel` | Linear and logistic regression |
@@ -104,7 +105,7 @@ git clone https://github.com/AmadeusITGroup/cPMML.git && cd cPMML && ./install.s
 - Git
 - CMake >= 3.5.1
 - Compiler with C++20 support (GCC 10+, Clang 12+, MSVC 2019+)
-- Eigen3 (header-only, included via `third_party/`)
+- Eigen3 (header-only, included via `CPM`)
 
 #### Windows
 ```

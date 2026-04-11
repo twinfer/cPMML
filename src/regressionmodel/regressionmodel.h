@@ -76,9 +76,9 @@ class RegressionModel : public InternalModel {
         scores = classification_normalization(get_scores(sample));
         regressed_value = *std::max_element(scores.begin(), scores.end());
         return std::make_unique<RegressionScore>(get_class(scores), regressed_value, classes, scores);
+      default:
+        throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
     }
-
-    throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
@@ -87,9 +87,9 @@ class RegressionModel : public InternalModel {
         return std::to_string(regression_normalization(regression_tables[0].score(sample)));
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         return get_class(classification_normalization(get_scores(sample)));
+      default:
+        throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
     }
-
-    throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
   }
 
   inline std::vector<double> get_scores(const Sample& sample) const {

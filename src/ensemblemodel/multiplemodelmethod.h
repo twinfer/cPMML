@@ -87,6 +87,8 @@ class MultipleModelMethod {
             return classification_average;
           case MiningFunction::MiningFunctionType::REGRESSION:
             return regression_average;
+          default:
+            break;
         }
       case MultipleModelMethodType::WEIGHTED_AVERAGE:
         return classification_weighted_average;

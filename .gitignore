@@ -2,4 +2,7 @@
 cmake-build-debug*
 build*
 *.out
+*.jar
+tools/fixture-generator/target
+test/jpmml
 __pycache__/

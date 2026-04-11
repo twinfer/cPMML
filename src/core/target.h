@@ -171,6 +171,9 @@ class Target {
           score.score = std::to_string(score.double_score);
         }
         break;
+
+      default:
+        break;
     }
   }
 
@@ -201,6 +204,9 @@ class Target {
           // score string representation must be updated accordingly
           return std::to_string(predicted_double);
         }
+        break;
+
+      default:
         break;
     }
 
