@@ -37,6 +37,7 @@ class ScorecardEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return sc.target_field.name; }
+  inline std::string output_name() const override { return sc.output_name(); }
 };
 
 #endif

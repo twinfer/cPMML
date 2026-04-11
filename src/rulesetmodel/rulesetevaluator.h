@@ -38,6 +38,7 @@ class RuleSetEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return ruleset.target_field.name; }
+  inline std::string output_name() const override { return ruleset.output_name(); }
 };
 
 #endif

@@ -5,9 +5,9 @@
  * Usage: pmml_tester.exe <model.zip> <fixture.csv>
  *
  * CSV mode is auto-detected from column headers:
- *   "prediction" column present  →  scoring mode: model.score() per row
- *   "forecast" column only       →  forecast mode: model.forecast(n)
- *   "forecast" + other columns   →  forecast mode: model.forecast(n, regressors)
+ *   "forecast" column present    →  forecast mode: model.forecast(n[, regressors])
+ *   otherwise                    →  scoring mode: model.score() per row, primary
+ *                                   output column matched via model.output_name()
  *******************************************************************************/
 
 #include <cmath>
@@ -32,9 +32,10 @@ static bool within_tolerance(double actual, double expected) {
 // ---- scoring mode -----------------------------------------------------------
 
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
+  const std::string out_col = model.output_name();
   while (!row.empty()) {
     cpmml::Prediction pred = model.score(row);
-    const std::string& expected = row.at("prediction");
+    const std::string& expected = row.at(out_col);
 
     bool ok = (pred.as_string() == expected) ||
               (pred.as_double() != double_min() && within_tolerance(pred.as_double(), to_double(expected)));

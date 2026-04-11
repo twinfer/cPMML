@@ -1,4 +1,4 @@
-age,prediction
+age,zscore
 35.0,0.0
 45.0,1.0
 25.0,-1.0

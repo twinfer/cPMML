@@ -1,0 +1,13 @@
+Age,Employment,Education,Marital,Occupation,Income,Gender,Deductions,Hours,TARGET_Adjusted
+45,Private,Bachelor,Married,Executive,100000,Male,5000,50,1
+40,PSFederal,Professional,Married,Professional,80000,Female,2000,45,1
+50,SelfEmp,Doctorate,Married,Protective,90000,Male,3000,55,1
+38,Private,Master,Married,Clerical,70000,Male,4000,48,1
+30,Private,College,Married,Sales,40000,Male,8000,40,1
+25,Unemployed,HSgrad,Absent,Service,10000,Female,0,20,0
+65,Volunteer,Preschool,Divorced,Home,0,Female,0,10,0
+22,Private,Yr9,Absent,Farming,15000,Male,0,30,0
+35,PSLocal,Yr12,Divorced,Transport,30000,Female,0,38,0
+28,Private,College,Married,Repair,20000,Female,0,35,0
+33,PSState,Associate,Widowed,Support,45000,Male,500,40,0
+55,Consultant,Vocational,Absent,Machinist,35000,Male,0,45,0

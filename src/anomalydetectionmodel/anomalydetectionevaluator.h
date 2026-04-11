@@ -79,6 +79,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return inner->target_field.name; }
+  inline std::string output_name() const override { return inner->output_name(); }
 
  private:
   double iforest_score(double avg_path) const {

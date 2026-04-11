@@ -42,6 +42,7 @@ class NeuralNetworkEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return nn.target_field.name; }
+  inline std::string output_name() const override { return nn.output_name(); }
 };
 
 #endif

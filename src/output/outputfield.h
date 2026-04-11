@@ -28,6 +28,7 @@ class OutputField {
   //  std::string target_field; // needed in case of multiple outputs, not
   //  supported by choice
   bool derived;
+  OutputExpressionType expression_type;
   DataType datatype;
   size_t index;
   std::shared_ptr<OutputExpression> expression;
@@ -37,8 +38,8 @@ class OutputField {
   OutputField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
       : name(node.get_attribute("name")),
         optype(node.get_attribute("optype")),
-        derived(OutputExpressionType(node.get_attribute("feature")).value ==
-                OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE)
+        expression_type(node.get_attribute("feature")),
+        derived(expression_type.value == OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE)
   //      target_field(node.get_attribute("targetField")),
   {
     if (!node.exists_attribute("dataType")) {
@@ -65,15 +66,13 @@ class OutputField {
     }
   }
 
-  inline static std::unordered_map<std::string, OutputField> to_outputfields(const std::vector<XmlNode>& nodes,
-                                                                             std::shared_ptr<Indexer> indexer,
-                                                                             const std::string& model_target) {
-    std::unordered_map<std::string, OutputField> result;
-    for (const auto& node : nodes) {
-      OutputField derived_field(node, indexer, model_target);
-      result.insert(std::make_pair(derived_field.name, derived_field));
-    }
-
+  inline static std::vector<OutputField> to_outputfields(const std::vector<XmlNode>& nodes,
+                                                          std::shared_ptr<Indexer> indexer,
+                                                          const std::string& model_target) {
+    std::vector<OutputField> result;
+    result.reserve(nodes.size());
+    for (const auto& node : nodes)
+      result.emplace_back(node, indexer, model_target);
     return result;
   }
 };

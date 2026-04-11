@@ -1,4 +1,4 @@
-x1,x2,prediction
+x1,x2,label
 2.0,0.0,yes
 0.0,2.0,no
 1.0,0.0,yes

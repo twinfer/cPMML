@@ -44,4 +44,6 @@ std::vector<std::pair<double, double>> Model::forecast_with_variance(
     int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const {
   return evaluator->forecast_with_variance(horizon, regressors);
 }
+
+std::string Model::output_name() const { return evaluator->output_name(); }
 }  // namespace cpmml

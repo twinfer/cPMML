@@ -47,6 +47,9 @@ class OutputExpressionType {
   inline bool operator!=(const OutputExpressionType& other) const { return value != other.value; };
 
   static OutputExpressionTypeValue from_string(const std::string& expressiontype) {
+    // Per PMML spec, feature attribute defaults to "predictedValue" when absent.
+    if (expressiontype.empty()) return OutputExpressionTypeValue::PREDICTED_VALUE;
+
     const static std::unordered_map<std::string, OutputExpressionTypeValue> expressiontype_converter = {
         {"predictedvalue", OutputExpressionTypeValue::PREDICTED_VALUE},
         {"predicteddisplayvalue", OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE},

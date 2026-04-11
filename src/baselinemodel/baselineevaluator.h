@@ -38,6 +38,7 @@ class BaselineEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return baseline.target_field.name; }
+  inline std::string output_name() const override { return baseline.output_name(); }
 };
 
 #endif

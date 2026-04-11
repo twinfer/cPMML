@@ -1,4 +1,4 @@
-color,size,prediction
+color,size,label
 red,4.0,yes
 red,9.0,no
 blue,5.0,yes

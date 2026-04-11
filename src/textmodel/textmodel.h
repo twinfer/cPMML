@@ -85,6 +85,7 @@ class TextEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return target_field_name; }
+  inline std::string output_name() const override { return target_field_name; }
 
  private:
   // -----------------------------------------------------------------------

@@ -1,0 +1,10 @@
+bread,butter,eggs,jam,milk,recommendation
+1,1,0,0,0,jam
+1,0,0,0,1,eggs
+0,1,0,1,0,bread
+1,1,0,0,1,jam
+1,1,0,1,0,jam
+1,1,0,1,1,jam
+1,0,0,0,0,
+0,0,0,0,0,
+1,1,0,1,0,jam

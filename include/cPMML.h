@@ -438,6 +438,18 @@ class Model {
   std::vector<std::pair<double, double>> forecast_with_variance(
       int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const;
 
+  /**
+   * @brief Returns the name of the primary output field produced by this model.
+   *
+   * This is the name of the first OutputField with feature="predictedValue" (or
+   * "predictedDisplayValue") in the PMML Output element. If no Output element is
+   * present, the target field name from MiningSchema is returned instead.
+   *
+   * Use this name as the key when looking up the primary prediction in a CSV
+   * fixture or when comparing against jpmml-evaluator output.
+   */
+  std::string output_name() const;
+
  private:
   std::shared_ptr<InternalEvaluator> evaluator;
 };

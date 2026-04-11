@@ -1,28 +1,31 @@
-
 /*******************************************************************************
- * Copyright 2019 AMADEUS. All rights reserved.
- * Author: Paolo Iannino
+ * Copyright 2026 Khalid Daoud. All rights reserved.
+ * Author: Khalid Daoud
  *******************************************************************************/
 
-#ifndef CPMML_ENSEMBLEEVALUATOR_H
-#define CPMML_ENSEMBLEEVALUATOR_H
+#ifndef CPMML_ASSOCIATIONEVALUATOR_H
+#define CPMML_ASSOCIATIONEVALUATOR_H
 
+#include "associationmodel.h"
 #include "core/internal_evaluator.h"
-#include "ensemblemodel.h"
+#include "core/xmlnode.h"
 
 /**
- * @class EnsembleEvaluator
+ * @class AssociationEvaluator
  *
- * Implementation of InternalEvaluator, it is used as a wrapper of
- * EnsembleModel.
+ * InternalEvaluator wrapper for AssociationModel.
  */
-class EnsembleEvaluator : public InternalEvaluator {
+class AssociationEvaluator : public InternalEvaluator {
  public:
-  EnsembleModel model;
+  AssociationModel model;
 
-  explicit EnsembleEvaluator(const XmlNode& node)
+  explicit AssociationEvaluator(const XmlNode& node)
       : InternalEvaluator(node),
-        model(node.get_child("MiningModel"), data_dictionary, transformation_dictionary, indexer) {};
+        model(node.get_child("AssociationModel"), data_dictionary, transformation_dictionary, indexer) {}
+
+  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
+    return model.validate(sample);
+  }
 
   inline std::unique_ptr<InternalScore> score(
       const std::unordered_map<std::string, std::string>& sample) const override {
@@ -37,4 +40,4 @@ class EnsembleEvaluator : public InternalEvaluator {
   inline std::string output_name() const override { return model.output_name(); }
 };
 
-#endif
+#endif  // CPMML_ASSOCIATIONEVALUATOR_H

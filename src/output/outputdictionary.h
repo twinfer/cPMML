@@ -29,8 +29,8 @@
 class OutputDictionary {
  public:
   bool empty;
-  std::unordered_map<std::string, OutputField> raw_outputfields;
-  std::vector<OutputField> dag;
+  std::vector<OutputField> raw_outputfields;  // XML-document order
+  std::vector<OutputField> dag;               // topological order for eval
 
   OutputDictionary() : empty(true) {}
 
@@ -40,36 +40,40 @@ class OutputDictionary {
         dag(build_dag(raw_outputfields)) {}
 
   inline bool contains(const std::string& field_name) const {
-    return raw_outputfields.find(field_name) != raw_outputfields.cend();
+    for (const auto& of : raw_outputfields)
+      if (of.name == field_name) return true;
+    return false;
   }
 
   inline const OutputField& operator[](const std::string& feature_name) const {
-    return raw_outputfields.at(feature_name);
+    for (const auto& of : raw_outputfields)
+      if (of.name == feature_name) return of;
+    throw std::out_of_range("OutputField not found: " + feature_name);
   }
 
-  static std::vector<OutputField> build_dag(const std::unordered_map<std::string, OutputField>& raw_outputfields) {
-    std::vector<OutputField> output_fields = ::to_values<std::string, OutputField>(raw_outputfields);
+  static std::vector<OutputField> build_dag(const std::vector<OutputField>& raw_outputfields) {
     std::vector<OutputField> dag;
-
     std::unordered_set<std::string> visited;
-    for (const auto& output_field : output_fields) build_dagR(output_field, dag, raw_outputfields, visited);
-
+    for (const auto& output_field : raw_outputfields)
+      build_dagR(output_field, dag, raw_outputfields, visited);
     return dag;
   }
 
   static void build_dagR(const OutputField& output_field, std::vector<OutputField>& dag,
-                         const std::unordered_map<std::string, OutputField>& raw_outputfields,
+                         const std::vector<OutputField>& raw_outputfields,
                          std::unordered_set<std::string>& visited) {
     if (visited.count(output_field.name)) return;
     visited.insert(output_field.name);
 
     for (const auto& input : output_field.expression->inputs) {
-      if (raw_outputfields.find(input) != raw_outputfields.cend()) {
-        OutputField tmp_input = raw_outputfields.at(input);
-        if (tmp_input.derived) build_dagR(tmp_input, dag, raw_outputfields, visited);
-        if (!visited.count(tmp_input.name)) {
-          visited.insert(tmp_input.name);
-          dag.push_back(tmp_input);
+      for (const auto& candidate : raw_outputfields) {
+        if (candidate.name == input) {
+          if (candidate.derived) build_dagR(candidate, dag, raw_outputfields, visited);
+          if (!visited.count(candidate.name)) {
+            visited.insert(candidate.name);
+            dag.push_back(candidate);
+          }
+          break;
         }
       }
     }

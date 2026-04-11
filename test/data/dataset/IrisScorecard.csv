@@ -1,4 +1,4 @@
-dept,age,prediction
+dept,age,score
 engineering,35,28.0
 engineering,25,23.0
 engineering,15,18.0

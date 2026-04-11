@@ -1,4 +1,4 @@
-ID,Age,Employment,Education,Marital,Occupation,Income,Gender,Deductions,Hours,IGNORE_Accounts,RISK_Adjustment,TARGET_Adjusted,prediction,as.factor(TARGET_Adjusted),Probability_0,Probability_1
+ID,Age,Employment,Education,Marital,Occupation,Income,Gender,Deductions,Hours,IGNORE_Accounts,RISK_Adjustment,TARGET_Adjusted,as.factor(TARGET_Adjusted),as.factor(TARGET_Adjusted),Probability_0,Probability_1
 2884161,31,Private,HSgrad,Absent,Farming,266708.54,Male,0,45,UnitedStates,0,0,0,0,0.9436749769159741,0.05632502308402586
 6470678,20,Private,College,Absent,Repair,237399.45,Male,0,40,UnitedStates,0,0,0,0,0.9436749769159741,0.05632502308402586
 1151685,39,Private,College,Divorced,Clerical,31036.73,Female,0,40,UnitedStates,0,0,0,0,0.9436749769159741,0.05632502308402586

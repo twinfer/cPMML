@@ -44,7 +44,8 @@ class RegressionEvaluator : public InternalEvaluator {
     return regression.predict(sample);
   }
 
-  inline std::string get_target_name() const override { return regression.target_field.name; };
+  inline std::string get_target_name() const override { return regression.target_field.name; }
+  inline std::string output_name() const override { return regression.output_name(); }
 };
 
 #endif

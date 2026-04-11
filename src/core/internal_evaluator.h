@@ -62,6 +62,8 @@ class InternalEvaluator {
 
   virtual inline std::string get_target_name() const { return ""; }
 
+  virtual inline std::string output_name() const { return get_target_name(); }
+
   virtual std::vector<double> forecast(int /*horizon*/) const {
     throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
   }

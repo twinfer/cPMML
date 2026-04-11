@@ -77,6 +77,19 @@ class InternalModel {
     check_scorable(node);
   }
 
+  std::string output_name() const {
+    if (!output.empty) {
+      for (const auto& of : output.raw_outputfields) {
+        const auto t = of.expression_type.value;
+        if (t == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE ||
+            t == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE)
+          return of.name;
+      }
+      if (!output.raw_outputfields.empty()) return output.raw_outputfields.front().name;
+    }
+    return target_field.name;
+  }
+
   inline bool validate(const std::unordered_map<std::string, std::string>& sample) const {
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
@@ -93,15 +106,13 @@ class InternalModel {
         transformation_dictionary[derivedfield_name].prepare(sample);
 
     std::unique_ptr<InternalScore> score = score_raw(sample);
-    sample.change_value(indexer->get_index(target_field.name),
-                        Value(target(score->score), target_field.datatype));
+    sample.change_value(indexer->get_index(target_field.name), Value(target(score->score), target_field.datatype));
     _write_outputs_to_sample(sample, *score);
   };
 
   inline void augment(Sample& sample) const {
     std::unique_ptr<InternalScore> score = score_raw(sample);
-    sample.change_value(indexer->get_index(target_field.name),
-                        Value(target(score->score), target_field.datatype));
+    sample.change_value(indexer->get_index(target_field.name), Value(target(score->score), target_field.datatype));
     _write_outputs_to_sample(sample, *score);
   };
 
@@ -208,9 +219,10 @@ class InternalModel {
   static MiningField get_target(const MiningFunction& mining_function, const MiningSchema& mining_schema,
                                 const std::shared_ptr<Indexer>& indexer) {
     if (mining_schema.target.empty) {
-      DataType datatype = mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION
-                              ? DataType::DataTypeValue::STRING
-                              : DataType::DataTypeValue::DOUBLE;
+      DataType datatype = (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION ||
+                         mining_function.value == MiningFunction::MiningFunctionType::ASSOCIATION_RULES)
+                            ? DataType::DataTypeValue::STRING
+                            : DataType::DataTypeValue::DOUBLE;
       MiningField target_placeholder(indexer->random_name(), datatype);
       indexer->get_or_set(target_placeholder.name, target_placeholder.datatype);
 

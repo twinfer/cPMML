@@ -1,6 +1,6 @@
-text,prediction
-"good product",positive
-"bad product",negative
-"good good service",positive
-"nothing here",negative
-"Good Quality",positive
+text,sentiment
+good product,positive
+bad product,negative
+good good service,positive
+nothing here,negative
+Good Quality,positive

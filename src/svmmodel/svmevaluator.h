@@ -43,6 +43,7 @@ class SvmEvaluator : public InternalEvaluator {
   }
 
   inline std::string get_target_name() const override { return svm.target_field.name; }
+  inline std::string output_name() const override { return svm.output_name(); }
 };
 
 #endif
