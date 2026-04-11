@@ -93,7 +93,7 @@ class Value {
   inline Value replace(const std::string& regex, const std::string& replacement) const {
     return Value(std::regex_replace(svalue, std::regex(regex), replacement), DataType::DataTypeValue::STRING);
   }
-  inline bool matches(const std::string& pattern) { return std::regex_match(svalue, std::regex(pattern)); }
+  inline bool matches(const std::string& pattern) const { return std::regex_match(svalue, std::regex(pattern)); }
 
   // Static members
   template <class CollectionT>

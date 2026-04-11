@@ -56,6 +56,7 @@ class BuiltInFunction {  // inputs are mapped by position
     IS_IN,
     IS_NOT_IN,
     REPLACE,
+    MATCHES,
     UPPERCASE,
     LOWERCASE,
     SUBSTRING,
@@ -109,6 +110,7 @@ class BuiltInFunction {  // inputs are mapped by position
         {"isin", BuiltInFunctionType::IS_IN},
         {"isnotin", BuiltInFunctionType::IS_NOT_IN},
         {"replace", BuiltInFunctionType::REPLACE},
+        {"matches", BuiltInFunctionType::MATCHES},
         {"uppercase", BuiltInFunctionType::UPPERCASE},
         {"lowercase", BuiltInFunctionType::LOWERCASE},
         {"substring", BuiltInFunctionType::SUBSTRING},
@@ -148,6 +150,8 @@ class BuiltInFunction {  // inputs are mapped by position
         return 1;
       case BuiltInFunctionType::REPLACE:
         return 3;
+      case BuiltInFunctionType::MATCHES:
+        return 2;
       case BuiltInFunctionType::UPPERCASE:
         return 1;
       case BuiltInFunctionType::LOWERCASE:
@@ -225,6 +229,8 @@ class BuiltInFunction {  // inputs are mapped by position
         return greater_thanorequal;
       case BuiltInFunctionType::REPLACE:
         return replace;
+      case BuiltInFunctionType::MATCHES:
+        return str_matches;
       case BuiltInFunctionType::UPPERCASE:
         return str_uppercase;
       case BuiltInFunctionType::LOWERCASE:
@@ -320,6 +326,9 @@ class BuiltInFunction {  // inputs are mapped by position
 
   inline static Value replace(const std::vector<Value>& input) {
     return input[0].replace(input[1].svalue, input[2].svalue);
+  }
+  inline static Value str_matches(const std::vector<Value>& input) {
+    return Value(input[0].matches(input[1].svalue), DataType::DataTypeValue::BOOLEAN);
   }
 
   // String built-in functions
