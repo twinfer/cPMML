@@ -58,12 +58,23 @@ class EnsembleModel : public InternalModel {
     return score->score;
   }
 
-  // For modelChain, when the outer model has no Output element, delegate to
-  // the last segment's output_name() so that the primary output of the chain
-  // is surfaced correctly (predictedValue first, then first OutputField).
+  // For modelChain, prefer the outer model's first predictedValue OutputField.
+  // If none exists, delegate to the last segment's output_name() so that the
+  // regression/classification result of the chain is surfaced correctly.
   std::string output_name() const {
     if (multiplemodelmethod.value == MultipleModelMethod::MultipleModelMethodType::MODEL_CHAIN
-        && !ensemble.empty() && output.empty) {
+        && !ensemble.empty()) {
+      // Check outer Output for an explicit predictedValue field first.
+      if (!output.empty) {
+        for (const auto& of : output.raw_outputfields) {
+          const auto t = of.expression_type.value;
+          if (t == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE ||
+              t == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE)
+            return of.name;
+        }
+      }
+      // Fall back to last segment's output_name (covers empty outer Output and
+      // outer Output with only entityId/transformedValue fields).
       const auto& last_model = ensemble.back().model;
       if (!last_model->output.empty)
         return last_model->output_name();

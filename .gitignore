@@ -4,5 +4,6 @@ build*
 *.out
 *.jar
 tools/fixture-generator/target
-test/jpmml
+Testing
+.vscode/
 __pycache__/

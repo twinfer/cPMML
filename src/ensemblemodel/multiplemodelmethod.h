@@ -97,7 +97,7 @@ class MultipleModelMethod {
       case MultipleModelMethodType::SELECT_FIRST:
         return select_first;
       case MultipleModelMethodType::SELECT_ALL:
-        return majority_vote;
+        return select_all;
       case MultipleModelMethodType::MODEL_CHAIN:
         return model_chain;
     }
@@ -313,6 +313,22 @@ class MultipleModelMethod {
       }
     }
     return std::make_unique<InternalScore>();
+  }
+
+  // selectAll: collect every active segment's prediction and format as PMML
+  // Collection string "[pred1, pred2, ...]".
+  inline static std::unique_ptr<InternalScore> select_all(const Sample& sample, const std::vector<Segment>& ensemble) {
+    std::string result = "[";
+    bool first = true;
+    for (const auto& segment : ensemble) {
+      if (segment.predicate(sample)) {
+        if (!first) result += ", ";
+        result += segment.predict(sample);
+        first = false;
+      }
+    }
+    result += "]";
+    return std::make_unique<InternalScore>(result);
   }
 
   inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble) {

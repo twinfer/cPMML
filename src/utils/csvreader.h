@@ -37,12 +37,39 @@ class CSVReader {
     std::unordered_map<std::string, std::string> result;
     line[0] = 0;
     this->file.getline(line, MAX_LINE_LENGTH);
-    std::stringstream line_stream(line);
-    std::string field;
+    if (line[0] == 0) return result;
 
-    if (!getline(line_stream, field, ',')) return result;
-    for (unsigned int i = 0; i < this->header.size(); i++, getline(line_stream, field, ','))
-      result[header[i]] = remove_all(remove_all(field, '\r'), '"');
+    std::string row(line);
+    // Remove trailing CR if present
+    if (!row.empty() && row.back() == '\r') row.pop_back();
+
+    std::vector<std::string> fields;
+    size_t pos = 0;
+    while (pos <= row.size()) {
+      std::string field;
+      if (pos < row.size() && row[pos] == '"') {
+        // Quoted field: read until closing quote
+        ++pos;
+        while (pos < row.size() && row[pos] != '"') field += row[pos++];
+        if (pos < row.size()) ++pos;  // skip closing quote
+        // skip comma after closing quote
+        if (pos < row.size() && row[pos] == ',') ++pos;
+      } else {
+        size_t comma = row.find(',', pos);
+        if (comma == std::string::npos) {
+          field = row.substr(pos);
+          pos = row.size() + 1;
+        } else {
+          field = row.substr(pos, comma - pos);
+          pos = comma + 1;
+        }
+      }
+      fields.push_back(field);
+      if (fields.size() >= header.size()) break;
+    }
+
+    for (size_t i = 0; i < header.size() && i < fields.size(); i++)
+      result[header[i]] = fields[i];
 
     return result;
   }

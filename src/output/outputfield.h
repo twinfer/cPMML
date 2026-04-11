@@ -46,7 +46,8 @@ class OutputField {
       // Probability features are always numeric; entityId is always string —
       // both regardless of the target field's datatype.
       const auto feat = OutputExpressionType(node.get_attribute("feature")).value;
-      if (feat == OutputExpressionType::OutputExpressionTypeValue::PROBABILITY) {
+      if (feat == OutputExpressionType::OutputExpressionTypeValue::PROBABILITY ||
+          feat == OutputExpressionType::OutputExpressionTypeValue::RESIDUAL) {
         datatype = DataType::DataTypeValue::DOUBLE;
       } else if (feat == OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID) {
         datatype = DataType::DataTypeValue::STRING;

@@ -154,6 +154,16 @@ class InternalModel {
     if (!mining_schema.validate(internal_sample))
       throw cpmml::InvalidValueException("Sample: " + to_string(sample) + "didn't pass input validation");
 
+    // Load actual target value if provided in the raw input (needed for
+    // feature="residual" output computation).  MiningSchema::prepare skips the
+    // target field, so we have to do this separately.
+    if (!mining_schema.target.empty) {
+      auto it = sample.find(mining_schema.target.name);
+      if (it != sample.end())
+        internal_sample.change_value(mining_schema.target_index,
+                                     Value(it->second, mining_schema.target.datatype));
+    }
+
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
     target(*score);
     output.add_output(internal_sample, *score);

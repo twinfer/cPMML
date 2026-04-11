@@ -17,6 +17,7 @@
 #include "outputexpressiontype.h"
 #include "predictedValue.h"
 #include "probability.h"
+#include "residual.h"
 #include "transformedvalue.h"
 
 /**
@@ -41,6 +42,8 @@ class OutputExpressionBuilder {
         return std::make_shared<Probability>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID:
         return std::make_shared<EntityId>(node, indexer, output_index, output_type);
+      case OutputExpressionType::OutputExpressionTypeValue::RESIDUAL:
+        return std::make_shared<Residual>(node, indexer, output_index, output_type, model_target);
       case OutputExpressionType::OutputExpressionTypeValue::PASS_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       default:

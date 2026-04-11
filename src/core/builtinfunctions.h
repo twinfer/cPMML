@@ -58,6 +58,12 @@ class BuiltInFunction {  // inputs are mapped by position
 #ifdef REGEX_SUPPORT
     REPLACE,
 #endif
+    UPPERCASE,
+    LOWERCASE,
+    SUBSTRING,
+    TRIM_BLANKS,
+    CONCAT,
+    STRING_LENGTH,
     IDENTITY  // introduced to have "empty" function type
   };
 
@@ -105,8 +111,14 @@ class BuiltInFunction {  // inputs are mapped by position
         {"isin", BuiltInFunctionType::IS_IN},
         {"isnotin", BuiltInFunctionType::IS_NOT_IN},
 #ifdef REGEX_SUPPORT
-        {"replace", BuiltInFunctionType::REPLACE}
+        {"replace", BuiltInFunctionType::REPLACE},
 #endif
+        {"uppercase", BuiltInFunctionType::UPPERCASE},
+        {"lowercase", BuiltInFunctionType::LOWERCASE},
+        {"substring", BuiltInFunctionType::SUBSTRING},
+        {"trimblanks", BuiltInFunctionType::TRIM_BLANKS},
+        {"concat", BuiltInFunctionType::CONCAT},
+        {"stringlength", BuiltInFunctionType::STRING_LENGTH}
     };
 
     try {
@@ -142,6 +154,18 @@ class BuiltInFunction {  // inputs are mapped by position
       case BuiltInFunctionType::REPLACE:
         return 3;
 #endif
+      case BuiltInFunctionType::UPPERCASE:
+        return 1;
+      case BuiltInFunctionType::LOWERCASE:
+        return 1;
+      case BuiltInFunctionType::SUBSTRING:
+        return 3;
+      case BuiltInFunctionType::TRIM_BLANKS:
+        return 1;
+      case BuiltInFunctionType::CONCAT:
+        return -1;
+      case BuiltInFunctionType::STRING_LENGTH:
+        return 1;
       default:
         return -1;
     }
@@ -209,6 +233,18 @@ class BuiltInFunction {  // inputs are mapped by position
       case BuiltInFunctionType::REPLACE:
         return replace;
 #endif
+      case BuiltInFunctionType::UPPERCASE:
+        return str_uppercase;
+      case BuiltInFunctionType::LOWERCASE:
+        return str_lowercase;
+      case BuiltInFunctionType::SUBSTRING:
+        return str_substring;
+      case BuiltInFunctionType::TRIM_BLANKS:
+        return str_trim_blanks;
+      case BuiltInFunctionType::CONCAT:
+        return str_concat;
+      case BuiltInFunctionType::STRING_LENGTH:
+        return str_length;
       default:
         throw cpmml::ParsingException("unsupported function");
     }
@@ -295,6 +331,80 @@ class BuiltInFunction {  // inputs are mapped by position
     return input[0].replace(input[1].svalue, input[2].svalue);
   }
 #endif
+
+  // String built-in functions. Work with REGEX_SUPPORT (via svalue) or without
+  // (via Value::double_to_string reverse-lookup, requires !STRING_OPTIMIZATION).
+  inline static Value str_uppercase(const std::vector<Value>& input) {
+#ifdef REGEX_SUPPORT
+    Value v = input[0];
+    v.uppercase();
+    return v;
+#else
+    std::string s = Value::double_to_string(input[0].value);
+    std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+    return Value(s, DataType::DataTypeValue::STRING);
+#endif
+  }
+
+  inline static Value str_lowercase(const std::vector<Value>& input) {
+#ifdef REGEX_SUPPORT
+    Value v = input[0];
+    v.lowercase();
+    return v;
+#else
+    std::string s = Value::double_to_string(input[0].value);
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return Value(s, DataType::DataTypeValue::STRING);
+#endif
+  }
+
+  // PMML substring uses 1-based startPos and a character count (length).
+  inline static Value str_substring(const std::vector<Value>& input) {
+    const size_t start_pos = static_cast<size_t>(input[1].value);  // 1-based
+    const size_t length = static_cast<size_t>(input[2].value);
+#ifdef REGEX_SUPPORT
+    Value v = input[0];
+    if (start_pos >= 1) v.substr(start_pos - 1, length);
+    return v;
+#else
+    std::string s = Value::double_to_string(input[0].value);
+    if (start_pos >= 1 && start_pos - 1 <= s.size())
+      s = s.substr(start_pos - 1, length);
+    else
+      s.clear();
+    return Value(s, DataType::DataTypeValue::STRING);
+#endif
+  }
+
+  inline static Value str_trim_blanks(const std::vector<Value>& input) {
+#ifdef REGEX_SUPPORT
+    Value v = input[0];
+    v.trim_blanks();
+    return v;
+#else
+    std::string s = Value::double_to_string(input[0].value);
+    s = ::trim(s);
+    return Value(s, DataType::DataTypeValue::STRING);
+#endif
+  }
+
+  inline static Value str_concat(const std::vector<Value>& input) {
+    std::string result;
+#ifdef REGEX_SUPPORT
+    for (const auto& v : input) result += v.svalue;
+#else
+    for (const auto& v : input) result += Value::double_to_string(v.value);
+#endif
+    return Value(result, DataType::DataTypeValue::STRING);
+  }
+
+  inline static Value str_length(const std::vector<Value>& input) {
+#ifdef REGEX_SUPPORT
+    return Value(static_cast<double>(input[0].svalue.size()), DataType::DataTypeValue::DOUBLE);
+#else
+    return Value(static_cast<double>(Value::double_to_string(input[0].value).size()), DataType::DataTypeValue::DOUBLE);
+#endif
+  }
 };
 
 #endif
