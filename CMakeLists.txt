@@ -7,7 +7,7 @@ set(AUTHOR "Paolo Iannino")
 # PROJECT NAME/VERSION
 set(PROJECT_NAME cPMML)
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 11)
+set(PROJECT_VERSION_MINOR 12)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
@@ -66,6 +66,12 @@ endif ()
 
 set(ADDITIONAL_LINK_LIBRARIES "")
 
+# DEBUG OUTPUT (enables field name storage and to_string() in Feature/Sample)
+option(CPMML_DEBUG "Enable verbose debug output" OFF)
+if(CPMML_DEBUG)
+    add_definitions(-DDEBUG)
+endif()
+
 # MULTITHREADING
 if(NOT DEFINED THREADS)
     set(THREADS 4)
@@ -83,18 +89,6 @@ if(THREADS AND THREADS GREATER 1)
     endif()
 endif ()
 
-# REGEX SUPPORT
-#set(REGEX_SUPPORT TRUE)
-if(REGEX_SUPPORT)
-    find_package(Boost COMPONENTS regex)
-    if(Boost_FOUND)
-        set(ADDITIONAL_LINK_LIBRARIES "${ADDITIONAL_LINK_LIBRARIES}" "${Boost_REGEX_LIBRARY}")
-        add_definitions(-DREGEX_SUPPORT)
-    else()
-        message("boost_regex is needed to enable string modifiers.")
-    endif()
-endif()
-
 # BUILD LIBRARY
 include(GNUInstallDirs)
 
@@ -106,7 +100,6 @@ add_library(
         src/api/model.cc
         src/api/prediction.cc
         src/api/version.cc
-        src/options.h
         src/core/xmlnode.h
         src/utils/csvreader.h
         src/utils/utils.h

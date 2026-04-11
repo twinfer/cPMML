@@ -108,7 +108,7 @@ class SupportVectorMachineModel : public InternalModel {
         for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
           if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
             for (const auto& v : pred.values) {
-              std::string lbl = Value::double_to_string(v.value);
+              std::string lbl = v.svalue;
               if (!lbl.empty() && lbl != machines[0].target_category) {
                 machines[0].alternate_category = lbl;
                 break;

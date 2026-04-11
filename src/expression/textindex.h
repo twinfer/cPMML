@@ -83,11 +83,7 @@ class TextIndex : public Expression {
     const Value& fv = sample[field_index].value;
     if (fv.missing) return Value();
 
-#ifdef STRING_OPTIMIZATION
-    // Cannot reverse-lookup with hash-based encoding; return missing
-    return Value();
-#else
-    std::string text = Value::double_to_string(fv.value);
+    std::string text = fv.svalue;
     if (!case_sensitive) text = to_lower(text);
 
     // Tokenize on whitespace and count exact-match occurrences
@@ -110,7 +106,6 @@ class TextIndex : public Expression {
       result = static_cast<double>(count);
 
     return Value(result);
-#endif
   }
 };
 

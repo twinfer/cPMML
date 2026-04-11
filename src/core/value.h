@@ -14,34 +14,37 @@
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
-#ifdef REGEX_SUPPORT
-#include <boost/regex.hpp>
-#endif
+#include <regex>
 
 #include "datatype.h"
-#include "options.h"
 #include "utils/utils.h"
 
 /**
  * @class Value
  *
- * Internal representation of each value used by the model. For efficiency
- * reasons every type of input value is converted into double.
+ * Internal representation of each value used by the model. Numeric types are
+ * stored as double for uniform comparison and arithmetic. String types also
+ * carry the original text in svalue and are assigned a stable sequential index
+ * (via string_converter) so that equality and set-membership comparisons work
+ * correctly through the double field. Lookups into string_converter use
+ * std::string_view (C++20 heterogeneous lookup) to avoid temporary allocations.
  */
 class Value {
  public:
   double value = double_min();
   bool missing = true;
-#ifdef REGEX_SUPPORT
   std::string svalue;
-#endif
-#ifndef STRING_OPTIMIZATION
-  inline static double string_index = 0;  // zero initialized because static
-  inline static std::unordered_map<std::string, double> string_converter;
-#endif
+
+  struct StringHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
+  };
+  inline static double string_index = 0;
+  inline static std::unordered_map<std::string, double, StringHash, std::equal_to<>> string_converter;
 
   class ValueHash {
    public:
@@ -55,9 +58,7 @@ class Value {
   explicit Value(const double& value) : value(value), missing(false) {}
   Value(const double& value, const DataType& datatype) : value(value), missing(false) {}
   Value(const std::string& value, const DataType& datatype) : value(to_double(value, datatype)), missing(false) {
-#ifdef REGEX_SUPPORT
     if (datatype == DataType::DataTypeValue::STRING) svalue = value;
-#endif
   }
 
   inline Value operator+(const Value& other) const { return Value(value + other.value); }
@@ -83,7 +84,6 @@ class Value {
     return other.find(*this) == other.end();
   }
 
-#ifdef REGEX_SUPPORT
   inline Value operator+=(const Value& other) const { return Value(svalue + other.svalue); }
 
   inline void lowercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::tolower); }
@@ -91,10 +91,9 @@ class Value {
   inline void substr(const size_t& start, const size_t& size) { svalue = svalue.substr(start, size); }
   inline void trim_blanks() { svalue = ::trim(svalue); }
   inline Value replace(const std::string& regex, const std::string& replacement) const {
-    return Value(boost::regex_replace(svalue, boost::regex(regex), replacement), DataType::DataTypeValue::STRING);
+    return Value(std::regex_replace(svalue, std::regex(regex), replacement), DataType::DataTypeValue::STRING);
   }
-  inline bool matches(const std::string& pattern) { return boost::regex_match(svalue, boost::regex(pattern)); }
-#endif
+  inline bool matches(const std::string& pattern) { return std::regex_match(svalue, std::regex(pattern)); }
 
   // Static members
   template <class CollectionT>
@@ -135,16 +134,6 @@ class Value {
     return to_double(value, DataType::DataTypeValue::INTEGER);
   }
 
-  // Reverse lookup: double → original string (only valid without STRING_OPTIMIZATION)
-#ifndef STRING_OPTIMIZATION
-  inline static std::string double_to_string(double d) {
-    for (const auto& kv : string_converter) {
-      if (kv.second == d) return kv.first;
-    }
-    return "";
-  }
-#endif
-
   inline static double to_double(const std::string& value, const DataType& datatype) {
     switch (datatype.value) {
       case DataType::DataTypeValue::BOOLEAN:
@@ -156,14 +145,14 @@ class Value {
         return ::to_double(value);
       case DataType::DataTypeValue::DOUBLE:
         return ::to_double(value);
-      case DataType::DataTypeValue::STRING:
-#ifdef STRING_OPTIMIZATION
-        return static_cast<double>(std::hash<std::string>()(value));
-#else
-        if (string_converter.find(value) == string_converter.cend()) string_converter[value] = string_index++;
-        return string_converter[value];
-
-#endif
+      case DataType::DataTypeValue::STRING: {
+        auto it = string_converter.find(std::string_view(value));
+        if (it == string_converter.end()) {
+          auto [inserted, _] = string_converter.emplace(value, string_index++);
+          return inserted->second;
+        }
+        return it->second;
+      }
     }
 
     return std::numeric_limits<double>::min();

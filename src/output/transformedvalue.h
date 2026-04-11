@@ -54,18 +54,7 @@ class TransformedValue : public OutputExpression {
 
   inline std::string eval_str(Sample& sample, const InternalScore& /*score*/) const override {
     if (!expression) return "";
-#ifndef REGEX_SUPPORT
-    const Value v = expression->eval(sample);
-    if (!v.missing) {
-      // Attempt to reverse-map the encoded double back to its original string.
-      const std::string s = Value::double_to_string(v.value);
-      if (!s.empty()) return s;
-      return std::to_string(v.value);
-    }
-    return "";
-#else
     return expression->eval(sample).svalue;
-#endif
   };
 };
 

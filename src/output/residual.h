@@ -37,7 +37,7 @@ class Residual : public OutputExpression {
 
     if (!score.probabilities.empty()) {
       // Classification: probability(actual_class) - 1.0
-      const std::string actual_str = Value::double_to_string(actual_val.value);
+      const std::string actual_str = actual_val.svalue;
       auto it = score.probabilities.find(actual_str);
       if (it == score.probabilities.end()) return double_min();
       return it->second - 1.0;

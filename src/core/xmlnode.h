@@ -13,7 +13,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "options.h"
 #include "utils/utils.h"
 
 /**

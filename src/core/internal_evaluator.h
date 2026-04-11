@@ -15,7 +15,6 @@
 #include "header.h"
 #include "indexer.h"
 #include "internal_score.h"
-#include "options.h"
 #include "transformationdictionary.h"
 
 /**

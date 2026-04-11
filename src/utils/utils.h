@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "miniz.h"
-#include "options.h"
 
 /**
  * @defgroup Utils
