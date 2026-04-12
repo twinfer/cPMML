@@ -9,6 +9,7 @@
 
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "datadictionary.h"
@@ -54,7 +55,22 @@ class InternalEvaluator {
 
   virtual inline bool validate(const std::unordered_map<std::string, std::string>& sample) { return false; }
 
+  using FieldValue = std::variant<std::string, std::vector<std::string>>;
+
   virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const = 0;
+
+  virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, FieldValue>& sample) const {
+    // Default: extract string values and delegate to the string-only overload.
+    // AssociationEvaluator overrides this to pass collections through.
+    std::unordered_map<std::string, std::string> flat;
+    for (const auto& [k, v] : sample) {
+      if (std::holds_alternative<std::string>(v))
+        flat[k] = std::get<std::string>(v);
+      else
+        flat[k] = "";  // non-association models ignore collection fields
+    }
+    return score(flat);
+  }
 
   // Simple score, due to the type of value returned is 2/300 ns faster
   virtual std::string predict(const std::unordered_map<std::string, std::string>& sample) const = 0;

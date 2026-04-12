@@ -25,6 +25,10 @@ Prediction Model::score(const std::unordered_map<std::string, std::string>& samp
   return Prediction(evaluator->score(sample));
 }
 
+Prediction Model::score(const std::unordered_map<std::string, FieldValue>& sample) const {
+  return Prediction(evaluator->score(sample));
+}
+
 std::string Model::predict(const std::unordered_map<std::string, std::string>& sample) const {
   return evaluator->predict(sample);
 }

@@ -69,6 +69,8 @@ class AssociationModel : public InternalModel {
   // Members
   // -------------------------------------------------------------------------
   Algorithm algorithm = Algorithm::RECOMMENDATION;
+  bool is_transactional = false;       // true when MiningSchema has a group field
+  std::string item_field_name;         // the active item field (transactional schema)
   std::unordered_map<std::string, Item>                              items;    // item id → Item
   std::unordered_map<std::string, std::unordered_set<std::string>>  itemsets; // itemset id → set<item id>
   std::vector<AssociationRule>                                       rules;
@@ -97,39 +99,66 @@ class AssociationModel : public InternalModel {
     parse_items(node);
     parse_itemsets(node);
     parse_rules(node);
+
+    // Detect transactional schema: group field present → item field is the
+    // single active field that receives a collection of values.
+    for (const auto& mf : mining_schema.miningfields) {
+      if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::GROUP) {
+        is_transactional = true;
+      } else if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::ACTIVE) {
+        item_field_name = mf.name;
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
   // Scoring
   // -------------------------------------------------------------------------
 
+  using InternalModel::score;  // prevent name hiding of score(string map) overload
+
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     const auto active   = build_active_items(sample);
-    const auto matching = get_matching_rules(active);
+    return score_from_active(active);
+  }
 
-    if (matching.empty()) return std::make_unique<InternalScore>();
-
-    // std::ranges::minmax_element finds best (max confidence) and worst (min)
-    // rule in a single O(3n/2) pass — cheaper than two separate scans when
-    // both ends are needed (e.g. for confidence-range reporting in outputs).
-    const auto [min_it, max_it] =
-        std::ranges::minmax_element(matching, {}, &AssociationRule::confidence);
-
-    // Primary score: consequent value of the highest-confidence rule
-    const std::string best = consequent_value(*max_it);
-
-    // Probabilities map: consequent value → best confidence across all
-    // matching rules with that consequent (available via Prediction::distribution())
-    std::unordered_map<std::string, double> probs;
-    for (const auto& r : matching) {
-      const std::string cons = consequent_value(r);
-      auto it = probs.find(cons);
-      if (it == probs.end() || r.confidence > it->second)
-        probs[cons] = r.confidence;
+  // Variant-aware score override: extracts collection values for transactional models.
+  inline std::unique_ptr<InternalScore> score(
+      const std::unordered_map<std::string, FieldValue>& sample) const override {
+    if (!is_transactional) {
+      // Non-transactional: flatten to string map and use normal path
+      return InternalModel::score(sample);
     }
 
-    auto result = std::make_unique<InternalScore>(best, probs);
-    result->double_score = max_it->confidence;
+    // Transactional: extract collection from the item field, build active items
+    // from the collection values, then score. MiningSchema preparation uses
+    // only the string fields (group field is skipped).
+    Sample internal_sample = base_sample;
+    std::unordered_map<std::string, std::string> flat;
+    std::vector<std::string> basket;
+    for (const auto& [k, v] : sample) {
+      if (k == item_field_name) {
+        if (std::holds_alternative<std::vector<std::string>>(v)) {
+          basket = std::get<std::vector<std::string>>(v);
+        } else {
+          // Single string → single-element basket
+          basket = {std::get<std::string>(v)};
+        }
+      } else if (std::holds_alternative<std::string>(v)) {
+        flat[k] = std::get<std::string>(v);
+      }
+    }
+    mining_schema.prepare(internal_sample, flat);
+
+    if (!transformation_dictionary.empty)
+      for (const auto& derivedfield_name : derivedfields_dag)
+        transformation_dictionary[derivedfield_name].prepare(internal_sample);
+
+    auto active = build_active_items_from_basket(basket);
+    auto result = score_from_active(active);
+    result->raw_score = result->score;
+    target(*result);
+    output.add_output(internal_sample, *result);
     return result;
   }
 
@@ -172,9 +201,11 @@ class AssociationModel : public InternalModel {
   }
 
   void parse_rules(const XmlNode& node) {
+    int rule_index = 0;
     for (const auto& n : node.get_childs("AssociationRule")) {
+      ++rule_index;
       AssociationRule rule;
-      rule.id         = n.exists_attribute("id")       ? n.get_attribute("id")       : "";
+      rule.id         = n.exists_attribute("id") ? n.get_attribute("id") : std::to_string(rule_index);
       rule.antecedent = n.get_attribute("antecedent");
       rule.consequent = n.get_attribute("consequent");
       rule.support    = to_double(n.get_attribute("support"));
@@ -219,6 +250,63 @@ class AssociationModel : public InternalModel {
     return active;
   }
 
+  // Build active items from an explicit basket (transactional schema).
+  // Each string in the basket is matched against Item::value.
+  std::unordered_set<std::string> build_active_items_from_basket(
+      const std::vector<std::string>& basket) const {
+    std::unordered_set<std::string> basket_set(basket.begin(), basket.end());
+    std::unordered_set<std::string> active;
+    for (const auto& [id, item] : items) {
+      if (basket_set.contains(item.value))
+        active.insert(id);
+    }
+    return active;
+  }
+
+  // Human-readable string for an itemset (comma-joined item values, sorted).
+  std::string itemset_string(const std::string& itemset_id) const {
+    const auto& item_ids = itemsets.at(itemset_id);
+    std::vector<std::string> vals;
+    vals.reserve(item_ids.size());
+    for (const auto& iid : item_ids) vals.push_back(items.at(iid).value);
+    std::ranges::sort(vals);
+    std::string result;
+    for (const auto& v : vals) {
+      if (!result.empty()) result += ", ";
+      result += v;
+    }
+    return result;
+  }
+
+  // Shared scoring logic: given active items, find matching rules and produce score.
+  std::unique_ptr<InternalScore> score_from_active(
+      const std::unordered_set<std::string>& active) const {
+    const auto matching = get_matching_rules(active);
+
+    if (matching.empty()) return std::make_unique<InternalScore>();
+
+    const auto [min_it, max_it] =
+        std::ranges::minmax_element(matching, {}, &AssociationRule::confidence);
+
+    const std::string best = consequent_value(*max_it);
+
+    std::unordered_map<std::string, double> probs;
+    for (const auto& r : matching) {
+      const std::string cons = consequent_value(r);
+      auto it = probs.find(cons);
+      if (it == probs.end() || r.confidence > it->second)
+        probs[cons] = r.confidence;
+    }
+
+    auto result = std::make_unique<InternalScore>(best, probs);
+    result->double_score = max_it->confidence;
+
+    // Populate matched rules per algorithm for OutputField evaluation
+    populate_matched_rules(*result, active);
+
+    return result;
+  }
+
   bool antecedent_matches(const AssociationRule& rule,
                           const std::unordered_set<std::string>& active) const {
     const auto& ant = itemsets.at(rule.antecedent);
@@ -228,16 +316,15 @@ class AssociationModel : public InternalModel {
   }
 
   bool consequent_check(const AssociationRule& rule,
-                        const std::unordered_set<std::string>& active) const {
+                        const std::unordered_set<std::string>& active,
+                        Algorithm algo) const {
     const auto& cons = itemsets.at(rule.consequent);
-    switch (algorithm) {
+    switch (algo) {
       case Algorithm::EXCLUSIVE_RECOMMENDATION:
-        // consequent must not overlap with the input basket
         return std::ranges::none_of(cons, [&](const std::string& id) {
           return active.contains(id);
         });
       case Algorithm::RULE_ASSOCIATION:
-        // entire consequent must already be in the input basket
         return std::ranges::all_of(cons, [&](const std::string& id) {
           return active.contains(id);
         });
@@ -248,11 +335,44 @@ class AssociationModel : public InternalModel {
 
   std::vector<AssociationRule> get_matching_rules(
       const std::unordered_set<std::string>& active) const {
+    return get_matching_rules(active, algorithm);
+  }
+
+  std::vector<AssociationRule> get_matching_rules(
+      const std::unordered_set<std::string>& active, Algorithm algo) const {
     std::vector<AssociationRule> matching;
     for (const auto& rule : rules)
-      if (antecedent_matches(rule, active) && consequent_check(rule, active))
+      if (antecedent_matches(rule, active) && consequent_check(rule, active, algo))
         matching.push_back(rule);
     return matching;
+  }
+
+  std::vector<InternalScore::MatchedRule> to_matched_rules(
+      const std::vector<AssociationRule>& matching) const {
+    std::vector<InternalScore::MatchedRule> result;
+    result.reserve(matching.size());
+    for (const auto& r : matching) {
+      InternalScore::MatchedRule mr;
+      mr.rule_id    = r.id;
+      mr.antecedent = itemset_string(r.antecedent);
+      mr.consequent = itemset_string(r.consequent);
+      mr.support    = r.support;
+      mr.confidence = r.confidence;
+      mr.lift       = r.lift;
+      result.push_back(std::move(mr));
+    }
+    return result;
+  }
+
+  void populate_matched_rules(InternalScore& score,
+                              const std::unordered_set<std::string>& active) const {
+    // Populate for each algorithm that OutputFields may reference
+    score.matched_rules_by_algorithm["recommendation"] =
+        to_matched_rules(get_matching_rules(active, Algorithm::RECOMMENDATION));
+    score.matched_rules_by_algorithm["exclusiverecommendation"] =
+        to_matched_rules(get_matching_rules(active, Algorithm::EXCLUSIVE_RECOMMENDATION));
+    score.matched_rules_by_algorithm["ruleassociation"] =
+        to_matched_rules(get_matching_rules(active, Algorithm::RULE_ASSOCIATION));
   }
 
   // Returns a deterministic string representation of a rule's consequent.

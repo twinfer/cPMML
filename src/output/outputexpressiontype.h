@@ -33,7 +33,16 @@ class OutputExpressionType {
     PROBABILITY,
     ENTITY_ID,
     RESIDUAL,
-    PASS_VALUE
+    PASS_VALUE,
+    // Association model output features (PMML 4.2+)
+    RULE_VALUE,       // feature="ruleValue" (PMML 4.0/4.1 style, uses ruleFeature attr)
+    ANTECEDENT,       // feature="antecedent"
+    CONSEQUENT,       // feature="consequent"
+    RULE,             // feature="rule"
+    RULE_ID,          // feature="ruleId"
+    SUPPORT,          // feature="support"
+    CONFIDENCE,       // feature="confidence"
+    LIFT              // feature="lift"
   };
 
   OutputExpressionTypeValue value;
@@ -58,7 +67,15 @@ class OutputExpressionType {
         {"transformedvalue", OutputExpressionTypeValue::TRANSFORMED_VALUE},
         {"probability", OutputExpressionTypeValue::PROBABILITY},
         {"entityid", OutputExpressionTypeValue::ENTITY_ID},
-        {"residual", OutputExpressionTypeValue::RESIDUAL}};
+        {"residual", OutputExpressionTypeValue::RESIDUAL},
+        {"rulevalue", OutputExpressionTypeValue::RULE_VALUE},
+        {"antecedent", OutputExpressionTypeValue::ANTECEDENT},
+        {"consequent", OutputExpressionTypeValue::CONSEQUENT},
+        {"rule", OutputExpressionTypeValue::RULE},
+        {"ruleid", OutputExpressionTypeValue::RULE_ID},
+        {"support", OutputExpressionTypeValue::SUPPORT},
+        {"confidence", OutputExpressionTypeValue::CONFIDENCE},
+        {"lift", OutputExpressionTypeValue::LIFT}};
 
     try {
       return expressiontype_converter.at(to_lower(expressiontype));

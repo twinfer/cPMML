@@ -14,22 +14,22 @@ It exposes a minimalist and user-friendly API targeting high performance, with a
 
 | PMML Element | Description |
 |---|---|
-|`AssociationModel`| Supports all three rule-selection algorithms (recommendation, exclusiveRecommendation, ruleAssociation)|
 | `TreeModel` | Decision trees |
-| `MiningModel` | Ensembles (random forests, gradient boosting, stacking) |
+| `MiningModel` | Ensembles (random forests, gradient boosting, model chains, selectAll) |
 | `RegressionModel` | Linear and logistic regression |
 | `GeneralRegressionModel` | GLMs (linear, multinomial logistic, ordinal multinomial, Poisson, gamma, tweedie) |
 | `NeuralNetwork` | Feed-forward neural networks |
-| `SupportVectorMachineModel` | SVM (classification and regression) |
-| `NearestNeighborModel` | k-NN |
+| `SupportVectorMachineModel` | SVM classification and regression (SupportVectors and Coefficients representations) |
+| `NearestNeighborModel` | k-NN (8 distance/similarity metrics, per-field compare functions, weighted voting) |
 | `NaiveBayesModel` | Naive Bayes |
 | `ClusteringModel` | k-means clustering |
-| `RuleSetModel` | Rule sets |
-| `Scorecard` | Scorecards |
+| `RuleSetModel` | Rule sets (simple and compound rules) |
+| `Scorecard` | Scorecards (attribute and characteristic reason codes) |
+| `AssociationModel` | All three algorithms (recommendation, exclusiveRecommendation, ruleAssociation); categorical and transactional schemas; multi-valued output features (ruleId, antecedent, consequent, support, confidence, lift) |
 | `BaselineModel` | Baseline / majority class |
 | `AnomalyDetectionModel` | Isolation forest anomaly detection |
 | `GaussianProcessModel` | Gaussian process regression |
-| `TextModel` | Text classification (TF-IDF) |
+| `TextModel` | Text classification (TF-IDF with TextIndex) |
 
 ### Time series models (`model.forecast`)
 
@@ -47,6 +47,17 @@ It exposes a minimalist and user-friendly API targeting high performance, with a
 - `SeasonalComponent` — SARIMA polynomial convolution φ(B)·Φ(B^m)
 - `DynamicRegressor` — transfer function N(B)/D(B); `futureValuesMethod="constant"` or `"userSupplied"`
 - `forecast_with_variance(h)` — h-step prediction intervals for all algorithms
+
+### PMML features
+
+| Feature | Details |
+|---|---|
+| `MiningSchema` | Active, target, supplementary, group fields; missing/invalid/outlier value handling |
+| `TransformationDictionary` / `LocalTransformations` | DerivedField, NormContinuous, NormDiscrete, Discretize, MapValues, FieldRef, Constant, Apply |
+| `Output` | predictedValue, predictedDisplayValue, probability, entityId, residual, transformedValue |
+| `Targets` | Rescaling, casting, prior corrections |
+| `Built-in functions` | Arithmetic, boolean, string (uppercase, lowercase, substring, trimBlanks, concat, replace, matches), value functions (isMissing, isNotMissing, isIn, isNotIn, if) |
+| `TextIndex` | TF-IDF term frequency with tokenization and normalization |
 
 ## API
 
@@ -71,6 +82,31 @@ cpmml::Prediction pred = model.score(sample);
 std::cout << pred.as_string();       // "Iris-versicolor"
 for (auto& [cls, prob] : pred.distribution())
     std::cout << cls << ": " << prob << "\n";
+
+// Named output fields (probability, confidence, entityId, etc.)
+for (auto& [name, val] : pred.num_outputs())
+    std::cout << name << ": " << val << "\n";
+for (auto& [name, val] : pred.str_outputs())
+    std::cout << name << ": " << val << "\n";
+```
+
+### Association model (transactional basket scoring)
+
+```cpp
+#include "cPMML.h"
+
+cpmml::Model model("ShoppingRules.zip", true);
+
+// Transactional models accept collection-valued inputs via FieldValue variant
+using cpmml::FieldValue;
+std::unordered_map<std::string, FieldValue> basket = {
+    {"item", std::vector<std::string>{"bread", "butter", "milk"}}
+};
+
+cpmml::Prediction pred = model.score(basket);
+for (auto& [name, val] : pred.str_outputs())
+    std::cout << name << ": " << val << "\n";
+// "Recommendation: [1, 3, 5]"
 ```
 
 ### Time series forecasting
@@ -127,7 +163,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to submit your
 ## Authors
 
 * **Paolo Iannino** - *Initial work* - [Paolo](https://github.com/piannino)
-* **Khalid Daoud** - *Time series models (ETS, SSM, ARIMA, GARCH, DynamicRegressor)*
+* **Khalid Daoud** - *Time series, SVM, k-NN, association transactional, cross-validation framework*
 
 See also the list of [contributors](https://github.com/AmadeusITGroup/cPMML/contributors) who participated in this project.
 

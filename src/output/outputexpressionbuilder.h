@@ -11,6 +11,7 @@
 
 #include <memory>
 
+#include "associationoutput.h"
 #include "entityid.h"
 #include "expression/expression.h"
 #include "expression/fieldref.h"
@@ -41,9 +42,36 @@ class OutputExpressionBuilder {
       case OutputExpressionType::OutputExpressionTypeValue::PROBABILITY:
         return std::make_shared<Probability>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID:
+        // Association models use entityId to reference rule IDs (with algorithm/rank attrs)
+        if (node.exists_attribute("algorithm"))
+          return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                      AssociationOutput::RuleFeature::RULE_ID);
         return std::make_shared<EntityId>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::RESIDUAL:
         return std::make_shared<Residual>(node, indexer, output_index, output_type, model_target);
+      case OutputExpressionType::OutputExpressionTypeValue::RULE_VALUE:
+        return AssociationOutput::from_rule_value(node, indexer, output_index, output_type);
+      case OutputExpressionType::OutputExpressionTypeValue::ANTECEDENT:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::ANTECEDENT);
+      case OutputExpressionType::OutputExpressionTypeValue::CONSEQUENT:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::CONSEQUENT);
+      case OutputExpressionType::OutputExpressionTypeValue::RULE:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::RULE);
+      case OutputExpressionType::OutputExpressionTypeValue::RULE_ID:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::RULE_ID);
+      case OutputExpressionType::OutputExpressionTypeValue::SUPPORT:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::SUPPORT);
+      case OutputExpressionType::OutputExpressionTypeValue::CONFIDENCE:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::CONFIDENCE);
+      case OutputExpressionType::OutputExpressionTypeValue::LIFT:
+        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                    AssociationOutput::RuleFeature::LIFT);
       case OutputExpressionType::OutputExpressionTypeValue::PASS_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       default:

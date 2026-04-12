@@ -66,7 +66,8 @@ class MiningSchema {
     std::cout << "BEFORE MINING SCHEMA PREPARATION: " << sample << std::endl;
 #endif
     for (const auto& miningfield : miningfields) {
-      if (miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::TARGET) {
+      if (miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::TARGET &&
+          miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::GROUP) {
         try {
           const std::string& raw = input.at(miningfield.name);
           if (raw.empty()) {
@@ -99,7 +100,8 @@ class MiningSchema {
 
   bool validate(const Sample& sample) const {
     for (const auto& mining_field : miningfields) {
-      if (mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET) continue;
+      if (mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET ||
+          mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::GROUP) continue;
       if (!mining_field.validate(sample)) return false;
     }
 

@@ -50,8 +50,12 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
     cpmml::Prediction pred = model.score(row);
 
-    bool ok = (pred.as_string() == expected) ||
-              (pred.as_double() != double_min() && within_tolerance(pred.as_double(), to_double(expected)));
+    bool ok = (pred.as_string() == expected);
+    if (!ok && pred.as_double() != double_min()) {
+      try {
+        ok = within_tolerance(pred.as_double(), to_double(expected));
+      } catch (const cpmml::ParsingException&) {}
+    }
 
     // Also check named output fields (handles probability/confidence output columns)
     if (!ok) {
@@ -76,6 +80,103 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
       return -1;
     }
     row = reader.read();
+  }
+  return 0;
+}
+
+// ---- transactional scoring mode ---------------------------------------------
+
+static int run_transactional(cpmml::Model& model, CSVReader& reader,
+                              std::unordered_map<std::string, std::string> row) {
+  const std::string out_col = model.output_name();
+
+  if (!row.count(out_col)) {
+    std::cerr << "output column '" << out_col << "' not found in fixture CSV" << std::endl;
+    return -1;
+  }
+
+  // Discover all output column names via a trial score with an empty basket.
+  // This lets us identify the item column by elimination.
+  std::unordered_set<std::string> output_cols;
+  {
+    std::unordered_map<std::string, cpmml::FieldValue> trial;
+    cpmml::Prediction trial_pred = model.score(trial);
+    for (const auto& [k, v] : trial_pred.str_outputs()) output_cols.insert(k);
+    for (const auto& [k, v] : trial_pred.num_outputs()) output_cols.insert(k);
+  }
+
+  // Item column = not "transaction" and not an output column
+  std::string item_col;
+  for (const auto& [k, v] : row) {
+    if (k != "transaction" && !output_cols.count(k)) {
+      item_col = k;
+      break;
+    }
+  }
+  if (item_col.empty()) {
+    std::cerr << "could not detect item column in transactional CSV" << std::endl;
+    return -1;
+  }
+
+  // Group rows by transaction ID
+  struct Transaction {
+    std::vector<std::string> items;
+    std::string expected;
+  };
+  std::vector<Transaction> transactions;
+  std::unordered_map<std::string, size_t> tx_index;
+
+  while (!row.empty()) {
+    const std::string& tx_id = row.at("transaction");
+    const std::string& expected = row.at(out_col);
+
+    auto it = tx_index.find(tx_id);
+    if (it == tx_index.end()) {
+      tx_index[tx_id] = transactions.size();
+      transactions.push_back({{row.at(item_col)}, expected});
+    } else {
+      transactions[it->second].items.push_back(row.at(item_col));
+    }
+    row = reader.read();
+  }
+
+  // Score each transaction
+  for (const auto& tx : transactions) {
+    if (tx.expected.empty()) continue;
+
+    std::unordered_map<std::string, cpmml::FieldValue> sample;
+    sample[item_col] = tx.items;
+
+    cpmml::Prediction pred = model.score(sample);
+
+    bool ok = (pred.as_string() == tx.expected);
+
+    if (!ok) {
+      const auto& sout = pred.str_outputs();
+      auto sit = sout.find(out_col);
+      if (sit != sout.end())
+        ok = (sit->second == tx.expected);
+    }
+    if (!ok) {
+      const auto& nout = pred.num_outputs();
+      auto nit = nout.find(out_col);
+      if (nit != nout.end()) {
+        try {
+          ok = within_tolerance(nit->second, to_double(tx.expected));
+        } catch (const cpmml::ParsingException&) {}
+      }
+    }
+
+    if (!ok) {
+      std::string items_str;
+      for (const auto& i : tx.items) {
+        if (!items_str.empty()) items_str += ",";
+        items_str += i;
+      }
+      std::cerr << "predicted: " << pred.as_string() << "  expected: " << tx.expected
+                << "  items: [" << items_str << "]" << std::endl;
+      return -1;
+    }
   }
   return 0;
 }
@@ -139,6 +240,8 @@ int main(int argc, char** argv) {
 
     if (first.count("forecast"))
       return run_forecast(model, reader, std::move(first));
+    else if (first.count("transaction"))
+      return run_transactional(model, reader, std::move(first));
     else
       return run_score(model, reader, std::move(first));
   } catch (const std::exception& e) {

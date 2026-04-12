@@ -8,6 +8,8 @@
 #define CPMML_MODEL_H
 
 #include <string>
+#include <variant>
+#include <vector>
 
 #include "dagbuilder.h"
 #include "miningfunction.h"
@@ -171,6 +173,20 @@ class InternalModel {
 
     return score;
   };
+
+  using FieldValue = std::variant<std::string, std::vector<std::string>>;
+
+  // Variant-aware score: default flattens to string map.
+  // AssociationModel overrides to extract collection inputs.
+  virtual inline std::unique_ptr<InternalScore> score(
+      const std::unordered_map<std::string, FieldValue>& sample) const {
+    std::unordered_map<std::string, std::string> flat;
+    for (const auto& [k, v] : sample) {
+      if (std::holds_alternative<std::string>(v))
+        flat[k] = std::get<std::string>(v);
+    }
+    return score(flat);
+  }
 
   virtual std::unique_ptr<InternalScore> score_raw(const Sample& sample) const = 0;
 

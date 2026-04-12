@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace cpmml {
@@ -19,6 +20,15 @@ namespace cpmml {
  * Stores which version of the cPMML library is used.
  */
 extern const std::string version;
+
+/**
+ * @brief Value type for model input fields.
+ *
+ * Most fields take a single string value. Association models with transactional
+ * schemas (group/item fields) accept a vector of strings representing the
+ * basket contents for the active item field.
+ */
+using FieldValue = std::variant<std::string, std::vector<std::string>>;
 
 /**
  * @class Exception
@@ -340,6 +350,21 @@ class Model {
    * @endcode
    */
   Prediction score(const std::unordered_map<std::string, std::string>& sample) const;
+
+  /**
+   * @brief Scores the model with collection-valued input fields.
+   *
+   * <p>
+   * Identical to the string-only overload, but accepts FieldValue (variant of
+   * string or vector of strings) as map values.  This is required for
+   * transactional association models where the active item field contains a
+   * basket of multiple values.<br></p>
+   *
+   * @param sample hash map where the keys are field names and the values are
+   * either a single string or a vector of strings (for collection fields).
+   * @return An instance of cpmml::Prediction
+   */
+  Prediction score(const std::unordered_map<std::string, FieldValue>& sample) const;
 
   /**
    * @brief Scores the model against the user input in *sample*.

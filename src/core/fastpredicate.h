@@ -46,6 +46,10 @@ inline bool is_in(const Sample& other, const std::set<Value>& values, const size
 inline bool is_notin(const Sample& other, const std::set<Value>& values, const size_t& feature) {
   return other[feature].cvalue().is_not_in(values);
 }
+
+inline bool is_missing(const Sample& other, const size_t& feature) { return other[feature].value.missing; }
+
+inline bool is_not_missing(const Sample& other, const size_t& feature) { return !other[feature].value.missing; }
 // inline bool is_in (const Sample& other, const std::unordered_set<Value,
 // Value::ValueHash>& values, const size_t& feature){return
 // other[feature].value.is_in(values);} inline bool is_notin (const
@@ -117,6 +121,10 @@ inline std::function<bool(const Sample&)> to_function(const Predicate& predicate
       return std::bind(_xor, std::placeholders::_1, to_function(predicate.predicates));
     case PredicateOpType::PredicateOpTypeValue::SURROGATE:
       return std::bind(surrogate, std::placeholders::_1, to_function(predicate.predicates));
+    case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
+      return std::bind(is_missing, std::placeholders::_1, predicate.feature);
+    case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
+      return std::bind(is_not_missing, std::placeholders::_1, predicate.feature);
   }
 
   return std::bind(_false, std::placeholders::_1);

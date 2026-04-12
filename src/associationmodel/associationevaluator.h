@@ -32,6 +32,11 @@ class AssociationEvaluator : public InternalEvaluator {
     return model.score(sample);
   }
 
+  inline std::unique_ptr<InternalScore> score(
+      const std::unordered_map<std::string, FieldValue>& sample) const override {
+    return model.score(sample);
+  }
+
   inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
     return model.predict(sample);
   }

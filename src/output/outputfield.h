@@ -27,8 +27,8 @@ class OutputField {
   OpType optype;
   //  std::string target_field; // needed in case of multiple outputs, not
   //  supported by choice
-  bool derived;
   OutputExpressionType expression_type;
+  bool derived;
   DataType datatype;
   size_t index;
   std::shared_ptr<OutputExpression> expression;
@@ -47,9 +47,17 @@ class OutputField {
       // both regardless of the target field's datatype.
       const auto feat = OutputExpressionType(node.get_attribute("feature")).value;
       if (feat == OutputExpressionType::OutputExpressionTypeValue::PROBABILITY ||
-          feat == OutputExpressionType::OutputExpressionTypeValue::RESIDUAL) {
+          feat == OutputExpressionType::OutputExpressionTypeValue::RESIDUAL ||
+          feat == OutputExpressionType::OutputExpressionTypeValue::SUPPORT ||
+          feat == OutputExpressionType::OutputExpressionTypeValue::CONFIDENCE ||
+          feat == OutputExpressionType::OutputExpressionTypeValue::LIFT) {
         datatype = DataType::DataTypeValue::DOUBLE;
-      } else if (feat == OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID) {
+      } else if (feat == OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::RULE_VALUE ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::ANTECEDENT ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::CONSEQUENT ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::RULE ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::RULE_ID) {
         datatype = DataType::DataTypeValue::STRING;
       } else if (indexer->contains(model_target)) {
         datatype = indexer->get_type(model_target);

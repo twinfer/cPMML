@@ -23,6 +23,16 @@
  */
 class InternalScore {
  public:
+  // Per-rule data stored for association model output features
+  struct MatchedRule {
+    std::string rule_id;
+    std::string antecedent;   // human-readable antecedent itemset string
+    std::string consequent;   // human-readable consequent itemset string
+    double support    = 0.0;
+    double confidence = 0.0;
+    double lift       = 1.0;
+  };
+
   bool empty = true;
   std::string score;
   std::string raw_score;  // pre-Target-transform prediction (predictedValue uses this)
@@ -31,6 +41,9 @@ class InternalScore {
   std::unordered_map<std::string, double> num_outputs;
   std::unordered_map<std::string, std::string> str_outputs;
   std::string entity_id;
+
+  // Association model: matched rules per algorithm
+  std::unordered_map<std::string, std::vector<MatchedRule>> matched_rules_by_algorithm;
 
   InternalScore() = default;
 
