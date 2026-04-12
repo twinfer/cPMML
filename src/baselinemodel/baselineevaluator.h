@@ -24,21 +24,17 @@ class BaselineEvaluator : public InternalEvaluator {
 
   BaselineModel baseline;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return baseline.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return baseline.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return baseline.score(sample);
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return baseline.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return baseline.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return baseline.target_field.name; }
   inline std::string output_name() const override { return baseline.output_name(); }
+  inline std::string mining_function_name() const override { return baseline.mining_function.to_string(); }
 };
 
 #endif

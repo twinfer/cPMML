@@ -71,21 +71,18 @@ class TextEvaluator : public InternalEvaluator {
     parse_similarity(model);
   }
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return sample.count(text_field) > 0;
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return std::make_unique<InternalScore>(classify(flatten_input(arguments)));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return std::make_unique<InternalScore>(classify(sample));
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return classify(sample);
+  inline bool validate(const Input& arguments) const override {
+    auto flat = flatten_input(arguments);
+    return flat.count(text_field) > 0;
   }
 
   inline std::string get_target_name() const override { return target_field_name; }
   inline std::string output_name() const override { return target_field_name; }
+  inline std::string mining_function_name() const override { return "CLASSIFICATION"; }
 
  private:
   // -----------------------------------------------------------------------

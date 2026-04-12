@@ -46,6 +46,10 @@ class InternalScore {
   // Association model: matched rules per algorithm
   std::unordered_map<std::string, std::vector<MatchedRule>> matched_rules_by_algorithm;
 
+  // Time series forecast data
+  std::vector<double> forecast_values;
+  std::vector<std::pair<double, double>> forecast_with_variance_values;
+
   InternalScore() = default;
 
   explicit InternalScore(const double& score) : empty(false), score(std::to_string(score)), double_score(score) {}

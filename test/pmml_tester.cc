@@ -4,10 +4,10 @@
  *
  * Usage: pmml_tester.exe <model.zip> <fixture.csv>
  *
- * CSV mode is auto-detected from column headers:
- *   "forecast" column present    →  forecast mode: model.forecast(n[, regressors])
- *   otherwise                    →  scoring mode: model.score() per row, primary
- *                                   output column matched via model.output_name()
+ * Mode is determined by model.mining_function():
+ *   "TIMESERIES"         →  forecast mode
+ *   "ASSOCIATION_RULES"  →  transactional or scoring mode (auto-detected)
+ *   otherwise            →  scoring mode
  *******************************************************************************/
 
 #include <cmath>
@@ -29,6 +29,13 @@ static bool within_tolerance(double actual, double expected) {
   return rel <= REL_TOL;
 }
 
+// Convert CSV row (string map) to cpmml::Input
+static cpmml::Input to_input(const std::unordered_map<std::string, std::string>& row) {
+  cpmml::Input input;
+  for (const auto& [k, v] : row) input[k] = v;
+  return input;
+}
+
 // ---- scoring mode -----------------------------------------------------------
 
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
@@ -48,18 +55,18 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
       continue;
     }
 
-    cpmml::Prediction pred = model.score(row);
+    cpmml::Result result = model.evaluate(to_input(row));
 
-    bool ok = (pred.as_string() == expected);
-    if (!ok && !is_double_min(pred.as_double())) {
+    bool ok = (result.as_string() == expected);
+    if (!ok && !is_double_min(result.as_double())) {
       try {
-        ok = within_tolerance(pred.as_double(), to_double(expected));
+        ok = within_tolerance(result.as_double(), to_double(expected));
       } catch (const cpmml::ParsingException&) {}
     }
 
     // Also check named output fields (handles probability/confidence output columns)
     if (!ok) {
-      const auto& nout = pred.num_outputs();
+      const auto nout = result.num_outputs();
       auto nit = nout.find(out_col);
       if (nit != nout.end()) {
         try {
@@ -68,14 +75,14 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
       }
     }
     if (!ok) {
-      const auto& sout = pred.str_outputs();
+      const auto sout = result.str_outputs();
       auto sit = sout.find(out_col);
       if (sit != sout.end())
         ok = (sit->second == expected);
     }
 
     if (!ok) {
-      std::cerr << "predicted: " << pred.as_string() << "  expected: " << expected << "  sample: " << to_string(row)
+      std::cerr << "predicted: " << result.as_string() << "  expected: " << expected << "  sample: " << to_string(row)
                 << std::endl;
       return -1;
     }
@@ -95,22 +102,34 @@ static int run_transactional(cpmml::Model& model, CSVReader& reader,
     return -1;
   }
 
-  // Discover all output column names via a trial score with an empty basket.
-  // This lets us identify the item column by elimination.
-  std::unordered_set<std::string> output_cols;
-  {
-    std::unordered_map<std::string, cpmml::FieldValue> trial;
-    cpmml::Prediction trial_pred = model.score(trial);
-    for (const auto& [k, v] : trial_pred.str_outputs()) output_cols.insert(k);
-    for (const auto& [k, v] : trial_pred.num_outputs()) output_cols.insert(k);
-  }
-
-  // Item column = not "transaction" and not an output column
+  // Detect item column.  Prefer a column literally named "item" (standard
+  // JPMML fixture name).  Fallback: score with a real item to discover all
+  // output columns, then pick the first non-transaction/non-output column.
   std::string item_col;
-  for (const auto& [k, v] : row) {
-    if (k != "transaction" && !output_cols.count(k)) {
-      item_col = k;
-      break;
+  if (row.count("item"))
+    item_col = "item";
+
+  if (item_col.empty()) {
+    // Discover output columns via a trial score with the first row's value
+    // in every candidate column.  Empty-basket scoring may not produce all
+    // output fields, so we try each non-transaction column as item.
+    std::unordered_set<std::string> output_cols;
+    output_cols.insert(out_col);
+    for (const auto& [k, v] : row) {
+      if (k == "transaction" || k == out_col) continue;
+      cpmml::Input trial;
+      trial[k] = std::vector<std::string>{v};
+      try {
+        cpmml::Result r = model.evaluate(trial);
+        for (const auto& [ok, ov] : r.str_outputs()) output_cols.insert(ok);
+        for (const auto& [ok, ov] : r.num_outputs()) output_cols.insert(ok);
+      } catch (...) {}
+    }
+    for (const auto& [k, v] : row) {
+      if (k != "transaction" && !output_cols.count(k)) {
+        item_col = k;
+        break;
+      }
     }
   }
   if (item_col.empty()) {
@@ -144,21 +163,21 @@ static int run_transactional(cpmml::Model& model, CSVReader& reader,
   for (const auto& tx : transactions) {
     if (tx.expected.empty()) continue;
 
-    std::unordered_map<std::string, cpmml::FieldValue> sample;
-    sample[item_col] = tx.items;
+    cpmml::Input input;
+    input[item_col] = tx.items;
 
-    cpmml::Prediction pred = model.score(sample);
+    cpmml::Result result = model.evaluate(input);
 
-    bool ok = (pred.as_string() == tx.expected);
+    bool ok = (result.as_string() == tx.expected);
 
     if (!ok) {
-      const auto& sout = pred.str_outputs();
+      const auto sout = result.str_outputs();
       auto sit = sout.find(out_col);
       if (sit != sout.end())
         ok = (sit->second == tx.expected);
     }
     if (!ok) {
-      const auto& nout = pred.num_outputs();
+      const auto nout = result.num_outputs();
       auto nit = nout.find(out_col);
       if (nit != nout.end()) {
         try {
@@ -173,7 +192,7 @@ static int run_transactional(cpmml::Model& model, CSVReader& reader,
         if (!items_str.empty()) items_str += ",";
         items_str += i;
       }
-      std::cerr << "predicted: " << pred.as_string() << "  expected: " << tx.expected
+      std::cerr << "predicted: " << result.as_string() << "  expected: " << tx.expected
                 << "  items: [" << items_str << "]" << std::endl;
       return -1;
     }
@@ -204,7 +223,15 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
   }
 
   int horizon = static_cast<int>(expected.size());
-  std::vector<double> actual = reg_cols.empty() ? model.forecast(horizon) : model.forecast(horizon, regressors);
+
+  // Build evaluate() input
+  cpmml::Input args;
+  args["horizon"] = horizon;
+  for (const auto& [col, values] : regressors)
+    args[col] = values;
+
+  cpmml::Result result = model.evaluate(args);
+  auto actual = result.series();
 
   if (actual.size() != expected.size()) {
     std::cerr << "size mismatch: got " << actual.size() << "  expected " << expected.size() << std::endl;
@@ -238,9 +265,11 @@ int main(int argc, char** argv) {
       return -1;
     }
 
-    if (first.count("forecast"))
+    std::string mf = model.mining_function();
+
+    if (mf == "TIMESERIES")
       return run_forecast(model, reader, std::move(first));
-    else if (first.count("transaction"))
+    else if (mf == "ASSOCIATION_RULES" && first.count("transaction"))
       return run_transactional(model, reader, std::move(first));
     else
       return run_score(model, reader, std::move(first));

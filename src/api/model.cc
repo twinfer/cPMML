@@ -17,37 +17,15 @@ Model::Model(const std::string& model_filepath) : evaluator(ModelBuilder::build(
 Model::Model(const std::string& model_filepath, const bool zipped = false)
     : evaluator(ModelBuilder::build(model_filepath, zipped)) {}
 
-bool Model::validate(const std::unordered_map<std::string, std::string>& sample) const {
-  return evaluator->validate(sample);
+Result Model::evaluate(const Input& arguments) const {
+  return Result(evaluator->evaluate(arguments));
 }
 
-Prediction Model::score(const std::unordered_map<std::string, std::string>& sample) const {
-  return Prediction(evaluator->score(sample));
-}
-
-Prediction Model::score(const std::unordered_map<std::string, FieldValue>& sample) const {
-  return Prediction(evaluator->score(sample));
-}
-
-std::string Model::predict(const std::unordered_map<std::string, std::string>& sample) const {
-  return evaluator->predict(sample);
-}
-
-std::vector<double> Model::forecast(int horizon) const { return evaluator->forecast(horizon); }
-
-std::vector<double> Model::forecast(int horizon,
-                                    const std::unordered_map<std::string, std::vector<double>>& regressors) const {
-  return evaluator->forecast(horizon, regressors);
-}
-
-std::vector<std::pair<double, double>> Model::forecast_with_variance(int horizon) const {
-  return evaluator->forecast_with_variance(horizon);
-}
-
-std::vector<std::pair<double, double>> Model::forecast_with_variance(
-    int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const {
-  return evaluator->forecast_with_variance(horizon, regressors);
+bool Model::validate(const Input& arguments) const {
+  return evaluator->validate(arguments);
 }
 
 std::string Model::output_name() const { return evaluator->output_name(); }
+
+std::string Model::mining_function() const { return evaluator->mining_function_name(); }
 }  // namespace cpmml

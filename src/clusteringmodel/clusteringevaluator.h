@@ -24,21 +24,17 @@ class ClusteringEvaluator : public InternalEvaluator {
 
   ClusteringModel clustering;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return clustering.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return clustering.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return clustering.score(sample);
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return clustering.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return clustering.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return clustering.target_field.name; }
   inline std::string output_name() const override { return clustering.output_name(); }
+  inline std::string mining_function_name() const override { return clustering.mining_function.to_string(); }
 };
 
 #endif

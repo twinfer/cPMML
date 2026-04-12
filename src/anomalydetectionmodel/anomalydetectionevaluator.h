@@ -61,25 +61,20 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     }
   }
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return inner->validate(sample);
-  }
-
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    double raw = to_double(inner->predict(sample));
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    auto flat = flatten_input(arguments);
+    double raw = to_double(inner->predict(flat));
     double s = is_iforest ? iforest_score(raw) : raw;
     return std::make_unique<InternalScore>(s);
   }
 
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    double raw = to_double(inner->predict(sample));
-    double s = is_iforest ? iforest_score(raw) : raw;
-    return std::to_string(s);
+  inline bool validate(const Input& arguments) const override {
+    return inner->validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return inner->target_field.name; }
   inline std::string output_name() const override { return inner->output_name(); }
+  inline std::string mining_function_name() const override { return "CLASSIFICATION"; }
 
  private:
   double iforest_score(double avg_path) const {

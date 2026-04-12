@@ -18,8 +18,10 @@
  *
  * Implementation of InternalEvaluator wrapping TimeSeriesModel.
  *
- * score() and predict() throw ParsingException — time series models do not
- * score individual samples; use model.forecast(horizon) instead.
+ * evaluate() expects:
+ *   - "horizon" (int or string) — required, number of forecast steps
+ *   - "_variance" (string "true" or int 1) — optional, include variance estimates
+ *   - Any vector<double> entry — treated as a regressor future-values series
  */
 class TimeSeriesEvaluator : public InternalEvaluator {
  public:
@@ -28,33 +30,54 @@ class TimeSeriesEvaluator : public InternalEvaluator {
 
   TimeSeriesModel ts_model;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>&) override {
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    // Extract horizon (required)
+    int horizon = 0;
+    if (auto it = arguments.find("horizon"); it != arguments.end()) {
+      if (std::holds_alternative<int>(it->second))
+        horizon = std::get<int>(it->second);
+      else if (std::holds_alternative<std::string>(it->second))
+        horizon = std::stoi(std::get<std::string>(it->second));
+    }
+    if (horizon <= 0)
+      throw cpmml::ParsingException("TimeSeriesModel requires 'horizon' > 0 in evaluate() arguments");
+
+    // Check for "_variance" flag
+    bool with_variance = false;
+    if (auto it = arguments.find("_variance"); it != arguments.end()) {
+      if (std::holds_alternative<std::string>(it->second))
+        with_variance = (std::get<std::string>(it->second) == "true");
+      else if (std::holds_alternative<int>(it->second))
+        with_variance = (std::get<int>(it->second) != 0);
+    }
+
+    // Extract regressors (any key that is a vector<double>)
+    std::unordered_map<std::string, std::vector<double>> regressors;
+    for (const auto& [k, v] : arguments) {
+      if (k == "horizon" || k == "_variance") continue;
+      if (std::holds_alternative<std::vector<double>>(v))
+        regressors[k] = std::get<std::vector<double>>(v);
+    }
+
+    auto result = std::make_unique<InternalScore>();
+    result->empty = false;
+
+    if (with_variance) {
+      result->forecast_with_variance_values = ts_model.forecast_with_variance(horizon, regressors);
+      for (const auto& [pt, var] : result->forecast_with_variance_values)
+        result->forecast_values.push_back(pt);
+    } else {
+      result->forecast_values = ts_model.forecast(horizon, regressors);
+    }
+
+    return result;
+  }
+
+  inline bool validate(const Input&) const override {
     return true;  // no sample input to validate
   }
 
-  inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>&) const override {
-    throw cpmml::ParsingException("TimeSeriesModel does not support score(); use model.forecast(horizon)");
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>&) const override {
-    throw cpmml::ParsingException("TimeSeriesModel does not support predict(); use model.forecast(horizon)");
-  }
-
-  inline std::vector<double> forecast(int horizon) const override { return ts_model.forecast(horizon, {}); }
-
-  inline std::vector<double> forecast(
-      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const override {
-    return ts_model.forecast(horizon, regressors);
-  }
-
-  inline std::vector<std::pair<double, double>> forecast_with_variance(int horizon) const override {
-    return ts_model.forecast_with_variance(horizon, {});
-  }
-
-  inline std::vector<std::pair<double, double>> forecast_with_variance(
-      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const override {
-    return ts_model.forecast_with_variance(horizon, regressors);
-  }
+  inline std::string mining_function_name() const override { return "TIMESERIES"; }
 };
 
 #endif

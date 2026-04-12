@@ -19,39 +19,26 @@ int main(int argc, char** argv) {
   double elapsed_load = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
 
   CSVReader reader(argv[2]);
-  double n_predict = 0;
+  double n_eval = 0;
   std::unordered_map<std::string, std::string> sample;
-  double elapsed_predict = 0;
+  double elapsed_eval = 0;
   while ((sample = reader.read()).size() > 0) {
     try {
-      start = std::chrono::steady_clock::now();
-      model.predict(sample);
-      end = std::chrono::steady_clock::now();
-      elapsed_predict += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-      n_predict++;
-    } catch (const cpmml::Exception& exception) {
-    }
-  }
+      cpmml::Input input;
+      for (const auto& [k, v] : sample) input[k] = v;
 
-  CSVReader reader_score(argv[2]);
-  double n_score = 0;
-  double elapsed_score = 0;
-  while ((sample = reader_score.read()).size() > 0) {
-    try {
       start = std::chrono::steady_clock::now();
-      model.score(sample);
+      model.evaluate(input);
       end = std::chrono::steady_clock::now();
-      elapsed_score += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-      n_score++;
+      elapsed_eval += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+      n_eval++;
     } catch (const cpmml::Exception& exception) {
     }
   }
 
   std::cout << "\tLoading time: " << std::setprecision(2) << std::fixed << elapsed_load / 1000 / 1000 << " ms";
-  std::cout << "\tScoring time: " << std::setprecision(2) << std::fixed << elapsed_score / n_score / 1000 << " us";
-  std::cout << "\tScoring TPS: " << format_int((int)1e9 / (elapsed_score / n_score));
-  std::cout << "\tPredict time: " << std::setprecision(2) << std::fixed << elapsed_predict / n_predict / 1000 << " us";
-  std::cout << "\tPredict TPS: " << format_int((int)1e9 / (elapsed_predict / n_predict)) << std::endl;
+  std::cout << "\tEvaluate time: " << std::setprecision(2) << std::fixed << elapsed_eval / n_eval / 1000 << " us";
+  std::cout << "\tEvaluate TPS: " << format_int((int)1e9 / (elapsed_eval / n_eval)) << std::endl;
 
   return 0;
 }

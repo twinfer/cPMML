@@ -28,21 +28,17 @@ class KnnEvaluator : public InternalEvaluator {
 
   NearestNeighborModel knn;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return knn.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return knn.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return knn.score(sample);
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return knn.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return knn.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return knn.target_field.name; }
   inline std::string output_name() const override { return knn.output_name(); }
+  inline std::string mining_function_name() const override { return knn.mining_function.to_string(); }
 };
 
 #endif

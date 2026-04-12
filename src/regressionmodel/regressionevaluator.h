@@ -16,12 +16,6 @@
 #include "core/xmlnode.h"
 #include "regressionmodel.h"
 
-/**
- * @class RegressionEvaluator
- *
- * Implementation of InternalEvaluator, it is used as a wrapper of
- * RegressionModel.
- */
 class RegressionEvaluator : public InternalEvaluator {
  public:
   explicit RegressionEvaluator(const XmlNode& node)
@@ -30,22 +24,17 @@ class RegressionEvaluator : public InternalEvaluator {
 
   RegressionModel regression;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return regression.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return regression.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return regression.score(sample);
-  }
-
-  // Simple score, due to the type of value returned is 2/300 ns faster
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return regression.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return regression.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return regression.target_field.name; }
   inline std::string output_name() const override { return regression.output_name(); }
+  inline std::string mining_function_name() const override { return regression.mining_function.to_string(); }
 };
 
 #endif

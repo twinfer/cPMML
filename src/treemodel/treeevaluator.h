@@ -29,22 +29,17 @@ class TreeEvaluator : public InternalEvaluator {
 
   TreeModel tree;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return tree.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return tree.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return tree.score(sample);
-  }
-
-  // Simple score, due to the type of value returned is 2/300 ns faster
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return tree.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return tree.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return tree.target_field.name; }
   inline std::string output_name() const override { return tree.output_name(); }
+  inline std::string mining_function_name() const override { return tree.mining_function.to_string(); }
 };
 
 #endif

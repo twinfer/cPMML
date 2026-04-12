@@ -23,21 +23,17 @@ class ScorecardEvaluator : public InternalEvaluator {
 
   ScorecardModel sc;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return sc.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return sc.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return sc.score(sample);
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return sc.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return sc.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return sc.target_field.name; }
   inline std::string output_name() const override { return sc.output_name(); }
+  inline std::string mining_function_name() const override { return sc.mining_function.to_string(); }
 };
 
 #endif

@@ -24,21 +24,17 @@ class RuleSetEvaluator : public InternalEvaluator {
 
   RuleSetModel ruleset;
 
-  inline bool validate(const std::unordered_map<std::string, std::string>& sample) override {
-    return ruleset.validate(sample);
+  inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
+    return ruleset.score(flatten_input(arguments));
   }
 
-  inline std::unique_ptr<InternalScore> score(
-      const std::unordered_map<std::string, std::string>& sample) const override {
-    return ruleset.score(sample);
-  }
-
-  inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const override {
-    return ruleset.predict(sample);
+  inline bool validate(const Input& arguments) const override {
+    return ruleset.validate(flatten_input(arguments));
   }
 
   inline std::string get_target_name() const override { return ruleset.target_field.name; }
   inline std::string output_name() const override { return ruleset.output_name(); }
+  inline std::string mining_function_name() const override { return ruleset.mining_function.to_string(); }
 };
 
 #endif

@@ -24,11 +24,17 @@ extern const std::string version;
 /**
  * @brief Value type for model input fields.
  *
- * Most fields take a single string value. Association models with transactional
- * schemas (group/item fields) accept a vector of strings representing the
- * basket contents for the active item field.
+ * - std::string: a single scalar value (most fields)
+ * - int: integer parameter (e.g. forecast horizon for time series)
+ * - std::vector<std::string>: collection of items (transactional association)
+ * - std::vector<double>: numeric series (e.g. regressor future values)
  */
-using FieldValue = std::variant<std::string, std::vector<std::string>>;
+using FieldValue = std::variant<std::string, int, std::vector<std::string>, std::vector<double>>;
+
+/**
+ * @brief Convenience alias for model input: field name -> value.
+ */
+using Input = std::unordered_map<std::string, FieldValue>;
 
 /**
  * @class Exception
@@ -128,24 +134,21 @@ class InternalScore;
 namespace cpmml {
 
 /**
- * @class Prediction
- * @brief Class representing a prediction.
+ * @class Result
+ * @brief Unified result of model evaluation.
  *
- * This class has no corresponding PMML element since it contains the output of
- * a PMML model evaluation.
+ * Wraps the output of any PMML model type: classification, regression,
+ * clustering, association, anomaly detection, and time series forecasting.
  *
- * It stores the predicted value, already transformed through <a
- * href="http://dmg.org/pmml/v4-4/Targets.html">PMML Target</a>, along with the
- * additional outputs provided by <a
- * href="http://dmg.org/pmml/v4-4/Output.html">PMML Output</a>. In addition, for
- * classification models allowing the calculation of target probabilities, it
- * provides the probability for each target class.
+ * For standard models, use as_string(), as_double(), distribution(),
+ * num_outputs(), str_outputs(). For time series models, use series() and
+ * series_with_variance().
  */
-class Prediction {
+class Result {
  public:
-  Prediction() = default;
+  Result() = default;
 
-  explicit Prediction(const std::shared_ptr<InternalScore>& score);
+  explicit Result(const std::shared_ptr<InternalScore>& score);
 
   /**
    * @brief It returns the predicted value as a string.
@@ -154,78 +157,52 @@ class Prediction {
 
   /**
    * @brief It returns the predicted value as a double. In case the predicted
-   * value cannot be converted to double, it will return <a
-   * href="https://en.cppreference.com/w/cpp/types/numeric_limits/min">std::numeric_limits<double>::min()</a>.
+   * value cannot be converted to double, it will return
+   * std::numeric_limits<double>::min().
    */
   double as_double() const;
 
   /**
-   * @brief It returns an hash map of string -> double pairs, where the keys are
-   * the target categories and the values are the associated probabilities
-   * computed by the model.
-   *
-   *
-   * <br><p><b>Examples</b></p>
-   * @code{.cpp}
-   * cpmml::Model model(model_filepath);
-   * std::unordered_map<std::string, std::string> sample = {
-   *  {"sepal_length", "6.6"},
-   *  {"sepal_width", "2.9"},
-   *  {"petal_length", "4.6"},
-   *  {"petal_width", "1.3"}
-   * };
-   *
-   * cpmml::Prediction prediction = model.score(sample);
-   * for (const auto &probability : prediction.distribution())
-   *    std::cout << probability.first << ": " << probability.second <<
-   * std::endl;
-   *
-   * // "Iris-virginica: 0.0810811"
-   * // "Iris-setosa: 0"
-   * // "Iris-versicolor: 0.918919"
-   * @endcode
+   * @brief Returns target categories and their associated probabilities.
    */
   std::unordered_map<std::string, double> distribution() const;
 
   /**
-   * @brief It returns an hash map of string -> double pairs, where the keys are
-   * the output field names and the values their corresponding value. Among all
-   * the output fields available for a model, it contains just numeric output
-   * fields.
-   *
-   *
-   * <br><p><b>Examples</b></p>
-   * @code{.cpp}
-   * cpmml::Model model(model_filepath);
-   * std::unordered_map<std::string, std::string> sample = {
-   *  {"sepal_length", "6.6"},
-   *  {"sepal_width", "2.9"},
-   *  {"petal_length", "4.6"},
-   *  {"petal_width", "1.3"}
-   * };
-   *
-   * cpmml::Prediction prediction = model.score(sample);
-   * for (const auto &output : prediction.num_outputs())
-   *    std::cout << output.first << ": " << output.second << std::endl;
-   *
-   * // "Probability_Iris-setosa: 0"
-   * // "Probability_Iris-virginica: 0.0810811"
-   * // "Probability_Iris-versicolor: 0.918919"
-   * @endcode
+   * @brief Returns numeric output fields (probabilities, confidence, etc.).
    */
   std::unordered_map<std::string, double> num_outputs() const;
 
   /**
-   * @brief It returns an hash map of string -> string pairs, where the keys are
-   * the output field names and the values their corresponding value. Among all
-   * the output fields available for a model, it contains just categorical
-   * output fields.
+   * @brief Returns categorical (string) output fields.
    */
   std::unordered_map<std::string, std::string> str_outputs() const;
 
+  /**
+   * @brief Returns time series point forecasts.
+   *
+   * For non-time-series models, returns an empty vector.
+   */
+  std::vector<double> series() const;
+
+  /**
+   * @brief Returns time series forecasts with variance estimates.
+   *
+   * Each pair is {point_forecast, variance}. For non-time-series models,
+   * returns an empty vector.
+   */
+  std::vector<std::pair<double, double>> series_with_variance() const;
+
+  /**
+   * @brief Returns true if the result contains no prediction.
+   */
+  bool empty() const;
+
  private:
-  std::shared_ptr<InternalScore> score;
+  std::shared_ptr<InternalScore> score_;
 };
+
+// Backward compatibility alias
+using Prediction = Result;
 }  // namespace cpmml
 
 class InternalEvaluator;
@@ -234,6 +211,10 @@ namespace cpmml {
 /**
  *  @class  Model
  *  @brief  Class representing a PMML model.
+ *
+ *  Provides a single evaluate() entry point for all model types:
+ *  classification, regression, clustering, association, anomaly detection,
+ *  and time series forecasting.
  */
 class Model {
  public:
@@ -245,235 +226,71 @@ class Model {
    * @brief Constructs a cpmml::Model instance representing the PMML model
    * stored at *model_filepath*.
    *
-   * <p>
-   * It triggers the *model load* process: the XML elements are visited and the
-   * corresponding internal cPMML objects are built.<br>
-   *
-   * It is responsibility of the user to ensure the input file is compliant with
-   * the <a href="http://dmg.org/pmml/v4-4/pmml-4-4.xsd">PMML XML schema</a>.
-   * Creating cpmml::Model instances from incorrect PMML files may result in
-   * undefined behavior.<br>
-   *
-   * cpmml::ParsingException will be thrown in case *model_path* does not
-   * exists.<br>
-   *
-   * File extension is not taken into account.<br></p>
-   *
-   *
    * @param model_filepath path to the XML file containing the PMML model.
-   * @param zipped *(optional)* it allows to specify whether the input file is
-   * compressed in zip format. The default value is *false*.
+   * @param zipped whether the input file is compressed in zip format.
    *
    * @throws cpmml::ParsingException
-   * @throws cpmml::InvalidValueException
-   * @throws cpmml::MissingValueException
-   *
-   *
-   * <br><p><b>Examples</b></p>
-   * @code{.cpp}
-   * cpmml::Model model("IrisTree.xml");
-   * @endcode
-   * @code{.cpp}
-   * cpmml::Model model("AuditRandomForest.zip", true);
-   * @endcode
    */
   Model(const std::string& model_filepath, const bool zipped);
 
   /**
-   * @brief Validates user input in *sample* against the constraints defined in
-   * the <a href="http://dmg.org/pmml/v4-4/DataDictionary.html">PMML
-   * DataDictionary</a>.
+   * @brief Evaluate the model against the given input arguments.
    *
-   * <p>The PMML standard allows to define constraints on every input field of
-   * the model in order to determine the validity of the values assumed by the
-   * variables. For continuous fields, it is verified they fall in a certain
-   * range. For categorical fields, it is checked they assume a value among a
-   * list of possible ones. Being PMML strongly typed, also the type of the
-   * input variables is checked.<br>
+   * This is the single entry point for all PMML model types.
    *
-   * In addition, if <a
-   * href="http://dmg.org/pmml/v4-4/Transformations.html">PMML
-   * TransformationDictionary</a> is present, it is also checked the possibility
-   * to compute all transformations needed for the model.<br></p>
-   *
-   *
-   * @param sample hash map where the keys are strings representing feature
-   * names and the values are strings representing features values.
-   * @return *true* in case of valid input *sample*.  *false* otherwise.
-   *
-   *
-   * <br><p><b>Examples</b></p>
+   * For standard models (classification, regression, clustering, etc.),
+   * pass feature name/value pairs as strings:
    * @code{.cpp}
-   * cpmml::Model model("IrisTree.xml");
-   * std::unordered_map<std::string, std::string> sample = {
-   *   {"sepal_length", "6.6"},
-   *   {"sepal_width", "2.9"},
-   *   {"petal_length", "4.6"},
-   *   {"petal_width", "1.3"}
-   * };
-   *
-   * if(!model.validate(sample)) std::cout << "Invalid input for model" <<
-   * std::endl;
+   * cpmml::Input sample = {{"age", "35"}, {"income", "50000"}};
+   * cpmml::Result result = model.evaluate(sample);
+   * std::string label = result.as_string();
    * @endcode
-   */
-  bool validate(const std::unordered_map<std::string, std::string>& sample) const;
-
-  /**
-   * @brief Scores the model against the user input in *sample*.
    *
-   * <p>
-   * It triggers the *model scoring* process: the input values are preprocessed,
-   * validated, used as input for the PMML model and the resulting prediction is
-   * postprocessed.<br></p>
+   * For association models with transactional schemas, pass item baskets
+   * as vector<string>:
+   * @code{.cpp}
+   * cpmml::Input basket = {{"item", std::vector<std::string>{"bread", "milk"}}};
+   * cpmml::Result result = model.evaluate(basket);
+   * @endcode
    *
+   * For time series models, pass horizon (and optional regressors):
+   * @code{.cpp}
+   * cpmml::Input args = {{"horizon", 12}};
+   * cpmml::Result result = model.evaluate(args);
+   * auto forecast = result.series();  // vector<double> of length 12
+   * @endcode
    *
-   * @param sample hash map where the keys are strings representing feature
-   * names and the values are strings representing features values.
-   * @return An instance of cpmml::Prediction
+   * @param arguments Input fields for the model. Default is empty (used by
+   * time series models that need no external input beyond horizon).
+   * @return cpmml::Result containing the prediction/forecast.
    *
    * @throws cpmml::InvalidValueException
    * @throws cpmml::MissingValueException
    * @throws cpmml::MathException
-   *
-   *
-   * <br><p><b>Examples</b></p>
-   * @code{.cpp}
-   * cpmml::Model model("IrisTree.xml");
-   * std::unordered_map<std::string, std::string> sample = {
-   *   {"sepal_length", "6.6"},
-   *   {"sepal_width", "2.9"},
-   *   {"petal_length", "4.6"},
-   *   {"petal_width", "1.3"}
-   * };
-   *
-   * cpmml::Prediction prediction = model.score(sample);
-   * @endcode
+   * @throws cpmml::ParsingException
    */
-  Prediction score(const std::unordered_map<std::string, std::string>& sample) const;
+  Result evaluate(const Input& arguments = {}) const;
 
   /**
-   * @brief Scores the model with collection-valued input fields.
+   * @brief Validates user input against DataDictionary constraints.
    *
-   * <p>
-   * Identical to the string-only overload, but accepts FieldValue (variant of
-   * string or vector of strings) as map values.  This is required for
-   * transactional association models where the active item field contains a
-   * basket of multiple values.<br></p>
-   *
-   * @param sample hash map where the keys are field names and the values are
-   * either a single string or a vector of strings (for collection fields).
-   * @return An instance of cpmml::Prediction
+   * @param arguments Input fields to validate.
+   * @return true if valid, false otherwise.
    */
-  Prediction score(const std::unordered_map<std::string, FieldValue>& sample) const;
-
-  /**
-   * @brief Scores the model against the user input in *sample*.
-   *
-   * <p>
-   * It triggers a minimal version of the *model scoring* process: the input
-   * values are preprocessed, validated, used as input for the PMML model and
-   * the raw resulting prediction is returned.<br>
-   *
-   * It has been included to easily retrieve the raw prediction value in case of
-   * no interest for other model outputs (eg. probabilities, etc.).<br>
-   *
-   * In addition, returning the raw prediction allows further internal
-   * optimization. Thus, cpmml::Model::predict achieves a significant speedup
-   * compared to cpmml::Model::score.<br>
-   * </p>
-   *
-   *
-   * @param sample hash map where the keys are strings representing feature
-   * names and the values are strings representing features values.
-   * @return A string containing the raw prediction.
-   *
-   * @throws cpmml::InvalidValueException
-   * @throws cpmml::MissingValueException
-   * @throws cpmml::MathException
-   *
-   *
-   * <br><p><b>Examples</b></p>
-   * @code{.cpp}
-   * cpmml::Model model("IrisTree.xml");
-   * std::unordered_map<std::string, std::string> sample = {
-   *   {"sepal_length", "6.6"},
-   *   {"sepal_width", "2.9"},
-   *   {"petal_length", "4.6"},
-   *   {"petal_width", "1.3"}
-   * };
-   *
-   * std::cout << model.predict(sample); // "Iris-versicolor"
-   * @endcode
-   */
-  std::string predict(const std::unordered_map<std::string, std::string>& sample) const;
-
-  /**
-   * @brief Generates an h-step-ahead forecast for TimeSeriesModel.
-   *
-   * Returns a vector of length *horizon* where element i is the (i+1)-step
-   * ahead prediction.  Throws cpmml::ParsingException if the loaded model is
-   * not a TimeSeriesModel.
-   *
-   * @param horizon Number of steps to forecast (must be > 0).
-   * @return std::vector<double> of length *horizon*.
-   *
-   * @throws cpmml::ParsingException if the model does not support forecasting.
-   *
-   * <br><p><b>Example</b></p>
-   * @code{.cpp}
-   * cpmml::Model model("AirPassengers_ETS.zip", true);
-   * auto forecast = model.forecast(12);  // 12-step-ahead
-   * for (auto v : forecast) std::cout << v << "\n";
-   * @endcode
-   */
-  std::vector<double> forecast(int horizon) const;
-
-  /**
-   * @brief Generates an h-step-ahead forecast with user-supplied regressor values.
-   *
-   * Required when the model contains a DynamicRegressor with
-   * futureValuesMethod="userSupplied". Provide future values for each
-   * regressor field as a vector of length >= horizon.
-   *
-   * @param horizon Number of steps to forecast (must be > 0).
-   * @param regressors Map of {field_name: [x(T+1), x(T+2), ..., x(T+horizon)]}.
-   * @return std::vector<double> of length *horizon*.
-   */
-  std::vector<double> forecast(int horizon,
-                               const std::unordered_map<std::string, std::vector<double>>& regressors) const;
-
-  /**
-   * @brief Generates an h-step-ahead forecast with prediction variance for TimeSeriesModel.
-   *
-   * Returns a vector of length *horizon* where each element is a pair
-   * {point_forecast, variance}.  Variance is computed via MA(∞) psi-weight
-   * expansion (ARIMA CLS), Kalman P propagation (ARIMA Kalman), or RMSE²×h
-   * approximation (ETS/SSM).
-   *
-   * @param horizon Number of steps to forecast (must be > 0).
-   * @return std::vector<std::pair<double,double>> of length *horizon*.
-   *
-   * @throws cpmml::ParsingException if the model does not support forecasting.
-   */
-  std::vector<std::pair<double, double>> forecast_with_variance(int horizon) const;
-
-  /**
-   * @brief forecast_with_variance with user-supplied regressor values.
-   */
-  std::vector<std::pair<double, double>> forecast_with_variance(
-      int horizon, const std::unordered_map<std::string, std::vector<double>>& regressors) const;
+  bool validate(const Input& arguments) const;
 
   /**
    * @brief Returns the name of the primary output field produced by this model.
-   *
-   * This is the name of the first OutputField with feature="predictedValue" (or
-   * "predictedDisplayValue") in the PMML Output element. If no Output element is
-   * present, the target field name from MiningSchema is returned instead.
-   *
-   * Use this name as the key when looking up the primary prediction in a CSV
-   * fixture or when comparing against jpmml-evaluator output.
    */
   std::string output_name() const;
+
+  /**
+   * @brief Returns the PMML mining function type as a string.
+   *
+   * Possible values: "CLASSIFICATION", "REGRESSION", "CLUSTERING",
+   * "ASSOCIATION_RULES", "TIMESERIES", "MIXED".
+   */
+  std::string mining_function() const;
 
  private:
   std::shared_ptr<InternalEvaluator> evaluator;

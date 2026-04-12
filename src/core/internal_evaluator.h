@@ -32,6 +32,9 @@
  */
 class InternalEvaluator {
  public:
+  using FieldValue = std::variant<std::string, int, std::vector<std::string>, std::vector<double>>;
+  using Input = std::unordered_map<std::string, FieldValue>;
+
   std::shared_ptr<Indexer> indexer;
   std::string name;
   std::string version;
@@ -60,49 +63,16 @@ class InternalEvaluator {
                                       ? TransformationDictionary(node.get_child("TransformationDictionary"), indexer)
                                       : TransformationDictionary()) {};
 
-  virtual inline bool validate(const std::unordered_map<std::string, std::string>& sample) { return false; }
+  // Single evaluation entry point — all subclasses must implement.
+  virtual std::unique_ptr<InternalScore> evaluate(const Input& arguments) const = 0;
 
-  using FieldValue = std::variant<std::string, std::vector<std::string>>;
-
-  virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const = 0;
-
-  virtual std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, FieldValue>& sample) const {
-    // Default: extract string values and delegate to the string-only overload.
-    // AssociationEvaluator overrides this to pass collections through.
-    std::unordered_map<std::string, std::string> flat;
-    for (const auto& [k, v] : sample) {
-      if (std::holds_alternative<std::string>(v))
-        flat[k] = std::get<std::string>(v);
-      else
-        flat[k] = "";  // non-association models ignore collection fields
-    }
-    return score(flat);
-  }
-
-  // Simple score, due to the type of value returned is 2/300 ns faster
-  virtual std::string predict(const std::unordered_map<std::string, std::string>& sample) const = 0;
+  virtual inline bool validate(const Input& arguments) const { return false; }
 
   virtual inline std::string get_target_name() const { return ""; }
 
   virtual inline std::string output_name() const { return get_target_name(); }
 
-  virtual std::vector<double> forecast(int /*horizon*/) const {
-    throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
-  }
-
-  virtual std::vector<double> forecast(
-      int /*horizon*/, const std::unordered_map<std::string, std::vector<double>>& /*regressors*/) const {
-    throw cpmml::ParsingException("forecast() is only available for TimeSeriesModel");
-  }
-
-  virtual std::vector<std::pair<double, double>> forecast_with_variance(int /*horizon*/) const {
-    throw cpmml::ParsingException("forecast_with_variance() is only available for TimeSeriesModel");
-  }
-
-  virtual std::vector<std::pair<double, double>> forecast_with_variance(
-      int /*horizon*/, const std::unordered_map<std::string, std::vector<double>>& /*regressors*/) const {
-    throw cpmml::ParsingException("forecast_with_variance() is only available for TimeSeriesModel");
-  }
+  virtual inline std::string mining_function_name() const { return ""; }
 
   InternalEvaluator(const InternalEvaluator&) = default;
 
@@ -113,6 +83,19 @@ class InternalEvaluator {
   InternalEvaluator& operator=(InternalEvaluator&&) = default;
 
   virtual ~InternalEvaluator() = default;
+
+ protected:
+  // Helper: flatten Input → unordered_map<string, string> for standard models.
+  static std::unordered_map<std::string, std::string> flatten_input(const Input& args) {
+    std::unordered_map<std::string, std::string> flat;
+    for (const auto& [k, v] : args) {
+      if (std::holds_alternative<std::string>(v))
+        flat[k] = std::get<std::string>(v);
+      else if (std::holds_alternative<int>(v))
+        flat[k] = std::to_string(std::get<int>(v));
+    }
+    return flat;
+  }
 };
 
 #endif
