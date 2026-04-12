@@ -68,18 +68,22 @@ class MiningSchema {
     for (const auto& miningfield : miningfields) {
       if (miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::TARGET) {
         try {
-          sample.change_value(miningfield.index, miningfield.createValue(input.at(miningfield.name)));
-          if (miningfield.hasInvalidTreatment || miningfield.hasOutlierTreatment) {
-            Value tmp_value = sample.operator[](miningfield.index).value;
-            if (miningfield.hasInvalidTreatment)
-              if (miningfield.is_invalid(tmp_value))
-                sample.change_value(miningfield.index, miningfield.handle_invalid(tmp_value));
+          const std::string& raw = input.at(miningfield.name);
+          if (raw.empty()) {
+            sample.change_value(miningfield.index, miningfield.handle_missing());
+          } else {
+            sample.change_value(miningfield.index, miningfield.createValue(raw));
+            if (miningfield.hasInvalidTreatment || miningfield.hasOutlierTreatment) {
+              Value tmp_value = sample.operator[](miningfield.index).value;
+              if (miningfield.hasInvalidTreatment)
+                if (miningfield.is_invalid(tmp_value))
+                  sample.change_value(miningfield.index, miningfield.handle_invalid(tmp_value));
 
-            if (miningfield.hasOutlierTreatment)
-              if (miningfield.is_outlier(tmp_value))
-                sample.change_value(miningfield.index, miningfield.handle_outlier(tmp_value));
+              if (miningfield.hasOutlierTreatment)
+                if (miningfield.is_outlier(tmp_value))
+                  sample.change_value(miningfield.index, miningfield.handle_outlier(tmp_value));
+            }
           }
-
         } catch (const std::out_of_range& exception) {  // field is missing
           sample.change_value(miningfield.index, miningfield.handle_missing());
         } catch (const cpmml::Exception& exception) {  // field cannot be converted to double

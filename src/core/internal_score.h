@@ -25,6 +25,7 @@ class InternalScore {
  public:
   bool empty = true;
   std::string score;
+  std::string raw_score;  // pre-Target-transform prediction (predictedValue uses this)
   double double_score = double_min();
   std::unordered_map<std::string, double> probabilities;
   std::unordered_map<std::string, double> num_outputs;

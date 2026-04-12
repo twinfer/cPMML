@@ -37,6 +37,31 @@ class PredictedValue : public OutputExpression {
   inline Value eval(Sample& sample) const override { return sample[index].value; }
 
   inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const override {
+    return score.raw_score.empty() ? score.score : score.raw_score;
+  };
+};
+
+/**
+ * @class PredictedDisplayValue
+ *
+ * Returns the display-value-transformed prediction (after Target processing).
+ */
+class PredictedDisplayValue : public OutputExpression {
+ public:
+  std::string field_name;
+  size_t index;
+
+  PredictedDisplayValue() : index(std::numeric_limits<size_t>::max()) {}
+
+  PredictedDisplayValue(const std::string& field_name, const std::shared_ptr<Indexer>& indexer,
+                        const size_t& output_index, const DataType& output_type)
+      : OutputExpression(output_index, output_type, indexer),
+        field_name(field_name),
+        index(indexer->get_or_set(field_name)) {}
+
+  inline Value eval(Sample& sample) const override { return sample[index].value; }
+
+  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const override {
     return score.score;
   };
 };

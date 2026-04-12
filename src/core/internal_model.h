@@ -165,6 +165,7 @@ class InternalModel {
     }
 
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
+    score->raw_score = score->score;  // preserve pre-Target prediction
     target(*score);
     output.add_output(internal_sample, *score);
 
@@ -233,7 +234,7 @@ class InternalModel {
                          mining_function.value == MiningFunction::MiningFunctionType::ASSOCIATION_RULES)
                             ? DataType::DataTypeValue::STRING
                             : DataType::DataTypeValue::DOUBLE;
-      MiningField target_placeholder(indexer->random_name(), datatype);
+      MiningField target_placeholder("_target", datatype);
       indexer->get_or_set(target_placeholder.name, target_placeholder.datatype);
 
       return target_placeholder;

@@ -209,7 +209,12 @@ class NearestNeighborModel : public InternalModel {
     // Ordered feature columns matching knn_inputs
     std::vector<std::string> feat_cols;
     feat_cols.reserve(knn_inputs.size());
-    for (const auto& ki : knn_inputs) feat_cols.push_back(field_to_col.at(ki.field_name));
+    for (const auto& ki : knn_inputs) {
+      if (!field_to_col.count(ki.field_name))
+        throw cpmml::ParsingException("KNNInput field '" + ki.field_name +
+                                       "' not found in TrainingInstances (derived-field KNNInputs not yet supported)");
+      feat_cols.push_back(field_to_col.at(ki.field_name));
+    }
 
     // Read rows from InlineTable
     std::vector<Eigen::VectorXd> rows;

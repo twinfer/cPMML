@@ -35,7 +35,7 @@ class OutputExpressionBuilder {
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE:
-        return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
+        return std::make_shared<PredictedDisplayValue>(model_target, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE:
         return std::make_shared<TransformedValue>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PROBABILITY:

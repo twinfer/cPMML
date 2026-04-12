@@ -127,17 +127,22 @@ int main(int argc, char** argv) {
     return -1;
   }
 
-  cpmml::Model model(argv[1], true);
-  CSVReader reader(argv[2]);
+  try {
+    cpmml::Model model(argv[1], true);
+    CSVReader reader(argv[2]);
 
-  auto first = reader.read();
-  if (first.empty()) {
-    std::cerr << "empty CSV: " << argv[2] << "\n";
+    auto first = reader.read();
+    if (first.empty()) {
+      std::cerr << "empty CSV: " << argv[2] << "\n";
+      return -1;
+    }
+
+    if (first.count("forecast"))
+      return run_forecast(model, reader, std::move(first));
+    else
+      return run_score(model, reader, std::move(first));
+  } catch (const std::exception& e) {
+    std::cerr << e.what() << std::endl;
     return -1;
   }
-
-  if (first.count("forecast"))
-    return run_forecast(model, reader, std::move(first));
-  else
-    return run_score(model, reader, std::move(first));
 }
