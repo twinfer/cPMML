@@ -41,6 +41,7 @@ class InternalScore {
   std::unordered_map<std::string, double> num_outputs;
   std::unordered_map<std::string, std::string> str_outputs;
   std::string entity_id;
+  std::vector<std::string> ranked_entity_ids;  // KNN clustering: neighbor IDs in distance order
 
   // Association model: matched rules per algorithm
   std::unordered_map<std::string, std::vector<MatchedRule>> matched_rules_by_algorithm;

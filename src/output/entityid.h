@@ -19,13 +19,23 @@
  */
 class EntityId : public OutputExpression {
  public:
-  EntityId() {}
+  int rank;
 
-  EntityId(const XmlNode& /*node*/, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
+  EntityId() : rank(1) {}
+
+  EntityId(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
            const DataType& output_type)
-      : OutputExpression(output_index, output_type, indexer) {}
+      : OutputExpression(output_index, output_type, indexer),
+        rank(node.exists_attribute("rank") ? static_cast<int>(node.get_long_attribute("rank")) : 1) {}
 
   inline virtual std::string eval_str(Sample& /*sample*/, const InternalScore& score) const override {
+    // Ranked entity IDs (KNN clustering: neighbor1, neighbor2, ...)
+    if (!score.ranked_entity_ids.empty()) {
+      const int idx = rank - 1;
+      if (idx >= 0 && idx < static_cast<int>(score.ranked_entity_ids.size()))
+        return score.ranked_entity_ids[idx];
+      return "";
+    }
     return score.entity_id;
   };
 };

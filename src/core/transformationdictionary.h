@@ -46,6 +46,7 @@ class TransformationDictionary {
   inline void add_derived_field(const DerivedField& derived_field) {
     raw_derivedfields[derived_field.name] = derived_field;
     derivedfields.push_back(derived_field);
+    empty = false;
   }
 };
 

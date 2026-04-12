@@ -73,10 +73,14 @@ class NearestNeighborModel : public InternalModel {
   double minkowski_p;
   std::string categorical_method;  // to_lower of categoricalScoringMethod
   std::string continuous_method;   // to_lower of continuousScoringMethod
+  std::string instance_id_variable;  // instanceIdVariable attribute (for clustering)
+  bool is_clustering = false;
+  bool uses_derived_inputs = false;  // KNNInputs reference DerivedFields
 
   std::vector<KnnInput> knn_inputs;
   Eigen::MatrixXd training_features;  // [n_instances x n_features]
   std::vector<std::string> training_targets;
+  std::vector<std::string> training_instance_ids;  // per-instance ID (instanceIdVariable)
   std::vector<std::string> classes;
 
   // --- Constructors ---
@@ -95,7 +99,9 @@ class NearestNeighborModel : public InternalModel {
                                         : node.get_attribute("categoricalScoringMethod"))),
         continuous_method(to_lower(node.get_attribute("continuousScoringMethod") == "null"
                                        ? "average"
-                                       : node.get_attribute("continuousScoringMethod"))) {
+                                       : node.get_attribute("continuousScoringMethod"))),
+        instance_id_variable(node.exists_attribute("instanceIdVariable") ? node.get_attribute("instanceIdVariable") : ""),
+        is_clustering(mining_function.value == MiningFunction::MiningFunctionType::CLUSTERING) {
     parse_metric(node);
     parse_knn_inputs(node, indexer);
     parse_training_instances(node);
@@ -104,7 +110,7 @@ class NearestNeighborModel : public InternalModel {
       std::unordered_set<std::string> seen;
       for (const auto& t : training_targets)
         if (seen.insert(t).second) classes.push_back(t);
-    } else {
+    } else if (!is_clustering) {
       classes.push_back(mining_schema.target.name);
     }
   }
@@ -114,6 +120,21 @@ class NearestNeighborModel : public InternalModel {
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     const Eigen::VectorXd query = build_query(sample);
     auto neighbors = find_k_nearest(query);
+
+    if (is_clustering) {
+      // Clustering: return nearest neighbor instance IDs
+      auto result = std::make_unique<InternalScore>();
+      if (!neighbors.empty()) {
+        const std::string& best_id = training_instance_ids[neighbors[0].second];
+        result->score = best_id;
+        result->entity_id = best_id;
+        result->empty = false;
+      }
+      // Populate ranked entity IDs for entityId rank=N output fields
+      for (const auto& [dist, idx] : neighbors)
+        result->ranked_entity_ids.push_back(training_instance_ids[idx]);
+      return result;
+    }
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
       const double val = to_double(regress(neighbors));
@@ -134,6 +155,9 @@ class NearestNeighborModel : public InternalModel {
     const Eigen::VectorXd query = build_query(sample);
     auto neighbors = find_k_nearest(query);
 
+    if (is_clustering) {
+      return neighbors.empty() ? "" : training_instance_ids[neighbors[0].second];
+    }
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) return regress(neighbors);
 
     return classify(neighbors);
@@ -192,38 +216,85 @@ class NearestNeighborModel : public InternalModel {
       const std::string col = (f.get_attribute("column") == "null") ? fname : f.get_attribute("column");
       field_to_col[fname] = col;
     }
-    // Target column: prefer the first continuous target (MIXED models may have several)
-    std::string primary_target_field = mining_schema.target.name;
-    if (indexer->get_type(primary_target_field).value == DataType::DataTypeValue::STRING) {
-      for (const auto& mf : mining_schema.miningfields) {
-        if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::TARGET &&
-            indexer->get_type(mf.name).value != DataType::DataTypeValue::STRING) {
-          primary_target_field = mf.name;
-          break;
+
+    // Instance ID column (for clustering models with instanceIdVariable)
+    std::string id_col;
+    if (!instance_id_variable.empty())
+      id_col = field_to_col.count(instance_id_variable) ? field_to_col.at(instance_id_variable) : instance_id_variable;
+
+    // Target column (skip for clustering which has no target)
+    std::string target_col;
+    if (!is_clustering && !mining_schema.target.empty) {
+      std::string primary_target_field = mining_schema.target.name;
+      if (indexer->get_type(primary_target_field).value == DataType::DataTypeValue::STRING) {
+        for (const auto& mf : mining_schema.miningfields) {
+          if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::TARGET &&
+              indexer->get_type(mf.name).value != DataType::DataTypeValue::STRING) {
+            primary_target_field = mf.name;
+            break;
+          }
         }
       }
+      target_col = field_to_col.count(primary_target_field) ? field_to_col.at(primary_target_field) : primary_target_field;
     }
-    std::string target_col =
-        field_to_col.count(primary_target_field) ? field_to_col.at(primary_target_field) : primary_target_field;
 
-    // Ordered feature columns matching knn_inputs
-    std::vector<std::string> feat_cols;
-    feat_cols.reserve(knn_inputs.size());
+    // Check if KNNInputs reference DerivedFields (not directly in InstanceFields)
+    uses_derived_inputs = false;
     for (const auto& ki : knn_inputs) {
-      if (!field_to_col.count(ki.field_name))
-        throw cpmml::ParsingException("KNNInput field '" + ki.field_name +
-                                       "' not found in TrainingInstances (derived-field KNNInputs not yet supported)");
-      feat_cols.push_back(field_to_col.at(ki.field_name));
+      if (!field_to_col.count(ki.field_name)) {
+        uses_derived_inputs = true;
+        break;
+      }
+    }
+
+    // Build ordered feature columns for direct (non-derived) KNNInputs
+    std::vector<std::string> feat_cols;
+    if (!uses_derived_inputs) {
+      feat_cols.reserve(knn_inputs.size());
+      for (const auto& ki : knn_inputs)
+        feat_cols.push_back(field_to_col.at(ki.field_name));
     }
 
     // Read rows from InlineTable
     std::vector<Eigen::VectorXd> rows;
-    for (const auto& row : ti.get_child("InlineTable").get_childs("row")) {
-      Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
-      for (size_t i = 0; i < feat_cols.size(); i++)
-        fv[static_cast<Eigen::Index>(i)] = Value(row.get_child(feat_cols[i]).value()).value;
-      rows.push_back(fv);
-      training_targets.push_back(row.get_child(target_col).value());
+    for (const auto& xml_row : ti.get_child("InlineTable").get_childs("row")) {
+      if (uses_derived_inputs) {
+        // Apply LocalTransformations to compute derived features from raw training data.
+        std::unordered_map<std::string, std::string> raw_input;
+        for (const auto& [field, col] : field_to_col) {
+          if (xml_row.exists_child(col))
+            raw_input[field] = xml_row.get_child(col).value();
+        }
+        Sample train_sample = base_sample;
+        mining_schema.prepare(train_sample, raw_input);
+        if (!transformation_dictionary.empty)
+          for (const auto& df_name : derivedfields_dag)
+            transformation_dictionary[df_name].prepare(train_sample);
+
+        // Extract KNNInput values from the transformed sample
+        Eigen::VectorXd fv(static_cast<Eigen::Index>(knn_inputs.size()));
+        for (size_t i = 0; i < knn_inputs.size(); i++)
+          fv[static_cast<Eigen::Index>(i)] = train_sample[knn_inputs[i].field_index].value.value;
+        rows.push_back(fv);
+      } else {
+        // Direct KNNInputs: read feature columns directly from InlineTable
+        Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
+        for (size_t i = 0; i < feat_cols.size(); i++)
+          fv[static_cast<Eigen::Index>(i)] = Value(xml_row.get_child(feat_cols[i]).value()).value;
+        rows.push_back(fv);
+      }
+
+      // Read target value (classification/regression)
+      if (!target_col.empty() && xml_row.exists_child(target_col))
+        training_targets.push_back(xml_row.get_child(target_col).value());
+      else
+        training_targets.push_back("");
+
+      // Read instance ID (clustering)
+      if (!id_col.empty() && xml_row.exists_child(id_col))
+        training_instance_ids.push_back(xml_row.get_child(id_col).value());
+      else
+        training_instance_ids.push_back(std::to_string(training_instance_ids.size() + 1));
     }
 
     // Build training matrix

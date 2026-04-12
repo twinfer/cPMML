@@ -20,7 +20,7 @@ It exposes a minimalist and user-friendly API targeting high performance, with a
 | `GeneralRegressionModel` | GLMs (linear, multinomial logistic, ordinal multinomial, Poisson, gamma, tweedie) |
 | `NeuralNetwork` | Feed-forward neural networks |
 | `SupportVectorMachineModel` | SVM classification and regression (SupportVectors and Coefficients representations) |
-| `NearestNeighborModel` | k-NN (8 distance/similarity metrics, per-field compare functions, weighted voting) |
+| `NearestNeighborModel` | k-NN classification, regression, and clustering (8 distance/similarity metrics, per-field compare functions, weighted voting, derived-field KNNInputs, instanceIdVariable) |
 | `NaiveBayesModel` | Naive Bayes |
 | `ClusteringModel` | k-means clustering |
 | `RuleSetModel` | Rule sets (simple and compound rules) |
