@@ -54,7 +54,7 @@ class Discretize : public Expression {
     }
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
 
     if (input.missing) return mapmissing_to;

@@ -47,6 +47,8 @@ class ModelBuilder {
     if (!result) throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
 
     XmlNode xmlNode(document.child("PMML"));
+    // Set up per-model string converter context for thread safety.
+    // The evaluator constructor will create the Indexer; we set the scope after.
     std::unique_ptr<InternalEvaluator> evaluator;
     if (xmlNode.exists_child("MiningModel"))
       evaluator = std::make_unique<EnsembleEvaluator>(xmlNode);

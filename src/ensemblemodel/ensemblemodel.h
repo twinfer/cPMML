@@ -9,9 +9,20 @@
 
 #include <memory>
 
+#include "associationmodel/associationmodel.h"
+#include "baselinemodel/baselinemodel.h"
+#include "clusteringmodel/clusteringmodel.h"
 #include "core/internal_model.h"
+#include "gaussianprocessmodel/gaussianprocessmodel.h"
+#include "generalregressionmodel/generalregressionmodel.h"
+#include "knnmodel/knnmodel.h"
 #include "multiplemodelmethod.h"
+#include "naivebayesmodel/naivebayesmodel.h"
+#include "neuralnetwork/neuralnetworkmodel.h"
 #include "regressionmodel/regressionmodel.h"
+#include "rulesetmodel/rulesetmodel.h"
+#include "scorecard/scorecardmodel.h"
+#include "svmmodel/svmmodel.h"
 #include "treemodel/treemodel.h"
 
 /**
@@ -86,20 +97,37 @@ class EnsembleModel : public InternalModel {
                                                             const TransformationDictionary& transformation_dictionary,
                                                             const PredicateBuilder& predicate_builder,
                                                             const std::shared_ptr<Indexer>& indexer) {
-    if (node.exists_child("MiningModel")) {
-      return std::make_unique<EnsembleModel>(node.get_child("MiningModel"), data_dictionary, transformation_dictionary,
-                                             indexer);
-    } else {
-      if (node.exists_child("TreeModel")) {
-        return std::make_unique<TreeModel>(node.get_child("TreeModel"), data_dictionary, predicate_builder, indexer);
-      } else {
-        if (node.exists_child("RegressionModel")) {
-          return std::make_unique<RegressionModel>(node.get_child("RegressionModel"), data_dictionary, indexer);
-        }
-      }
-    }
+    // Support all PMML MODEL-ELEMENT types inside Segmentation/Segment.
+    if (node.exists_child("MiningModel"))
+      return std::make_unique<EnsembleModel>(node.get_child("MiningModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("TreeModel"))
+      return std::make_unique<TreeModel>(node.get_child("TreeModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("RegressionModel"))
+      return std::make_unique<RegressionModel>(node.get_child("RegressionModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("NeuralNetwork"))
+      return std::make_unique<NeuralNetworkModel>(node.get_child("NeuralNetwork"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("SupportVectorMachineModel"))
+      return std::make_unique<SupportVectorMachineModel>(node.get_child("SupportVectorMachineModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("NearestNeighborModel"))
+      return std::make_unique<NearestNeighborModel>(node.get_child("NearestNeighborModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("GeneralRegressionModel"))
+      return std::make_unique<GeneralRegressionModel>(node.get_child("GeneralRegressionModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("NaiveBayesModel"))
+      return std::make_unique<NaiveBayesModel>(node.get_child("NaiveBayesModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("ClusteringModel"))
+      return std::make_unique<ClusteringModel>(node.get_child("ClusteringModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("Scorecard"))
+      return std::make_unique<ScorecardModel>(node.get_child("Scorecard"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("RuleSetModel"))
+      return std::make_unique<RuleSetModel>(node.get_child("RuleSetModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("BaselineModel"))
+      return std::make_unique<BaselineModel>(node.get_child("BaselineModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("GaussianProcessModel"))
+      return std::make_unique<GaussianProcessModel>(node.get_child("GaussianProcessModel"), data_dictionary, transformation_dictionary, indexer);
+    if (node.exists_child("AssociationModel"))
+      return std::make_unique<AssociationModel>(node.get_child("AssociationModel"), data_dictionary, transformation_dictionary, indexer);
 
-    throw cpmml::ParsingException("Type of model not supported in ensembles");
+    throw cpmml::ParsingException("Unsupported model type in ensemble segment");
   }
 };
 

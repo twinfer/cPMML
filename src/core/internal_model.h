@@ -60,9 +60,8 @@ class InternalModel {
         target_field(get_target(mining_function, mining_schema, indexer)),
         has_local_transformations(false),
         target(get_target(node, mining_schema, transformation_dictionary, mining_function)),
-        output(get_output(node, indexer, target_field.name)) {
-    check_scorable(node);
-  }
+        output(get_output(node, indexer, target_field.name)),
+        is_scorable(check_scorable(node)) {}
 
   InternalModel(const XmlNode& node, const DataDictionary& data_dictionary,
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
@@ -75,9 +74,8 @@ class InternalModel {
         target(get_target(node, mining_schema, this->transformation_dictionary, mining_function)),
         output(get_output(node, indexer, target_field.name)),
         base_sample(create_basesample(indexer)),
-        derivedfields_dag(DagBuilder::build(mining_schema, this->transformation_dictionary)) {
-    check_scorable(node);
-  }
+        derivedfields_dag(DagBuilder::build(mining_schema, this->transformation_dictionary)),
+        is_scorable(check_scorable(node)) {}
 
   std::string output_name() const {
     if (!output.empty) {
@@ -93,6 +91,7 @@ class InternalModel {
   }
 
   inline bool validate(const std::unordered_map<std::string, std::string>& sample) const {
+    Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -136,7 +135,7 @@ class InternalModel {
         sample.change_value_if_missing(of.index, of.expression->eval(sample));
       } else {
         const double v = of.expression->eval_double(sample, score);
-        if (v != double_min()) {
+        if (!is_double_min(v)) {
           sample.change_value(of.index, Value(v));
         } else {
           const Value sv = of.expression->eval(sample);
@@ -147,6 +146,8 @@ class InternalModel {
   };
 
   inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const {
+    if (!is_scorable) throw cpmml::ParsingException("The model is defined as non-scorable (isScorable=false)");
+    Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -191,6 +192,7 @@ class InternalModel {
   virtual std::unique_ptr<InternalScore> score_raw(const Sample& sample) const = 0;
 
   inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const {
+    Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -220,9 +222,10 @@ class InternalModel {
                                        : OutputDictionary();
   }
 
-  static inline void check_scorable(const XmlNode& node) {
-    if (node.exists_attribute("isScorable") && node.get_bool_attribute("isScorable") == false)
-      throw cpmml::ParsingException("The model is defined as non-scorable");
+  bool is_scorable = true;
+
+  static inline bool check_scorable(const XmlNode& node) {
+    return !(node.exists_attribute("isScorable") && node.get_bool_attribute("isScorable") == false);
   }
 
   static inline bool add_local_transformations(const XmlNode& node, TransformationDictionary& transformation_dictionary,

@@ -275,7 +275,7 @@ class GeneralRegressionModel : public InternalModel {
     const std::string cat = (param_matrix.begin()->second.begin()->first);
     // Use empty targetCategory for single-output models
     double eta = linear_predictor("", sample);
-    if (eta == get_offset(sample)) {  // fallback: try first available category
+    if (std::abs(eta - get_offset(sample)) < 1e-15) {  // fallback: try first available category
       for (const auto& p : parameters) {
         for (const auto& [tc, b] : param_matrix.at(p)) {
           eta = linear_predictor(tc, sample);

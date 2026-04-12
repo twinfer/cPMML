@@ -56,7 +56,7 @@ class AssociationOutput : public OutputExpression {
                    "descending"),
         multi_valued(node.exists_attribute("isMultiValued") && node.get_attribute("isMultiValued") == "1") {}
 
-  inline virtual std::string eval_str(Sample& /*sample*/, const InternalScore& score) const override {
+  inline virtual std::string eval_str(const Sample& /*sample*/, const InternalScore& score) const override {
     auto it = score.matched_rules_by_algorithm.find(algorithm_key);
 
     if (rank == 0 || multi_valued) {
@@ -86,7 +86,7 @@ class AssociationOutput : public OutputExpression {
     return extract_feature(sorted[idx]);
   }
 
-  inline virtual double eval_double(Sample& /*sample*/, const InternalScore& score) const override {
+  inline virtual double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
     auto it = score.matched_rules_by_algorithm.find(algorithm_key);
     if (it == score.matched_rules_by_algorithm.end() || it->second.empty()) return double_min();
 

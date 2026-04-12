@@ -48,7 +48,7 @@ class FieldRef : public Expression {
     inputs.insert(field_name);
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     Value value = sample[index].value;
     return value.missing ? mapmissing_to : value;
   }

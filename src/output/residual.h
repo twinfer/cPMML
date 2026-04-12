@@ -30,7 +30,7 @@ class Residual : public OutputExpression {
       : OutputExpression(output_index, output_type, indexer),
         target_index(target_name.empty() ? std::numeric_limits<size_t>::max() : indexer->get_index(target_name)) {}
 
-  inline virtual double eval_double(Sample& sample, const InternalScore& score) const override {
+  inline virtual double eval_double(const Sample& sample, const InternalScore& score) const override {
     if (target_index == std::numeric_limits<size_t>::max()) return double_min();
     const Value& actual_val = sample[target_index].value;
     if (actual_val.missing) return double_min();

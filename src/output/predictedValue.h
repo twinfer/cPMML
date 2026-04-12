@@ -34,9 +34,9 @@ class PredictedValue : public OutputExpression {
         field_name(field_name),
         index(indexer->get_or_set(field_name)) {}
 
-  inline Value eval(Sample& sample) const override { return sample[index].value; }
+  inline Value eval(const Sample& sample) const override { return sample[index].value; }
 
-  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const override {
+  inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     return score.raw_score.empty() ? score.score : score.raw_score;
   };
 };
@@ -59,9 +59,9 @@ class PredictedDisplayValue : public OutputExpression {
         field_name(field_name),
         index(indexer->get_or_set(field_name)) {}
 
-  inline Value eval(Sample& sample) const override { return sample[index].value; }
+  inline Value eval(const Sample& sample) const override { return sample[index].value; }
 
-  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const override {
+  inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     return score.score;
   };
 };

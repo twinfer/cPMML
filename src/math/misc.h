@@ -30,7 +30,7 @@ inline double probit(const double a) {
   std::function<double(double)> function = [](double a) {
     return (1 / std::sqrt(2 * M_PI)) * std::exp(-0.5 * std::pow(a, 2));
   };
-  return ::integral(::double_min(), a, 0.01, function);
+  return ::integral(-8.0, a, 0.01, function);
 }
 
 inline double logit(const double a) { return 1 / (1 + std::exp(-a)); }

@@ -37,7 +37,7 @@ class Expression {
   Expression(const size_t& output_index, const DataType& output_type, const std::shared_ptr<Indexer>& indexer)
       : is_empty(false), output_index(output_index), output_type(output_type), indexer(indexer) {}
 
-  inline virtual Value eval(Sample& sample) const { return Value(); };
+  inline virtual Value eval(const Sample& sample) const { return Value(); };
 
   Expression(const Expression&) = default;
 

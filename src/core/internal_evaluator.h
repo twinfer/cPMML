@@ -42,8 +42,15 @@ class InternalEvaluator {
 
   InternalEvaluator() = default;
 
+  // Helper: creates an Indexer and activates it as the thread-local string context.
+  static std::shared_ptr<Indexer> make_and_activate_indexer() {
+    auto idx = std::make_shared<Indexer>();
+    Value::active_indexer = idx.get();
+    return idx;
+  }
+
   InternalEvaluator(const XmlNode& node)
-      : indexer(new Indexer()),
+      : indexer(make_and_activate_indexer()),
         name(node.name()),
         version(node.get_attribute("version")),
         header(node.get_child("Header")),

@@ -76,8 +76,8 @@ class Predicate {
           return operator()(other[feature].value);
         } catch (const std::out_of_range& exception) {
 #ifdef DEBUG
-          throw cpmml::GenericException("feature \"" + other[feature].name +
-                                        "\" not found in sample: " + other.to_string());
+          throw cpmml::MissingValueException("feature \"" + other[feature].name +
+                                              "\" not found in sample: " + other.to_string());
 #else
           throw cpmml::MissingValueException("missing feature in sample");
 #endif
@@ -128,72 +128,33 @@ class Predicate {
     return false;
   }
 
-  inline bool AND(const Sample& other) const {
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
-      if (!it->operator()(other)) return false;
-
+  template <typename T>
+  inline bool AND(const T& other) const {
+    for (const auto& p : predicates)
+      if (!p(other)) return false;
     return true;
   }
 
-  inline bool OR(const Sample& other) const {
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
-      if (it->operator()(other)) return true;
-
+  template <typename T>
+  inline bool OR(const T& other) const {
+    for (const auto& p : predicates)
+      if (p(other)) return true;
     return false;
   }
 
-  inline bool XOR(const Sample& other) const {
-    bool first = predicates.front().operator()(other);
-
+  template <typename T>
+  inline bool XOR(const T& other) const {
+    bool first = predicates.front()(other);
     for (auto it = predicates.cbegin() + 1; it != predicates.cend(); it++)
       if (it->operator()(other) != first) return true;
-
     return false;
   }
 
-  inline bool SURROGATE(const Sample& other) const {
-    bool result = false;
-
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++) {
-      result = it->operator()(other);
-      if (result) return true;
-    }
-
-    return result;
-  }
-
-  inline bool AND(const Value& other) const {
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
-      if (!it->operator()(other)) return false;
-
-    return true;
-  }
-
-  inline bool OR(const Value& other) const {
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++)
-      if (it->operator()(other)) return true;
-
+  template <typename T>
+  inline bool SURROGATE(const T& other) const {
+    for (const auto& p : predicates)
+      if (p(other)) return true;
     return false;
-  }
-
-  inline bool XOR(const Value& other) const {
-    bool first = predicates.front().operator()(other);
-
-    for (auto it = predicates.cbegin() + 1; it != predicates.cend(); it++)
-      if (it->operator()(other) != first) return true;
-
-    return false;
-  }
-
-  inline bool SURROGATE(const Value& other) const {
-    bool result = false;
-
-    for (auto it = predicates.cbegin(); it != predicates.cend(); it++) {
-      result = it->operator()(other);
-      if (result) return true;
-    }
-
-    return result;
   }
 };
 

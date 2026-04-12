@@ -198,7 +198,22 @@ inline std::string remove_all(std::string value, char to_remove) {
 
 inline bool parse_boolstring(const std::string& value) { return value == "true"; }
 
-inline double double_min() { return std::numeric_limits<double>::min(); }
+// Sentinel value indicating "missing/uninitialized".
+// Must NOT be NaN (undefined under -ffast-math) and must NOT be a large magnitude
+// value (would corrupt arithmetic when missing values leak through expressions).
+// Using min() (~2.2e-308): a tiny positive value, indistinguishable from zero in
+// real arithmetic, matching the original behavior.
+inline constexpr double double_min() { return std::numeric_limits<double>::min(); }
+
+inline bool is_double_min(double v) { return v == std::numeric_limits<double>::min(); }
+
+template <typename T>
+T enum_from_string(const std::unordered_map<std::string, T>& converter, const std::string& value,
+                   const std::string& type_name) {
+  auto it = converter.find(value);
+  if (it != converter.end()) return it->second;
+  throw cpmml::ParsingException("unsupported " + type_name + ": " + value);
+}
 
 static inline std::string& ltrim(std::string& s) {
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isspace(c); }));

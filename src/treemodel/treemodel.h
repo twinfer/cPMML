@@ -59,11 +59,8 @@ class TreeModel : public InternalModel {
   inline TreeScore scoreR(const Sample& sample, const Node& current_node) const {
 #ifdef DEBUG
     static int depth = 0;
-    //        depth++;
     std::cout << std::string(depth, '\t') << current_node.predicate << (current_node.leaf ? " !!! MATCH !!!" : "")
               << std::endl;
-//        if(current_node.leaf)
-//            depth--;
 #endif
 
     TreeScore result;
@@ -76,13 +73,18 @@ class TreeModel : public InternalModel {
         depth++;
 #endif
         result = scoreR(sample, child);
-
 #ifdef DEBUG
         depth--;
-//                if(result.score != "") depth--;
 #endif
         if (result.is_score) return result;
       }
+
+    // PMML missingValueStrategy="defaultChild": fall back to the named child
+    if (!current_node.default_child.empty()) {
+      for (const auto& child : current_node.children) {
+        if (child.id == current_node.default_child) return scoreR(sample, child);
+      }
+    }
 
     if (return_last_prediction) return current_node.score;
 
@@ -110,6 +112,13 @@ class TreeModel : public InternalModel {
 #endif
         if (!result.empty()) return result;
       }
+
+    // PMML missingValueStrategy="defaultChild"
+    if (!current_node.default_child.empty()) {
+      for (const auto& child : current_node.children) {
+        if (child.id == current_node.default_child) return simple_scoreR(sample, child);
+      }
+    }
 
     if (return_last_prediction) return std::string_view(current_node.simple_score);
 

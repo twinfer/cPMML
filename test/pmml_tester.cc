@@ -51,7 +51,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
     cpmml::Prediction pred = model.score(row);
 
     bool ok = (pred.as_string() == expected);
-    if (!ok && pred.as_double() != double_min()) {
+    if (!ok && !is_double_min(pred.as_double())) {
       try {
         ok = within_tolerance(pred.as_double(), to_double(expected));
       } catch (const cpmml::ParsingException&) {}

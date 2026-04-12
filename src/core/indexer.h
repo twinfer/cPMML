@@ -8,6 +8,7 @@
 #define CPMML_INDEXER_H
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -27,6 +28,14 @@ class Indexer {
   std::unordered_map<std::string, DataType> name_datatype;
   std::unordered_map<size_t, std::string> index_name;
   std::unordered_map<size_t, DataType> index_datatype;
+
+  // Per-model string↔double mapping (moved from Value static for thread safety)
+  struct StringHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
+  };
+  double string_value_index = 0;
+  std::unordered_map<std::string, double, StringHash, std::equal_to<>> string_value_map;
 
  public:
   Indexer() = default;
@@ -79,6 +88,15 @@ class Indexer {
   }
 
   size_t size() { return _size; }
+
+  double get_string_value(const std::string& value) {
+    auto it = string_value_map.find(std::string_view(value));
+    if (it == string_value_map.end()) {
+      auto [inserted, _] = string_value_map.emplace(value, string_value_index++);
+      return inserted->second;
+    }
+    return it->second;
+  }
 
   std::unordered_map<std::string, size_t>::const_iterator cbegin() { return name_index.cbegin(); }
   std::unordered_map<std::string, size_t>::const_iterator cend() { return name_index.cend(); }

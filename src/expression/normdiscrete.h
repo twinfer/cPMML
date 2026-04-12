@@ -45,7 +45,7 @@ class NormDiscrete : public Expression {
     inputs.insert(field_name);
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
     if (input.missing) return mapmissing_to;
     if (input == value) return Value(1, output_type);

@@ -61,7 +61,7 @@ class MiningSchema {
 
   inline MiningField at(const std::string& feature_name) const { return raw_miningfields.at(feature_name); }
 
-  const void prepare(Sample& sample, const std::unordered_map<std::string, std::string>& input) const {
+  void prepare(Sample& sample, const std::unordered_map<std::string, std::string>& input) const {
 #ifdef DEBUG
     std::cout << "BEFORE MINING SCHEMA PREPARATION: " << sample << std::endl;
 #endif

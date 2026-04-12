@@ -73,13 +73,19 @@ class OutputField {
 
   inline void prepare(Sample& sample) const { sample.change_value_if_missing(index, expression->eval(sample)); }
 
-  inline void add_output(Sample& sample, InternalScore& score) const {
+  inline void add_output(const Sample& sample, InternalScore& score) const {
     switch (datatype.value) {
-      case DataType::DataTypeValue::STRING:
-        score.str_outputs[name] = expression->eval_str(sample, score);
+      case DataType::DataTypeValue::STRING: {
+        std::string sv = expression->eval_str(sample, score);
+        if (!sv.empty()) score.str_outputs[name] = sv;
         break;
-      default:
-        score.num_outputs[name] = expression->eval_double(sample, score);
+      }
+      default: {
+        double v = expression->eval_double(sample, score);
+        if (!is_double_min(v))
+          score.num_outputs[name] = v;
+        break;
+      }
     }
   }
 

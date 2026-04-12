@@ -47,12 +47,12 @@ class TransformedValue : public OutputExpression {
     if (expression) Expression::inputs = expression->inputs;
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     if (!expression) return Value();
     return expression->eval(sample);
   }
 
-  inline std::string eval_str(Sample& sample, const InternalScore& /*score*/) const override {
+  inline std::string eval_str(const Sample& sample, const InternalScore& /*score*/) const override {
     if (!expression) return "";
     return expression->eval(sample).svalue;
   };

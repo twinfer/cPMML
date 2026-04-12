@@ -101,7 +101,7 @@ class RegressionModel : public InternalModel {
   }
 
   inline std::string get_class(const std::vector<double>& scores) const {
-    double max = -double_min();
+    double max = std::numeric_limits<double>::lowest();
     size_t _class = 0;
 
     for (auto i = 0u; i < regression_tables.size(); i++)

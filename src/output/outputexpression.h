@@ -31,11 +31,11 @@ class OutputExpression : public Expression {
   OutputExpression(const size_t& output_index, const DataType& output_type, const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer) {}
 
-  inline virtual Value eval(Sample& sample) const override { return Value(); };
+  inline virtual Value eval(const Sample& sample) const override { return Value(); };
 
-  inline virtual std::string eval_str(Sample& sample, const InternalScore& score) const { return ""; };
+  inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const { return ""; };
 
-  inline virtual double eval_double(Sample& sample, const InternalScore& score) const { return double_min(); };
+  inline virtual double eval_double(const Sample& sample, const InternalScore& score) const { return double_min(); };
 
   OutputExpression(const OutputExpression&) = default;
 

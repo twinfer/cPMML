@@ -67,7 +67,7 @@ class MapValues : public Expression {
     }
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     std::vector<Value> keys;
     Value tmp;
     bool missing_input = false;

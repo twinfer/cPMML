@@ -21,6 +21,7 @@
 #include <regex>
 
 #include "datatype.h"
+#include "indexer.h"
 #include "utils/utils.h"
 
 /**
@@ -43,8 +44,19 @@ class Value {
     using is_transparent = void;
     size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
   };
-  inline static double string_index = 0;
-  inline static std::unordered_map<std::string, double, StringHash, std::equal_to<>> string_converter;
+
+  // Thread-local pointer to the active model's Indexer for per-model string mapping.
+  // Set via ScopedIndexer RAII at model parse/score entry points.
+  inline static thread_local class Indexer* active_indexer = nullptr;
+
+  // RAII helper to set/restore the active indexer.
+  struct ScopedIndexer {
+    Indexer* prev;
+    explicit ScopedIndexer(Indexer* idx) : prev(active_indexer) { active_indexer = idx; }
+    ~ScopedIndexer() { active_indexer = prev; }
+    ScopedIndexer(const ScopedIndexer&) = delete;
+    ScopedIndexer& operator=(const ScopedIndexer&) = delete;
+  };
 
   class ValueHash {
    public:
@@ -112,7 +124,7 @@ class Value {
   }
 
   inline static Value min(const std::set<Value>& other) { return *other.cbegin(); }
-  inline static Value max(const std::set<Value>& other) { return *other.cend(); }
+  inline static Value max(const std::set<Value>& other) { return *other.crbegin(); }
 
   inline static double infer_value(const std::string& value) {
     size_t char_index;
@@ -146,9 +158,13 @@ class Value {
       case DataType::DataTypeValue::DOUBLE:
         return ::to_double(value);
       case DataType::DataTypeValue::STRING: {
-        auto it = string_converter.find(std::string_view(value));
-        if (it == string_converter.end()) {
-          auto [inserted, _] = string_converter.emplace(value, string_index++);
+        if (active_indexer) return active_indexer->get_string_value(value);
+        // Fallback for contexts without an active indexer (should not happen in normal use)
+        static std::unordered_map<std::string, double, StringHash, std::equal_to<>> fallback_converter;
+        static double fallback_index = 0;
+        auto it = fallback_converter.find(std::string_view(value));
+        if (it == fallback_converter.end()) {
+          auto [inserted, _] = fallback_converter.emplace(value, fallback_index++);
           return inserted->second;
         }
         return it->second;

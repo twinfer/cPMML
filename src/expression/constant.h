@@ -34,7 +34,7 @@ class Constant : public Expression {
                                                       // says the type should be inferred
   {}
 
-  inline Value eval(Sample& sample) const override { return value; }
+  inline Value eval(const Sample& sample) const override { return value; }
 };
 
 #endif

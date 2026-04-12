@@ -139,7 +139,7 @@ class ScorecardModel : public InternalModel {
         if (attr.predicate.is_empty || attr.predicate(sample)) {
           double ps;
           if (attr.complex_score)
-            ps = attr.complex_score->eval(const_cast<Sample&>(sample)).value;
+            ps = attr.complex_score->eval(sample).value;
           else
             ps = attr.partial_score;
 

@@ -23,6 +23,7 @@
 #include "core/transformationdictionary.h"
 #include "core/value.h"
 #include "core/xmlnode.h"
+#include "math/distance.h"
 #include "regressionmodel/regressionscore.h"
 
 /**
@@ -42,20 +43,7 @@
  */
 class NearestNeighborModel : public InternalModel {
  public:
-  // --- Enumerations ---
-
-  enum class Metric {
-    EUCLIDEAN,
-    CITYBLOCK,
-    CHEBYSHEV,
-    MINKOWSKI,
-    SIMPLE_MATCHING,
-    JACCARD,
-    TANIMOTO,
-    BINARY_SIMILARITY
-  };
-
-  enum class CompareFunc { ABS_DIFF, GAUSS_SIM, DELTA, EQUAL };
+  // --- Enumerations (shared via math/distance.h) ---
 
   // --- Nested types ---
 
@@ -69,7 +57,7 @@ class NearestNeighborModel : public InternalModel {
   // --- Members ---
 
   int k;
-  Metric metric;
+  DistanceMetric metric;
   double minkowski_p;
   std::string categorical_method;  // to_lower of categoricalScoringMethod
   std::string continuous_method;   // to_lower of continuousScoringMethod
@@ -92,7 +80,7 @@ class NearestNeighborModel : public InternalModel {
                        const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         k(static_cast<int>(node.get_long_attribute("numberOfNeighbors"))),
-        metric(Metric::EUCLIDEAN),
+        metric(DistanceMetric::EUCLIDEAN),
         minkowski_p(2.0),
         categorical_method(to_lower(node.get_attribute("categoricalScoringMethod") == "null"
                                         ? "majorityvote"
@@ -166,33 +154,25 @@ class NearestNeighborModel : public InternalModel {
  private:
   // --- Parsing ---
 
-  static Metric parse_metric_type(const XmlNode& measure) {
-    if (measure.exists_child("euclidean")) return Metric::EUCLIDEAN;
-    if (measure.exists_child("cityBlock")) return Metric::CITYBLOCK;
-    if (measure.exists_child("chebychev")) return Metric::CHEBYSHEV;
-    if (measure.exists_child("minkowski")) return Metric::MINKOWSKI;
-    if (measure.exists_child("simpleMatching")) return Metric::SIMPLE_MATCHING;
-    if (measure.exists_child("jaccard")) return Metric::JACCARD;
-    if (measure.exists_child("tanimoto")) return Metric::TANIMOTO;
-    if (measure.exists_child("binarySimilarity")) return Metric::BINARY_SIMILARITY;
-    return Metric::EUCLIDEAN;
+  static DistanceMetric parse_metric_type(const XmlNode& measure) {
+    if (measure.exists_child("euclidean")) return DistanceMetric::EUCLIDEAN;
+    if (measure.exists_child("cityBlock")) return DistanceMetric::CITYBLOCK;
+    if (measure.exists_child("chebychev")) return DistanceMetric::CHEBYSHEV;
+    if (measure.exists_child("minkowski")) return DistanceMetric::MINKOWSKI;
+    if (measure.exists_child("simpleMatching")) return DistanceMetric::SIMPLE_MATCHING;
+    if (measure.exists_child("jaccard")) return DistanceMetric::JACCARD;
+    if (measure.exists_child("tanimoto")) return DistanceMetric::TANIMOTO;
+    if (measure.exists_child("binarySimilarity")) return DistanceMetric::BINARY_SIMILARITY;
+    return DistanceMetric::EUCLIDEAN;
   }
 
   void parse_metric(const XmlNode& node) {
     if (!node.exists_child("ComparisonMeasure")) return;
     const XmlNode cm = node.get_child("ComparisonMeasure");
     metric = parse_metric_type(cm);
-    if (metric == Metric::MINKOWSKI && cm.exists_child("minkowski"))
+    if (metric == DistanceMetric::MINKOWSKI && cm.exists_child("minkowski"))
       if (cm.get_child("minkowski").exists_attribute("p"))
         minkowski_p = to_double(cm.get_child("minkowski").get_attribute("p"));
-  }
-
-  static CompareFunc parse_compare_func(const std::string& s) {
-    const std::string lower = to_lower(s);
-    if (lower == "gausssim") return CompareFunc::GAUSS_SIM;
-    if (lower == "delta") return CompareFunc::DELTA;
-    if (lower == "equal") return CompareFunc::EQUAL;
-    return CompareFunc::ABS_DIFF;
   }
 
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
@@ -313,94 +293,14 @@ class NearestNeighborModel : public InternalModel {
     return q;
   }
 
-  // --- Per-field comparison ---
+  // --- Distance computation (uses shared math/distance.h) ---
 
-  static double field_compare(double xi, double yi, CompareFunc cf) {
-    switch (cf) {
-      case CompareFunc::ABS_DIFF:
-        return std::abs(xi - yi);
-      case CompareFunc::GAUSS_SIM:
-        return 1.0 - std::exp(-(xi - yi) * (xi - yi));
-      case CompareFunc::DELTA:
-        return (xi != yi) ? 1.0 : 0.0;
-      case CompareFunc::EQUAL:
-        return (xi == yi) ? 1.0 : 0.0;
-    }
-    return std::abs(xi - yi);
-  }
-
-  // --- Distance computation ---
-
-  double compute_distance(const Eigen::VectorXd& query, Eigen::Index row) const {
+  double compute_row_distance(const Eigen::VectorXd& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
     const size_t n = knn_inputs.size();
-
-    switch (metric) {
-      case Metric::EUCLIDEAN: {
-        double sum = 0.0;
-        for (size_t i = 0; i < n; i++) {
-          const double d = field_compare(query[i], train[i], knn_inputs[i].compare_func);
-          sum += knn_inputs[i].field_weight * d * d;
-        }
-        return std::sqrt(sum);
-      }
-      case Metric::CITYBLOCK: {
-        double sum = 0.0;
-        for (size_t i = 0; i < n; i++)
-          sum += knn_inputs[i].field_weight * field_compare(query[i], train[i], knn_inputs[i].compare_func);
-        return sum;
-      }
-      case Metric::CHEBYSHEV: {
-        double max_val = 0.0;
-        for (size_t i = 0; i < n; i++)
-          max_val = std::max(
-              max_val, knn_inputs[i].field_weight * field_compare(query[i], train[i], knn_inputs[i].compare_func));
-        return max_val;
-      }
-      case Metric::MINKOWSKI: {
-        double sum = 0.0;
-        for (size_t i = 0; i < n; i++)
-          sum += knn_inputs[i].field_weight *
-                 std::pow(field_compare(query[i], train[i], knn_inputs[i].compare_func), minkowski_p);
-        return std::pow(sum, 1.0 / minkowski_p);
-      }
-      case Metric::SIMPLE_MATCHING: {
-        int match = 0;
-        for (size_t i = 0; i < n; i++)
-          if ((query[i] > 0.5) == (train[i] > 0.5)) match++;
-        return (n > 0) ? 1.0 - static_cast<double>(match) / n : 0.0;
-      }
-      case Metric::JACCARD: {
-        int a11 = 0, union_count = 0;
-        for (size_t i = 0; i < n; i++) {
-          const bool xi = query[i] > 0.5, yi = train[i] > 0.5;
-          if (xi || yi) union_count++;
-          if (xi && yi) a11++;
-        }
-        return (union_count > 0) ? 1.0 - static_cast<double>(a11) / union_count : 0.0;
-      }
-      case Metric::TANIMOTO: {
-        // distance = 1 - (a11+a00) / (a11 + 2*(a10+a01) + a00)
-        int a11 = 0, a10 = 0, a01 = 0, a00 = 0;
-        for (size_t i = 0; i < n; i++) {
-          const bool xi = query[i] > 0.5, yi = train[i] > 0.5;
-          if (xi && yi)
-            a11++;
-          else if (xi)
-            a10++;
-          else if (yi)
-            a01++;
-          else
-            a00++;
-        }
-        const int denom = a11 + 2 * (a10 + a01) + a00;
-        return (denom > 0) ? 1.0 - static_cast<double>(a11 + a00) / denom : 0.0;
-      }
-      case Metric::BINARY_SIMILARITY:
-        // Falls back to simple matching (binarySimilarity requires custom p1..p4 parameters)
-        return compute_distance(query, row);
-    }
-    return 0.0;
+    return compute_distance(
+        metric, n, minkowski_p, [&](size_t i) { return query[i]; }, [&](size_t i) { return train[i]; },
+        [&](size_t i) { return knn_inputs[i].field_weight; }, [&](size_t i) { return knn_inputs[i].compare_func; });
   }
 
   // --- K-nearest neighbor search ---
@@ -408,7 +308,7 @@ class NearestNeighborModel : public InternalModel {
   std::vector<std::pair<double, int>> find_k_nearest(const Eigen::VectorXd& query) const {
     const int n = static_cast<int>(training_features.rows());
     std::vector<std::pair<double, int>> distances(n);
-    for (int i = 0; i < n; i++) distances[i] = {compute_distance(query, i), i};
+    for (int i = 0; i < n; i++) distances[i] = {compute_row_distance(query, i), i};
     const int kk = std::min(k, n);
     std::partial_sort(distances.begin(), distances.begin() + kk, distances.end());
     return {distances.begin(), distances.begin() + kk};

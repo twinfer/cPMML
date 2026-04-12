@@ -55,13 +55,22 @@ class DataType {
         {"float", DataTypeValue::FLOAT},
         {"double", DataTypeValue::DOUBLE},
         {"boolean", DataTypeValue::BOOLEAN},
+        // PMML 4.4.1 date/time types — mapped to DOUBLE (epoch-based numeric)
+        {"date", DataTypeValue::DOUBLE},
+        {"time", DataTypeValue::DOUBLE},
+        {"datetime", DataTypeValue::DOUBLE},
+        {"datedayssince[0]", DataTypeValue::DOUBLE},
+        {"datedayssince[1960]", DataTypeValue::DOUBLE},
+        {"datedayssince[1970]", DataTypeValue::DOUBLE},
+        {"datedayssince[1980]", DataTypeValue::DOUBLE},
+        {"timeseconds", DataTypeValue::DOUBLE},
+        {"datetimesecondssince[0]", DataTypeValue::DOUBLE},
+        {"datetimesecondssince[1960]", DataTypeValue::DOUBLE},
+        {"datetimesecondssince[1970]", DataTypeValue::DOUBLE},
+        {"datetimesecondssince[1980]", DataTypeValue::DOUBLE},
     };
 
-    try {
-      return datatype_converter.at(to_lower(data_type));
-    } catch (const std::out_of_range& exception) {
-      throw cpmml::ParsingException("unsupported datatype: " + data_type);
-    }
+    return enum_from_string(datatype_converter, to_lower(data_type), "datatype");
   }
 
   std::string to_string() const {

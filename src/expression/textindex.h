@@ -78,7 +78,7 @@ class TextIndex : public Expression {
     if (!case_sensitive) term = to_lower(term);
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     // Recover the original string for the text field via reverse lookup
     const Value& fv = sample[field_index].value;
     if (fv.missing) return Value();

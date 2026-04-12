@@ -33,7 +33,7 @@ class Probability : public OutputExpression {
       : OutputExpression(output_index, output_type, indexer),
         target_value(node.exists_attribute("value") ? node.get_attribute("value") : "") {}
 
-  inline virtual double eval_double(Sample& sample, const InternalScore& score) const override {
+  inline virtual double eval_double(const Sample& sample, const InternalScore& score) const override {
     // When no value attribute is specified, return the probability of the
     // predicted (winning) class.
     const std::string& key = target_value.empty() ? score.score : target_value;

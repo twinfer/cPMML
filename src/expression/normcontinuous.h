@@ -66,7 +66,7 @@ class NormContinuous : public Expression {
       const Value& value) const {  // if value == orig then the closest interval will be right and
                                    // the interpolation also (look at formula and ifs to see it)
     unsigned int i, min_i = std::numeric_limits<unsigned int>::min();
-    Value min(double_min(), DataType::DataTypeValue::DOUBLE), a, b;
+    Value min(std::numeric_limits<double>::max(), DataType::DataTypeValue::DOUBLE), a, b;
     for (i = 0; i < (orig.size() - 1); i++) {
       if (value > orig[i] && value < orig[i + 1]) {
         return i;  // correct interval
@@ -90,7 +90,7 @@ class NormContinuous : public Expression {
                          (norm[i + 1] - norm[i]);  // that's why input and output type must be equal
   }
 
-  inline Value eval(Sample& sample) const override {
+  inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
 
     if (input < orig[0] && input > orig[1]) {

@@ -33,7 +33,7 @@ class Node {
   std::string id;
   std::string simple_score;
   double record_count = double_min();
-  //    std::string default_child;
+  std::string default_child;
   std::vector<Node> children;
   std::function<bool(const Sample&)> predicate;
   bool root = false;
@@ -47,7 +47,7 @@ class Node {
       : id(node.exists_attribute("id") ? node.get_attribute("id") : ""),
         simple_score(node.exists_attribute("score") ? node.get_attribute("score") : ""),
         record_count(node.get_double_attribute("recordCount")),
-        //        default_child(node.get_attribute("defaultChild")),
+        default_child(node.exists_attribute("defaultChild") ? node.get_attribute("defaultChild") : ""),
         children(to_nodes(node.get_childs("Node"), predicate_builder, target_datatype)),
         predicate(to_function(predicate_builder.build(node.get_child_bypattern("Predicate")))),
         root(root),
