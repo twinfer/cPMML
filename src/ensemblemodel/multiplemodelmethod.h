@@ -38,8 +38,8 @@ class MultipleModelMethod {
     WEIGHTED_MAJORITY_VOTE,
     AVERAGE,
     WEIGHTED_AVERAGE,
-    //    MEDIAN,
-    //    MAX,
+    MEDIAN,
+    MAX,
     SUM,
     SELECT_FIRST,
     SELECT_ALL,
@@ -60,8 +60,8 @@ class MultipleModelMethod {
         {"weightedmajorityvote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE},
         {"average", MultipleModelMethodType::AVERAGE},
         {"weightedaverage", MultipleModelMethodType::WEIGHTED_AVERAGE},
-        //        {"median", MultipleModelMethodType::MEDIAN},
-        //        {"max", MultipleModelMethodType::MAX},
+        {"median", MultipleModelMethodType::MEDIAN},
+        {"max", MultipleModelMethodType::MAX},
         {"sum", MultipleModelMethodType::SUM},
         {"selectfirst", MultipleModelMethodType::SELECT_FIRST},
         {"selectall", MultipleModelMethodType::SELECT_ALL},
@@ -92,6 +92,10 @@ class MultipleModelMethod {
         }
       case MultipleModelMethodType::WEIGHTED_AVERAGE:
         return classification_weighted_average;
+      case MultipleModelMethodType::MEDIAN:
+        return median;
+      case MultipleModelMethodType::MAX:
+        return max;
       case MultipleModelMethodType::SUM:
         return sum;
       case MultipleModelMethodType::SELECT_FIRST:
@@ -274,6 +278,32 @@ class MultipleModelMethod {
     }
 
     return std::make_unique<InternalScore>(score, probabilities);
+  }
+
+  inline static std::unique_ptr<InternalScore> median(const Sample& sample, const std::vector<Segment>& ensemble) {
+    std::vector<double> values;
+    for (const auto& segment : ensemble)
+      if (segment.predicate(sample)) values.push_back(to_double(segment.predict(sample)));
+
+    if (values.empty()) return std::make_unique<InternalScore>();
+
+    const size_t mid = values.size() / 2;
+    std::nth_element(values.begin(), values.begin() + mid, values.end());
+    double med = values[mid];
+    if (values.size() % 2 == 0) {
+      double lo = *std::max_element(values.begin(), values.begin() + mid);
+      med = (lo + med) / 2.0;
+    }
+    return std::make_unique<InternalScore>(med);
+  }
+
+  inline static std::unique_ptr<InternalScore> max(const Sample& sample, const std::vector<Segment>& ensemble) {
+    std::vector<double> values;
+    for (const auto& segment : ensemble)
+      if (segment.predicate(sample)) values.push_back(to_double(segment.predict(sample)));
+
+    if (values.empty()) return std::make_unique<InternalScore>();
+    return std::make_unique<InternalScore>(*std::max_element(values.begin(), values.end()));
   }
 
 #ifndef MULTITHREADING
