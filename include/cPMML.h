@@ -201,8 +201,6 @@ class Result {
   std::shared_ptr<InternalScore> score_;
 };
 
-// Backward compatibility alias
-using Prediction = Result;
 }  // namespace cpmml
 
 class InternalEvaluator;
