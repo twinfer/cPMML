@@ -86,6 +86,35 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
                 << std::endl;
       return -1;
     }
+
+    // Verify every other oracle column the model claims to produce
+    // (probability/transformedValue/... OutputFields keyed by name).
+    {
+      const auto nout = result.num_outputs();
+      const auto sout = result.str_outputs();
+      for (const auto& [col, expected_val] : row) {
+        if (col == out_col || expected_val.empty()) continue;
+
+        auto nit = nout.find(col);
+        if (nit != nout.end()) {
+          try {
+            if (!within_tolerance(nit->second, to_double(expected_val))) {
+              std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: " << expected_val
+                        << "  sample: " << to_string(row) << std::endl;
+              return -1;
+            }
+          } catch (const cpmml::ParsingException&) {}
+          continue;
+        }
+
+        auto sit = sout.find(col);
+        if (sit != sout.end() && sit->second != expected_val) {
+          std::cerr << "output '" << col << "': predicted: " << sit->second << "  expected: " << expected_val
+                    << "  sample: " << to_string(row) << std::endl;
+          return -1;
+        }
+      }
+    }
     row = reader.read();
   }
   return 0;
