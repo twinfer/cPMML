@@ -88,10 +88,17 @@ class MultipleModelMethod {
           case MiningFunction::MiningFunctionType::REGRESSION:
             return regression_average;
           default:
-            break;
+            throw cpmml::ParsingException("average not supported for this mining function");
         }
       case MultipleModelMethodType::WEIGHTED_AVERAGE:
-        return classification_weighted_average;
+        switch (mining_function.value) {
+          case MiningFunction::MiningFunctionType::CLASSIFICATION:
+            return classification_weighted_average;
+          case MiningFunction::MiningFunctionType::REGRESSION:
+            return regression_weighted_average;
+          default:
+            throw cpmml::ParsingException("weightedAverage not supported for this mining function");
+        }
       case MultipleModelMethodType::MEDIAN:
         return median;
       case MultipleModelMethodType::MAX:
@@ -109,26 +116,40 @@ class MultipleModelMethod {
     throw cpmml::ParsingException(multiplemodelmethod + " not supported");
   }
 
+  // Deterministic winner selection: highest probability wins, ties broken by
+  // name so results do not depend on unordered_map iteration order.
+  inline static std::string argmax(const std::unordered_map<std::string, double>& probabilities) {
+    std::string best;
+    double best_prob = -1;
+    for (const auto& [category, prob] : probabilities)
+      if (category != "" && (prob > best_prob || (prob == best_prob && category < best))) {
+        best_prob = prob;
+        best = category;
+      }
+    return best;
+  }
+
+  inline static void normalize(std::unordered_map<std::string, double>& probabilities, const double total) {
+    if (total <= 0) return;
+    for (auto& [category, prob] : probabilities) prob /= total;
+  }
+
 #ifndef MULTITHREADING
 
   static std::unique_ptr<InternalScore> majority_vote(const Sample& sample, const std::vector<Segment>& ensemble) {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
 
-    std::string score;
+    double votes = 0;
     for (const auto& segment : ensemble)
-      if (segment.predicate(sample)) probabilities[segment.predict(sample)] += 1.0 / ensemble.size();
-
-    double max_prob = 0;
-    for (const auto& probability : probabilities) {
-      if (max_prob > 0.5) break;
-
-      if (probability.second > max_prob && probability.first != "") {
-        max_prob = probability.second;
-        score = probability.first;
+      if (segment.predicate(sample)) {
+        const std::string prediction = segment.predict(sample);
+        if (prediction.empty()) continue;  // null prediction casts no vote
+        probabilities[prediction] += 1.0;
+        votes++;
       }
-    }
 
-    return std::make_unique<InternalScore>(score, probabilities);
+    normalize(probabilities, votes);
+    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
   }
 
 #else
@@ -137,26 +158,35 @@ class MultipleModelMethod {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
     std::unordered_map<std::string, double> tmp_probabilities[NUM_THREADS];
 
-    std::string score;
+    std::exception_ptr worker_error = nullptr;
 #pragma omp parallel for if (ensemble.size() > 25) default(shared) num_threads(NUM_THREADS)
-    for (auto i = 0u; i < ensemble.size(); i++)
-      if (ensemble[i].predicate(sample))
-        tmp_probabilities[omp_get_thread_num()][ensemble[i].predict(sample)] += 1.0 / ensemble.size();
-
-    for (auto i = 0u; i < NUM_THREADS; i++)
-      for (const auto& pair : tmp_probabilities[i]) probabilities[pair.first] += pair.second;
-
-    double max_prob = 0;
-    for (const auto& probability : probabilities) {
-      if (max_prob > 0.5) break;
-
-      if (probability.second > max_prob && probability.first != "") {
-        max_prob = probability.second;
-        score = probability.first;
+    for (auto i = 0u; i < ensemble.size(); i++) {
+      try {
+        // OMP worker threads have their own thread-local active_indexer;
+        // without this scope string values would be interned in the wrong map.
+        Value::ScopedIndexer _scope(ensemble[i].model->indexer.get());
+        if (ensemble[i].predicate(sample)) {
+          const std::string prediction = ensemble[i].predict(sample);
+          if (!prediction.empty()) tmp_probabilities[omp_get_thread_num()][prediction] += 1.0;
+        }
+      } catch (...) {
+        // Exceptions may not escape an OMP region (std::terminate); capture
+        // the first one and rethrow after the barrier.
+#pragma omp critical
+        if (!worker_error) worker_error = std::current_exception();
       }
     }
+    if (worker_error) std::rethrow_exception(worker_error);
 
-    return std::make_unique<InternalScore>(score, probabilities);
+    double votes = 0;
+    for (auto i = 0u; i < NUM_THREADS; i++)
+      for (const auto& pair : tmp_probabilities[i]) {
+        probabilities[pair.first] += pair.second;
+        votes += pair.second;
+      }
+
+    normalize(probabilities, votes);
+    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
   }
 
 #endif
@@ -165,50 +195,33 @@ class MultipleModelMethod {
                                                                       const std::vector<Segment>& ensemble) {
     std::unordered_map<std::string, double> probabilities;  // zero initialized
 
+    double total_weight = 0;
     for (const auto& segment : ensemble)
-      if (segment.predicate(sample)) probabilities[segment.predict(sample)] += 1.0 * segment.weight / ensemble.size();
-
-    double max_prob = 0;
-    std::string score;
-    double winning_threshold = 1.0 / ensemble[0].model->target_field.n_values;
-    for (const auto& probability : probabilities) {
-      if (max_prob > winning_threshold) break;
-
-      if (probability.second > max_prob && probability.first != "") {
-        max_prob = probability.second;
-        score = probability.first;
+      if (segment.predicate(sample)) {
+        const std::string prediction = segment.predict(sample);
+        if (prediction.empty()) continue;
+        probabilities[prediction] += segment.weight;
+        total_weight += segment.weight;
       }
-    }
 
-    return std::make_unique<InternalScore>(score, probabilities);
+    normalize(probabilities, total_weight);
+    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
   }
 
   inline static std::unique_ptr<InternalScore> classification_average(const Sample& sample,
                                                                       const std::vector<Segment>& ensemble) {
-    std::unique_ptr<InternalScore> first_score(ensemble[0].score(sample));
-    std::unordered_map<std::string, double> probabilities = first_score->probabilities;
+    std::unordered_map<std::string, double> probabilities;
 
-    for (auto i = 1u; i < ensemble.size(); i++)
-      if (ensemble[i].predicate(sample)) {
-        std::unique_ptr<InternalScore> tmp_score(ensemble[i].score(sample));
+    double count = 0;
+    for (const auto& segment : ensemble)
+      if (segment.predicate(sample)) {
+        std::unique_ptr<InternalScore> tmp_score(segment.score(sample));
         for (const auto& probability : tmp_score->probabilities) probabilities[probability.first] += probability.second;
+        count++;
       }
 
-    for (const auto& probability : probabilities)
-      probabilities[probability.first] = probability.second / ensemble.size();
-
-    std::vector<std::pair<std::string, double>> sorted_probs(probabilities.begin(), probabilities.end());
-    std::sort(sorted_probs.begin(), sorted_probs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    double max_prob = 0;
-    std::string score;
-    for (const auto& probability : sorted_probs) {
-      if (probability.second > max_prob && probability.first != "") {
-        max_prob = probability.second;
-        score = probability.first;
-      }
-    }
-
-    return std::make_unique<InternalScore>(score, probabilities);
+    normalize(probabilities, count);
+    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
   }
 
 #ifndef MULTITHREADING
@@ -222,6 +235,7 @@ class MultipleModelMethod {
         score += to_double(segment.predict(sample));
       }
 
+    if (count == 0) return std::make_unique<InternalScore>();
     score /= count;
 
     return std::make_unique<InternalScore>(score);
@@ -235,15 +249,26 @@ class MultipleModelMethod {
 
     for (auto i = 0u; i < NUM_THREADS; i++) scores[i] = 0;
 
+    std::exception_ptr worker_error = nullptr;
 #pragma omp parallel for if (ensemble.size() > 25) default(shared) num_threads(NUM_THREADS)
-    for (auto i = 0u; i < ensemble.size(); i++)
-      if (ensemble[i].predicate(sample)) {
-        count++;
-        scores[omp_get_thread_num()] += to_double(ensemble[i].predict(sample));
+    for (auto i = 0u; i < ensemble.size(); i++) {
+      try {
+        Value::ScopedIndexer _scope(ensemble[i].model->indexer.get());
+        if (ensemble[i].predicate(sample)) {
+#pragma omp atomic
+          count++;
+          scores[omp_get_thread_num()] += to_double(ensemble[i].predict(sample));
+        }
+      } catch (...) {
+#pragma omp critical
+        if (!worker_error) worker_error = std::current_exception();
       }
+    }
+    if (worker_error) std::rethrow_exception(worker_error);
 
     for (auto i = 0u; i < NUM_THREADS; i++) score += scores[i];
 
+    if (count == 0) return std::make_unique<InternalScore>();
     score /= count;
 
     return std::make_unique<InternalScore>(score);
@@ -252,32 +277,34 @@ class MultipleModelMethod {
 
   inline static std::unique_ptr<InternalScore> classification_weighted_average(const Sample& sample,
                                                                                const std::vector<Segment>& ensemble) {
-    std::unique_ptr<InternalScore> first_score(ensemble[0].score(sample));
-    std::unordered_map<std::string, double> probabilities = first_score->probabilities;
+    std::unordered_map<std::string, double> probabilities;
 
-    for (auto i = 1u; i < ensemble.size(); i++)
-      if (ensemble[i].predicate(sample)) {
-        std::unique_ptr<InternalScore> tmp_score(ensemble[i].score(sample));
+    double total_weight = 0;
+    for (const auto& segment : ensemble)
+      if (segment.predicate(sample)) {
+        std::unique_ptr<InternalScore> tmp_score(segment.score(sample));
         for (const auto& probability : tmp_score->probabilities)
-          probabilities[probability.first] += probability.second * ensemble[i].weight;
+          probabilities[probability.first] += probability.second * segment.weight;
+        total_weight += segment.weight;
       }
 
-    for (const auto& probability : probabilities)
-      probabilities[probability.first] = probability.second / ensemble.size();
+    normalize(probabilities, total_weight);
+    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
+  }
 
-    double max_prob = 0;
-    std::string score;
-    double winning_threshold = 1.0 / ensemble[0].model->target_field.n_values;
-    for (const auto& probability : probabilities) {
-      if (max_prob >= winning_threshold) break;
+  inline static std::unique_ptr<InternalScore> regression_weighted_average(const Sample& sample,
+                                                                           const std::vector<Segment>& ensemble) {
+    double score = 0;
+    double total_weight = 0;
 
-      if (probability.second > max_prob && probability.first != "") {
-        max_prob = probability.second;
-        score = probability.first;
+    for (const auto& segment : ensemble)
+      if (segment.predicate(sample)) {
+        score += to_double(segment.predict(sample)) * segment.weight;
+        total_weight += segment.weight;
       }
-    }
 
-    return std::make_unique<InternalScore>(score, probabilities);
+    if (total_weight == 0) return std::make_unique<InternalScore>();
+    return std::make_unique<InternalScore>(score / total_weight);
   }
 
   inline static std::unique_ptr<InternalScore> median(const Sample& sample, const std::vector<Segment>& ensemble) {
@@ -324,10 +351,19 @@ class MultipleModelMethod {
 
     for (auto i = 0u; i < NUM_THREADS; i++) scores[i] = 0;
 
+    std::exception_ptr worker_error = nullptr;
 #pragma omp parallel for if (ensemble.size() > 25) default(shared) num_threads(NUM_THREADS)
-    for (auto i = 0u; i < ensemble.size(); i++)
-      if (ensemble[i].predicate(sample))
-        scores[omp_get_thread_num()] += std::unique_ptr<InternalScore>(ensemble[i].score(sample))->double_score;
+    for (auto i = 0u; i < ensemble.size(); i++) {
+      try {
+        Value::ScopedIndexer _scope(ensemble[i].model->indexer.get());
+        if (ensemble[i].predicate(sample))
+          scores[omp_get_thread_num()] += std::unique_ptr<InternalScore>(ensemble[i].score(sample))->double_score;
+      } catch (...) {
+#pragma omp critical
+        if (!worker_error) worker_error = std::current_exception();
+      }
+    }
+    if (worker_error) std::rethrow_exception(worker_error);
 
     for (auto i = 0u; i < NUM_THREADS; i++) score += scores[i];
 
@@ -361,21 +397,30 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(result);
   }
 
+  // modelChain: segments whose predicate is false are skipped entirely; the
+  // last *matching* segment supplies the chain result. Since predicates are
+  // evaluated against the evolving sample, each matching segment's execution
+  // is deferred until a later match proves it is not the last one.
   inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble) {
     Sample tmp_sample = sample;
     bool first = true;
+    const Segment* pending = nullptr;  // last matching segment, not yet executed
 
-    for (auto i = 0u; i < ensemble.size() - 1; i++)
-      if (ensemble[i].predicate(tmp_sample)) {
+    for (const auto& segment : ensemble) {
+      if (!segment.predicate(tmp_sample)) continue;
+      if (pending) {
         if (first) {
-          ensemble[i].model->augment_first(tmp_sample);
+          pending->model->augment_first(tmp_sample);
           first = false;
         } else {
-          ensemble[i].model->augment(tmp_sample);
+          pending->model->augment(tmp_sample);
         }
       }
+      pending = &segment;
+    }
 
-    return ensemble.back().model->augment_last(tmp_sample);
+    if (!pending) return std::make_unique<InternalScore>();  // no segment matched
+    return pending->model->augment_last(tmp_sample);
   }
 };
 
