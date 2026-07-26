@@ -54,7 +54,14 @@ inline NeuralActivationType parse_activation(const std::string& s) {
   return NeuralActivationType::IDENTITY;
 }
 
-inline double apply_activation(double x, NeuralActivationType type, double threshold = 0.0, double width = 1.0) {
+/**
+ * Element-wise activations, applied to a neuron's weighted sum.
+ *
+ * radialBasis is not one of them: an RBF neuron reads its Con weights as the
+ * coordinates of a centre rather than as a linear combination, so it is
+ * evaluated by the layer itself (see NeuralNetworkModel::forward_pass).
+ */
+inline double apply_activation(double x, NeuralActivationType type, double threshold = 0.0) {
   switch (type) {
     case NeuralActivationType::THRESHOLD:
       return x > threshold ? 1.0 : 0.0;
@@ -83,7 +90,7 @@ inline double apply_activation(double x, NeuralActivationType type, double thres
     case NeuralActivationType::RECTIFIER:
       return std::max(0.0, x);
     case NeuralActivationType::RADIALBASIS:
-      return std::exp(-(x * x) / (2.0 * width * width));
+      return x;  // handled by the layer
   }
   return x;
 }

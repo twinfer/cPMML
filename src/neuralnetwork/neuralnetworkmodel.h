@@ -42,18 +42,25 @@ class NeuralNetworkModel : public InternalModel {
   };
 
   struct Layer {
-    Eigen::MatrixXd weights;  // [n_neurons x n_inputs_to_layer]
+    Eigen::MatrixXd weights;  // [n_neurons x n_inputs_to_layer]; RBF centers when radial_basis
     Eigen::VectorXd biases;   // [n_neurons]
     NeuralActivationType activation;
     double threshold;
-    double width;
     std::string normalization;  // "none", "softmax", "simplemax"
+    bool radial_basis = false;
+    Eigen::VectorXd widths;     // [n_neurons], RBF only
+    Eigen::VectorXd altitudes;  // [n_neurons], RBF only
+    Eigen::VectorXd fan_ins;    // [n_neurons], RBF only: number of Con elements
     std::vector<std::string> output_ids;
   };
 
   struct NeuralOutput {
     std::string output_neuron;
     std::string target_category;
+    // Inverse of a NormContinuous on the NeuralOutput DerivedField: the network
+    // works in normalized space, the prediction must come back in target scale.
+    std::vector<double> norm;
+    std::vector<double> orig;
   };
 
   // --- Members ---
@@ -61,6 +68,7 @@ class NeuralNetworkModel : public InternalModel {
   NeuralActivationType default_activation;
   double default_threshold;
   double default_width;
+  double default_altitude;
   std::string model_normalization;
 
   std::vector<NeuralInput> neural_inputs;
@@ -80,8 +88,9 @@ class NeuralNetworkModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         default_activation(parse_activation(node.get_attribute("activationFunction"))),
         default_threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 0.0),
-        default_width(node.exists_attribute("width") ? to_double(node.get_attribute("width")) : 1.0),
-        model_normalization(normalize_method_str(node.get_attribute("normalizationMethod"))) {
+        default_width(node.get_double_attribute("width", 1.0)),
+        default_altitude(node.get_double_attribute("altitude", 1.0)),
+        model_normalization(node.get_attribute("normalizationMethod", "none")) {
     parse_neural_inputs(node.get_child("NeuralInputs"), indexer);
     parse_layers(node);
     parse_neural_outputs(node.get_child("NeuralOutputs"));
@@ -127,8 +136,6 @@ class NeuralNetworkModel : public InternalModel {
  private:
   // --- Parse helpers ---
 
-  static std::string normalize_method_str(const std::string& s) { return (s == "null") ? "none" : to_lower(s); }
-
   void parse_neural_inputs(const XmlNode& inputs_node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& ni : inputs_node.get_childs("NeuralInput")) {
       NeuralInput input;
@@ -152,13 +159,17 @@ class NeuralNetworkModel : public InternalModel {
       NeuralActivationType act = layer_node.exists_attribute("activationFunction")
                                      ? parse_activation(layer_node.get_attribute("activationFunction"))
                                      : default_activation;
-      double thr = layer_node.exists_attribute("threshold") ? to_double(layer_node.get_attribute("threshold"))
-                                                            : default_threshold;
-      double wid = layer_node.exists_attribute("width") ? to_double(layer_node.get_attribute("width")) : default_width;
-      std::string norm = normalize_method_str(layer_node.get_attribute("normalizationMethod"));
+      double thr = layer_node.get_double_attribute("threshold", default_threshold);
+      double layer_width = layer_node.get_double_attribute("width", default_width);
+      double layer_altitude = layer_node.get_double_attribute("altitude", default_altitude);
+      // A layer without normalizationMethod inherits the model-level one.
+      std::string norm = to_lower(layer_node.get_attribute("normalizationMethod", model_normalization));
 
       Eigen::MatrixXd W = Eigen::MatrixXd::Zero(n, prev_n);
       Eigen::VectorXd b = Eigen::VectorXd::Zero(n);
+      Eigen::VectorXd widths = Eigen::VectorXd::Constant(n, layer_width);
+      Eigen::VectorXd altitudes = Eigen::VectorXd::Constant(n, layer_altitude);
+      Eigen::VectorXd fan_ins = Eigen::VectorXd::Zero(n);
       std::vector<std::string> output_ids;
       std::unordered_map<std::string, size_t> curr_id_to_idx;
 
@@ -169,15 +180,20 @@ class NeuralNetworkModel : public InternalModel {
         curr_id_to_idx[nid] = i;
 
         if (neuron.exists_attribute("bias")) b[i] = to_double(neuron.get_attribute("bias"));
+        widths[i] = neuron.get_double_attribute("width", layer_width);
+        altitudes[i] = neuron.get_double_attribute("altitude", layer_altitude);
 
         for (const auto& con : neuron.get_childs("Con")) {
           const std::string from = con.get_attribute("from");
           const auto it = prev_id_to_idx.find(from);
           if (it != prev_id_to_idx.end()) W(i, it->second) = to_double(con.get_attribute("weight"));
+          fan_ins[i] += 1.0;
         }
       }
 
-      layers.push_back({std::move(W), std::move(b), act, thr, wid, norm, std::move(output_ids)});
+      const bool radial_basis = act == NeuralActivationType::RADIALBASIS;
+      layers.push_back({std::move(W), std::move(b), act, thr, norm, radial_basis, std::move(widths),
+                        std::move(altitudes), std::move(fan_ins), std::move(output_ids)});
       prev_id_to_idx = std::move(curr_id_to_idx);
     }
   }
@@ -188,10 +204,16 @@ class NeuralNetworkModel : public InternalModel {
       output.output_neuron = no.get_attribute("outputNeuron");
 
       XmlNode df = no.get_child("DerivedField");
-      if (df.exists_child("NormDiscrete"))
+      if (df.exists_child("NormDiscrete")) {
         output.target_category = df.get_child("NormDiscrete").get_attribute("value");
-      else
+      } else {
         output.target_category = mining_schema.target.name;
+        if (df.exists_child("NormContinuous"))
+          for (const auto& linear_norm : df.get_child("NormContinuous").get_childs("LinearNorm")) {
+            output.orig.push_back(to_double(linear_norm.get_attribute("orig")));
+            output.norm.push_back(to_double(linear_norm.get_attribute("norm")));
+          }
+      }
 
       neural_outputs.push_back(std::move(output));
     }
@@ -216,11 +238,23 @@ class NeuralNetworkModel : public InternalModel {
 
     // Layer-by-layer forward pass
     for (const auto& layer : layers) {
-      Eigen::VectorXd pre = layer.weights * x + layer.biases;
+      Eigen::VectorXd pre(layer.weights.rows());
 
-      // Element-wise activation
-      for (Eigen::Index j = 0; j < pre.size(); j++)
-        pre[j] = apply_activation(pre[j], layer.activation, layer.threshold, layer.width);
+      if (layer.radial_basis) {
+        // RBF neurons: the Con weights are the coordinates of the centre, not
+        // a linear combination, and the neuron output is a Gaussian of the
+        // distance to it, scaled by altitude^fanIn.
+        for (Eigen::Index j = 0; j < layer.weights.rows(); j++) {
+          const double squared_distance = (layer.weights.row(j).transpose() - x).squaredNorm();
+          const double width = layer.widths[j];
+          pre[j] = std::pow(layer.altitudes[j], layer.fan_ins[j]) *
+                   std::exp(-squared_distance / (2.0 * width * width));
+        }
+      } else {
+        pre = layer.weights * x + layer.biases;
+        for (Eigen::Index j = 0; j < pre.size(); j++)
+          pre[j] = apply_activation(pre[j], layer.activation, layer.threshold);
+      }
 
       // Layer normalization (softmax/simplemax)
       if (layer.normalization == "softmax") {
@@ -243,12 +277,33 @@ class NeuralNetworkModel : public InternalModel {
     scores.reserve(neural_outputs.size());
     for (const auto& no : neural_outputs) {
       const auto it = output_id_to_idx.find(no.output_neuron);
-      if (it != output_id_to_idx.end())
-        scores.push_back(out[static_cast<Eigen::Index>(it->second)]);
-      else
+      if (it == output_id_to_idx.end()) {
         scores.push_back(0.0);
+        continue;
+      }
+
+      scores.push_back(denormalize(no, out[static_cast<Eigen::Index>(it->second)]));
     }
     return scores;
+  }
+
+  // Piecewise-linear inverse of the NeuralOutput NormContinuous: maps a value
+  // from network space back to target scale, extrapolating from the nearest
+  // segment outside the mapped range (NormContinuous outliers="asIs").
+  static double denormalize(const NeuralOutput& output, const double value) {
+    if (output.norm.size() < 2) return value;
+
+    size_t segment = 0;
+    for (size_t i = 0; i + 1 < output.norm.size(); i++) {
+      segment = i;
+      if (value < output.norm[i + 1]) break;
+    }
+
+    const double span = output.norm[segment + 1] - output.norm[segment];
+    if (span == 0.0) return output.orig[segment];
+
+    return output.orig[segment] +
+           (value - output.norm[segment]) / span * (output.orig[segment + 1] - output.orig[segment]);
   }
 };
 
