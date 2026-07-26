@@ -47,8 +47,11 @@ class ModelBuilder {
     if (!result) throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
 
     XmlNode xmlNode(document.child("PMML"));
-    // Set up per-model string converter context for thread safety.
-    // The evaluator constructor will create the Indexer; we set the scope after.
+    // Parse-time indexer scope guard: evaluator constructors set
+    // Value::active_indexer (via make_and_activate_indexer); this guard
+    // restores the previous value on every exit path so the thread-local never
+    // dangles past the model's lifetime.
+    Value::ScopedIndexer parse_scope(Value::active_indexer);
     std::unique_ptr<InternalEvaluator> evaluator;
     if (xmlNode.exists_child("MiningModel"))
       evaluator = std::make_unique<EnsembleEvaluator>(xmlNode);
@@ -86,6 +89,10 @@ class ModelBuilder {
       evaluator = std::make_unique<AssociationEvaluator>(xmlNode);
     else
       throw cpmml::ParsingException("unsupported model type");
+
+    // Parsing is done: freeze the per-model string map so concurrent scoring
+    // threads can read it without synchronization.
+    if (evaluator->indexer) evaluator->indexer->freeze();
 
     return evaluator;
   }

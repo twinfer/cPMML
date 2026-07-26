@@ -133,6 +133,7 @@ class AssociationModel : public InternalModel {
     // Transactional: extract collection from the item field, build active items
     // from the collection values, then score. MiningSchema preparation uses
     // only the string fields (group field is skipped).
+    Value::ScopedIndexer _scope(indexer.get());  // string interning must use this model's map
     Sample internal_sample = base_sample;
     std::unordered_map<std::string, std::string> flat;
     std::vector<std::string> basket;
