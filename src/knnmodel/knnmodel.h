@@ -126,7 +126,7 @@ class NearestNeighborModel : public InternalModel {
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
       const double val = to_double(regress(neighbors));
-      return std::make_unique<RegressionScore>(std::to_string(val), val, classes, std::vector<double>{val});
+      return std::make_unique<InternalScore>(val);
     }
 
     const std::string winner = classify(neighbors);

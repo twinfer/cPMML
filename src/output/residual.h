@@ -38,9 +38,8 @@ class Residual : public OutputExpression {
 
     // Classification residual (JPMML semantics): X − p(predicted), where
     // X = 1 if the actual value equals the predicted category, 0 otherwise.
-    // The predicted category having a probability entry is what identifies a
-    // classification score: regression models may carry a bogus
-    // {target_name: predicted_value} probabilities entry that must not match.
+    // A score is treated as classification only when the predicted category
+    // has a probability entry; anything else falls through to regression.
     auto it = score.probabilities.find(score.score);
     if (it == score.probabilities.end() && !score.raw_score.empty()) it = score.probabilities.find(score.raw_score);
     if (it != score.probabilities.end()) {

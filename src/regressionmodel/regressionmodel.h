@@ -69,9 +69,8 @@ class RegressionModel : public InternalModel {
     double regressed_value;
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::REGRESSION:
-        scores.push_back(regression_normalization(regression_tables[0].score(sample)));
-        regressed_value = scores[0];
-        return std::make_unique<RegressionScore>(std::to_string(regressed_value), regressed_value, classes, scores);
+        regressed_value = regression_normalization(regression_tables[0].score(sample));
+        return std::make_unique<InternalScore>(regressed_value);
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         scores = classification_normalization(get_scores(sample));
         regressed_value = *std::max_element(scores.begin(), scores.end());

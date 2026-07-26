@@ -129,7 +129,7 @@ class GeneralRegressionModel : public InternalModel {
     }
     // regression / generallinear / generalizedlinear
     const double val = predict_continuous(sample);
-    return std::make_unique<RegressionScore>(std::to_string(val), val, classes, std::vector<double>{val});
+    return std::make_unique<InternalScore>(val);
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
