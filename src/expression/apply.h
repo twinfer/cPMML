@@ -17,6 +17,7 @@
 #include "mapvalues.h"
 #include "normcontinuous.h"
 #include "normdiscrete.h"
+#include "textindex.h"
 
 /**
  * @class Apply
@@ -74,6 +75,9 @@ class Apply : public Expression {
         case ExpressionType::ExpressionTypeValue::MAP_VALUES:
           expression = std::make_shared<MapValues>(n, output_index, output_type, indexer);
           break;
+        case ExpressionType::ExpressionTypeValue::TEXT_INDEX:
+          expression = std::make_shared<TextIndex>(n, output_index, output_type, indexer);
+          break;
         default:
           throw cpmml::ParsingException("Expression " + expression_type.to_string() + " type not supported");
       }
@@ -86,15 +90,17 @@ class Apply : public Expression {
 
   inline Value eval(const Sample& sample) const override {
     std::vector<Value> input;
-    Value tmp;
+    input.reserve(expressions.size());
     bool missing_input = false;
     for (const auto& expression : expressions) {
-      tmp = expression->eval(sample);
-      input.push_back(tmp);
-      if (tmp.missing) missing_input = true;
+      input.push_back(expression->eval(sample));
+      if (input.back().missing) missing_input = true;
     }
 
-    if (missing_input) {
+    // isMissing/isNotMissing/if must receive their missing arguments; for any
+    // other function a missing argument makes the result missing, with
+    // mapMissingTo (then defaultValue) taking over when given.
+    if (missing_input && !function.handles_missing()) {
       if (exist_missingreplacement)
         return mapmissing_to;
       else if (exist_defaultvalue)
@@ -109,8 +115,7 @@ class Apply : public Expression {
            // invalid is like "division by zero"
       // thus it is captured with an exception
       result = function(input);
-    } catch (const std::exception& e) {
-      std::cout << e.what() << std::endl;
+    } catch (const std::exception&) {
       switch (invalidValueTreatmentMethod.value) {
         case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:
           throw cpmml::InvalidValueException("evaluating apply function");
@@ -126,6 +131,7 @@ class Apply : public Expression {
       }
     }
 
+    if (result.missing && exist_defaultvalue) return defaultValue;
     return result;
   }
 };

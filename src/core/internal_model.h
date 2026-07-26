@@ -134,12 +134,15 @@ class InternalModel {
       if (of.datatype.value == DataType::DataTypeValue::STRING) {
         sample.change_value_if_missing(of.index, of.expression->eval(sample));
       } else {
-        const double v = of.expression->eval_double(sample, score);
-        if (!is_double_min(v)) {
-          sample.change_value(of.index, Value(v));
+        // Prefer the sample-derived value: for predictedValue-type outputs it
+        // carries the post-Target (rescaled) prediction written by augment(),
+        // while score.double_score is the raw pre-Target value at this point.
+        const Value sv = of.expression->eval(sample);
+        if (!sv.missing) {
+          sample.change_value(of.index, sv);
         } else {
-          const Value sv = of.expression->eval(sample);
-          if (!sv.missing) sample.change_value(of.index, sv);
+          const double v = of.expression->eval_double(sample, score);
+          if (!is_double_min(v)) sample.change_value(of.index, Value(v));
         }
       }
     }

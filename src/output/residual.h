@@ -36,11 +36,12 @@ class Residual : public OutputExpression {
     if (actual_val.missing) return double_min();
 
     if (!score.probabilities.empty()) {
-      // Classification: probability(actual_class) - 1.0
+      // Classification residual per spec: X − p(actual), where X = 1 for the
+      // actual category (so 1 − p when looking at the actual class).
       const std::string actual_str = actual_val.svalue;
       auto it = score.probabilities.find(actual_str);
       if (it == score.probabilities.end()) return double_min();
-      return it->second - 1.0;
+      return 1.0 - it->second;
     } else {
       // Regression: actual_value - predicted_value
       return actual_val.value - score.double_score;

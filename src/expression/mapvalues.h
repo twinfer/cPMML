@@ -61,7 +61,11 @@ class MapValues : public Expression {
     for (const auto& n : raw_node.get_child("InlineTable").get_childs("row")) {
       std::vector<Value> keys;
       for (const auto& column : columns) {
-        keys.push_back(Value(n.get_child(column).value()));  // datatype is inferred!!!
+        // Keys must carry the same datatype as the field they are compared
+        // against at lookup time: with an inferred type, a numeric-looking
+        // category like "1" becomes the number 1 while the sample carries the
+        // string-indexed value, and no lookup would ever match.
+        keys.push_back(Value(n.get_child(column).value(), indexer->get_type(fieldcolumn_pairs.at(column))));
       }
       tree_table.add(keys, Value(n.get_child(out).value(), output_type));
     }
@@ -90,14 +94,10 @@ class MapValues : public Expression {
     try {
       return tree_table.get(keys);
     } catch (const std::out_of_range& e) {
-      if (exist_defaultvalue)
-        return defaultValue;
-      else if (exist_missingreplacement)
-        return mapmissing_to;
-      else
-        return Value();
-      //            else throw NeverSawException("Input value " +
-      //            ::mkstring<Value>(keys) + " never saw");
+      // Unmatched (non-missing) key: defaultValue or missing. mapMissingTo is
+      // reserved for missing inputs and must not apply here.
+      if (exist_defaultvalue) return defaultValue;
+      return Value();
     }
   }
 };

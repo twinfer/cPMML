@@ -38,6 +38,17 @@ class EntityId : public OutputExpression {
     }
     return score.entity_id;
   };
+
+  // Entity ids are strings, but an OutputField may declare dataType="integer"
+  // (common for cluster/node ids) — convert when possible.
+  inline double eval_double(const Sample& sample, const InternalScore& score) const override {
+    try {
+      const std::string id = eval_str(sample, score);
+      return id.empty() ? double_min() : to_double(id);
+    } catch (const cpmml::ParsingException&) {
+      return double_min();
+    }
+  };
 };
 
 #endif  // CPMML_SRC_EXPRESSION_ENTITYID_H_

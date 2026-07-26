@@ -56,6 +56,12 @@ class TransformedValue : public OutputExpression {
     if (!expression) return "";
     return expression->eval(sample).svalue;
   };
+
+  inline double eval_double(const Sample& sample, const InternalScore& /*score*/) const override {
+    if (!expression) return double_min();
+    const Value v = expression->eval(sample);
+    return v.missing ? double_min() : v.value;
+  };
 };
 
 #endif  // CPMML_SRC_EXPRESSION_TRANSFORMED_VALUE_H_

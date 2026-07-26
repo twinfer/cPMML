@@ -39,6 +39,10 @@ class PredictedValue : public OutputExpression {
   inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     return score.raw_score.empty() ? score.score : score.raw_score;
   };
+
+  inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+    return score.double_score;
+  };
 };
 
 /**
@@ -63,6 +67,10 @@ class PredictedDisplayValue : public OutputExpression {
 
   inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     return score.score;
+  };
+
+  inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+    return score.double_score;
   };
 };
 

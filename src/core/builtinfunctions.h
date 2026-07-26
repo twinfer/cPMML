@@ -69,6 +69,7 @@ class BuiltInFunction {  // inputs are mapped by position
   std::string function_string;
   BuiltInFunctionType function_type = BuiltInFunctionType::IDENTITY;
   int n_args = -1;
+  int min_nargs = 0;
   std::function<Value(const std::vector<Value>&)> function;
 
   BuiltInFunction() = default;
@@ -77,6 +78,7 @@ class BuiltInFunction {  // inputs are mapped by position
       : function_string(function_string),
         function_type(from_string(function_string)),
         n_args(get_nargs(function_type)),
+        min_nargs(get_min_nargs(function_type)),
         function(get_function(function_type)) {}
 
   static BuiltInFunctionType from_string(const std::string& builtinfunction) {
@@ -126,46 +128,63 @@ class BuiltInFunction {  // inputs are mapped by position
     }
   }
 
+  // Exact arity, or -1 for variadic functions (see get_min_nargs for those).
   static int get_nargs(const BuiltInFunctionType& function_type) {
     switch (function_type) {
       case BuiltInFunctionType::PLUS:
-        return 2;
       case BuiltInFunctionType::MINUS:
-        return 2;
       case BuiltInFunctionType::MUL:
-        return 2;
       case BuiltInFunctionType::DIV:
-        return 2;
       case BuiltInFunctionType::POW:
-        return 2;
-      case BuiltInFunctionType::IF:
-        return 3;
-      case BuiltInFunctionType::IS_MISSING:
-        return 1;
-      case BuiltInFunctionType::IS_NOT_MISSING:
-        return 1;
-      case BuiltInFunctionType::IS_IN:
-        return 1;
-      case BuiltInFunctionType::IS_NOT_IN:
-        return 1;
-      case BuiltInFunctionType::REPLACE:
-        return 3;
+      case BuiltInFunctionType::EQUAL:
+      case BuiltInFunctionType::NOT_EQUAL:
+      case BuiltInFunctionType::LESS_THAN:
+      case BuiltInFunctionType::LESS_THAN_EQUAL:
+      case BuiltInFunctionType::GREATER_THAN:
+      case BuiltInFunctionType::GREATER_THAN_EQUAL:
       case BuiltInFunctionType::MATCHES:
         return 2;
+      case BuiltInFunctionType::IF:
+        return -1;  // if(condition, then[, else]) — the else part is optional
+      case BuiltInFunctionType::IS_MISSING:
+      case BuiltInFunctionType::IS_NOT_MISSING:
+      case BuiltInFunctionType::EXP:
+      case BuiltInFunctionType::LOG:
+      case BuiltInFunctionType::LOG10:
+      case BuiltInFunctionType::SQRT:
+      case BuiltInFunctionType::ABS:
+      case BuiltInFunctionType::ROUND:
+      case BuiltInFunctionType::FLOOR:
+      case BuiltInFunctionType::CEIL:
       case BuiltInFunctionType::UPPERCASE:
-        return 1;
       case BuiltInFunctionType::LOWERCASE:
-        return 1;
-      case BuiltInFunctionType::SUBSTRING:
-        return 3;
       case BuiltInFunctionType::TRIM_BLANKS:
-        return 1;
-      case BuiltInFunctionType::CONCAT:
-        return -1;
       case BuiltInFunctionType::STRING_LENGTH:
         return 1;
+      case BuiltInFunctionType::REPLACE:
+      case BuiltInFunctionType::SUBSTRING:
+        return 3;
       default:
-        return -1;
+        return -1;  // variadic: max, min, sum, avg, concat, isIn, isNotIn
+    }
+  }
+
+  // Minimum arity for variadic functions (n_args == -1).
+  static int get_min_nargs(const BuiltInFunctionType& function_type) {
+    switch (function_type) {
+      case BuiltInFunctionType::IS_IN:
+      case BuiltInFunctionType::IS_NOT_IN:
+        return 2;  // isIn(candidate, member, ...)
+      case BuiltInFunctionType::MAX:
+      case BuiltInFunctionType::MIN:
+      case BuiltInFunctionType::SUM:
+      case BuiltInFunctionType::AVG:
+      case BuiltInFunctionType::CONCAT:
+        return 1;
+      case BuiltInFunctionType::IF:
+        return 2;  // if(condition, then[, else])
+      default:
+        return 0;
     }
   }
 
@@ -250,7 +269,15 @@ class BuiltInFunction {  // inputs are mapped by position
 
   inline Value operator()(const std::vector<Value>& input) const {
     if (n_args != -1 && n_args != (int)input.size()) throw cpmml::InvalidValueException("Wrong number of inputs");
+    if (n_args == -1 && (int)input.size() < min_nargs) throw cpmml::InvalidValueException("Wrong number of inputs");
     return function(input);
+  }
+
+  // True for functions that must receive missing arguments instead of having
+  // Apply short-circuit them (PMML: isMissing/isNotMissing/if).
+  inline bool handles_missing() const {
+    return function_type == BuiltInFunctionType::IS_MISSING || function_type == BuiltInFunctionType::IS_NOT_MISSING ||
+           function_type == BuiltInFunctionType::IF;
   }
 
   inline static Value plus(const std::vector<Value>& input) { return input[0] + input[1]; }
@@ -312,13 +339,15 @@ class BuiltInFunction {  // inputs are mapped by position
   inline static Value pow(const std::vector<Value>& input) {
     return Value(std::pow(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
   }
-  // PMML if(condition, then-value, else-value)
+  // PMML if(condition, then-value[, else-value]); without an else part the
+  // result is missing when the condition does not hold.
   inline static Value if_then_else(const std::vector<Value>& input) {
-    return (input[0].value != 0.0 && !input[0].missing) ? input[1] : input[2];
+    if (input[0].value != 0.0 && !input[0].missing) return input[1];
+    return input.size() > 2 ? input[2] : Value();
   }
   inline static Value is_in(const std::vector<Value>& input) {
     auto found = std::find(input.begin() + 1, input.end(), input[0]);
-    return Value(found != input.begin() && found != input.end(), DataType::DataTypeValue::BOOLEAN);
+    return Value(found != input.end(), DataType::DataTypeValue::BOOLEAN);
   }
   inline static Value is_notin(const std::vector<Value>& input) {
     return Value(!(is_in(input).value), DataType::DataTypeValue::BOOLEAN);

@@ -49,6 +49,8 @@ class NormContinuous : public Expression {
                         output_type))  // TYPE IMPLICIT: DOUBLE, we know input type must be
                                        // equal to output type in this case
   {
+    if (orig.size() < 2 || orig.size() != norm.size())
+      throw cpmml::ParsingException("NormContinuous requires at least two LinearNorm elements");
     inputs.insert(field_name);
   }
 
@@ -57,7 +59,7 @@ class NormContinuous : public Expression {
     std::vector<Value> result;
 
     for (const auto& linear_norm : node.get_childs_bypattern("LinearNorm"))
-      result.push_back(Value(linear_norm.get_attribute("orig"), dataType));
+      result.push_back(Value(linear_norm.get_attribute(linearnorm_type), dataType));
 
     return result;
   }
@@ -93,14 +95,16 @@ class NormContinuous : public Expression {
   inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
 
-    if (input < orig[0] && input > orig[1]) {
+    if (input.missing) return mapmissing_to;  // missing when no mapMissingTo is given
+
+    if (input < orig.front() || input > orig.back()) {  // outlier
       switch (outliertreatment_method.value) {
         case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_IS:
-          return interpolate(input);
+          return interpolate(input);  // extrapolate from the nearest interval
         case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
           return mapmissing_to;
         case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-          return norm.back();
+          return input < orig.front() ? norm.front() : norm.back();
       }
     }
 
