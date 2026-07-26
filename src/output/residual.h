@@ -14,7 +14,8 @@
  * OutputExpression for feature="residual".
  *
  * For regression models:  residual = actual_target_value - predicted_value
- * For classification:     residual = probability(actual_target_class) - 1.0
+ * For classification:     residual = X - probability(predicted_class),
+ *                         where X = 1 if actual == predicted, else 0
  *
  * The actual target value is read from the internal sample at target_index,
  * which must be populated from the raw input before OutputExpression evaluation.
@@ -35,17 +36,21 @@ class Residual : public OutputExpression {
     const Value& actual_val = sample[target_index].value;
     if (actual_val.missing) return double_min();
 
-    if (!score.probabilities.empty()) {
-      // Classification residual per spec: X − p(actual), where X = 1 for the
-      // actual category (so 1 − p when looking at the actual class).
-      const std::string actual_str = actual_val.svalue;
-      auto it = score.probabilities.find(actual_str);
-      if (it == score.probabilities.end()) return double_min();
-      return 1.0 - it->second;
-    } else {
-      // Regression: actual_value - predicted_value
-      return actual_val.value - score.double_score;
+    // Classification residual (JPMML semantics): X − p(predicted), where
+    // X = 1 if the actual value equals the predicted category, 0 otherwise.
+    // The predicted category having a probability entry is what identifies a
+    // classification score: regression models may carry a bogus
+    // {target_name: predicted_value} probabilities entry that must not match.
+    auto it = score.probabilities.find(score.score);
+    if (it == score.probabilities.end() && !score.raw_score.empty()) it = score.probabilities.find(score.raw_score);
+    if (it != score.probabilities.end()) {
+      const double x = (actual_val.svalue == score.score || actual_val.svalue == score.raw_score) ? 1.0 : 0.0;
+      return x - it->second;
     }
+
+    // Regression: actual_value - predicted_value
+    if (is_double_min(score.double_score)) return double_min();
+    return actual_val.value - score.double_score;
   }
 };
 
