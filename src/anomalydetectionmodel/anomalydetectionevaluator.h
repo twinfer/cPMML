@@ -36,14 +36,15 @@
 class AnomalyDetectionEvaluator : public InternalEvaluator {
  public:
   std::unique_ptr<InternalModel> inner;
+  const ClusteringModel* clustering = nullptr;  // set for clusterMeanDist (non-owning view of inner)
   double mean_threshold = 0.5;
   double sample_data_size = 256.0;
   bool is_iforest = true;
 
   explicit AnomalyDetectionEvaluator(const XmlNode& pmml_root) : InternalEvaluator(pmml_root) {
     XmlNode ad = pmml_root.get_child("AnomalyDetectionModel");
-    mean_threshold = ad.get_double_attribute("meanThreshold");
-    sample_data_size = ad.get_double_attribute("sampleDataSize");
+    mean_threshold = ad.get_double_attribute("meanThreshold", 0.5);
+    sample_data_size = ad.get_double_attribute("sampleDataSize", 256.0);
     std::string algo = to_lower(ad.get_attribute("algorithmType"));
     is_iforest = (algo == "iforest");
 
@@ -54,8 +55,10 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
       inner = std::make_unique<SupportVectorMachineModel>(ad.get_child("SupportVectorMachineModel"), data_dictionary,
                                                           transformation_dictionary, indexer);
     } else if (ad.exists_child("ClusteringModel")) {
-      inner = std::make_unique<ClusteringModel>(ad.get_child("ClusteringModel"), data_dictionary,
-                                                transformation_dictionary, indexer);
+      auto cm = std::make_unique<ClusteringModel>(ad.get_child("ClusteringModel"), data_dictionary,
+                                                  transformation_dictionary, indexer);
+      clustering = cm.get();
+      inner = std::move(cm);
     } else {
       throw cpmml::ParsingException("AnomalyDetectionModel: unsupported or missing inner model");
     }
@@ -63,7 +66,9 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
 
   inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
     auto flat = flatten_input(arguments);
-    double raw = to_double(inner->predict(flat));
+    // clusterMeanDist scores with the distance to the nearest cluster —
+    // inner->predict would return the cluster *id*, which is not a score.
+    double raw = clustering ? clustering->min_distance(flat) : to_double(inner->predict(flat));
     double s = is_iforest ? iforest_score(raw) : raw;
     return std::make_unique<InternalScore>(s);
   }

@@ -77,6 +77,10 @@ class GeneralRegressionModel : public InternalModel {
   std::vector<std::string> classes;
   std::string reference_category;
 
+  // Category key used by continuous prediction: "" when PCells omit
+  // targetCategory (the standard encoding), else the first category seen.
+  std::string continuous_category;
+
   // Offset
   bool has_offset_value = false;
   double offset_value = 0.0;
@@ -179,17 +183,29 @@ class GeneralRegressionModel : public InternalModel {
   }
 
   void parse_param_matrix(const XmlNode& node) {
+    bool has_shared_cells = false;
+    std::string first_category;
     for (const auto& cell : node.get_child("ParamMatrix").get_childs("PCell")) {
       const std::string param = cell.get_attribute("parameterName");
-      const std::string cat = cell.get_attribute("targetCategory");
+      // A PCell without targetCategory is a shared beta: it applies to every
+      // target category (ordinal slope terms, common covariates). Key it "".
+      const std::string cat = cell.exists_attribute("targetCategory") ? cell.get_attribute("targetCategory") : "";
       const double beta_val = to_double(cell.get_attribute("beta"));
       param_matrix[param][cat] = beta_val;
 
-      // Collect ordered classes
-      if (!cat.empty() && cat != "null" && cat != reference_category) {
-        if (std::find(classes.begin(), classes.end(), cat) == classes.end()) classes.push_back(cat);
+      if (cat.empty()) {
+        has_shared_cells = true;
+      } else {
+        if (first_category.empty()) first_category = cat;
+        // Collect ordered classes
+        if (cat != reference_category && std::find(classes.begin(), classes.end(), cat) == classes.end())
+          classes.push_back(cat);
       }
     }
+    // Continuous prediction reads shared ("") betas when any exist; otherwise
+    // some producers attach a targetCategory even to regression PCells — use
+    // the first one in document order (deterministic).
+    continuous_category = has_shared_cells ? "" : first_category;
 
     // For regression, use target field name as the single class
     if (classes.empty()) classes.push_back(mining_schema.target.name);
@@ -210,7 +226,9 @@ class GeneralRegressionModel : public InternalModel {
 
     double result = 1.0;
     for (const auto& cell : cells) {
-      const double x = sample[cell.predictor_index].value.value;
+      const Value& xv = sample[cell.predictor_index].value;
+      if (xv.missing) throw cpmml::MissingValueException("missing value for GeneralRegression predictor");
+      const double x = xv.value;
       if (cell.is_factor) {
         // Categorical indicator: 1.0 if sample value matches the level
         // The sample value is stored as a double index in Value::string_converter
@@ -229,7 +247,11 @@ class GeneralRegressionModel : public InternalModel {
   double get_offset(const Sample& sample) const {
     double off = 0.0;
     if (has_offset_value) off += offset_value;
-    if (has_offset_variable) off += sample[offset_variable_index].value.value;
+    if (has_offset_variable) {
+      const Value& v = sample[offset_variable_index].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for offset variable");
+      off += v.value;
+    }
     return off;
   }
 
@@ -237,11 +259,18 @@ class GeneralRegressionModel : public InternalModel {
   double linear_predictor(const std::string& target_cat, const Sample& sample) const {
     double eta = get_offset(sample);
     for (const auto& param_name : parameters) {
+      const auto pit = param_matrix.find(param_name);
+      if (pit == param_matrix.end()) continue;  // parameter with no PCell → implicit β = 0
       const double dv = design_value(param_name, sample);
       if (dv == 0.0) continue;
-      const auto& betas = param_matrix.at(param_name);
+      const auto& betas = pit->second;
       const auto it = betas.find(target_cat);
       if (it != betas.end()) eta += it->second * dv;
+      // Shared betas (PCells without targetCategory) apply to every category.
+      if (!target_cat.empty()) {
+        const auto shared = betas.find("");
+        if (shared != betas.end()) eta += shared->second * dv;
+      }
     }
     return eta;
   }
@@ -271,19 +300,10 @@ class GeneralRegressionModel : public InternalModel {
 
   double predict_continuous(const Sample& sample) const {
     // For regression / generalLinear / generalizedLinear:
-    // single linear predictor → inverse link
-    const std::string cat = (param_matrix.begin()->second.begin()->first);
-    // Use empty targetCategory for single-output models
-    double eta = linear_predictor("", sample);
-    if (std::abs(eta - get_offset(sample)) < 1e-15) {  // fallback: try first available category
-      for (const auto& p : parameters) {
-        for (const auto& [tc, b] : param_matrix.at(p)) {
-          eta = linear_predictor(tc, sample);
-          return apply_inverse_link(eta);
-        }
-      }
-    }
-    return apply_inverse_link(eta);
+    // single linear predictor → inverse link. continuous_category is "" for
+    // the standard no-targetCategory encoding, else the first document-order
+    // category (some producers tag regression PCells with a category).
+    return apply_inverse_link(linear_predictor(continuous_category, sample));
   }
 
   std::pair<std::string, std::vector<double>> predict_multinomial(const Sample& sample) const {

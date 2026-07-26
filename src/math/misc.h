@@ -26,12 +26,9 @@ inline double closest0or1(const double& value) {
   return value;
 }
 
-inline double probit(const double a) {
-  std::function<double(double)> function = [](double a) {
-    return (1 / std::sqrt(2 * M_PI)) * std::exp(-0.5 * std::pow(a, 2));
-  };
-  return ::integral(-8.0, a, 0.01, function);
-}
+// Standard normal CDF, exact via erfc (the former numeric integration was
+// ~100× slower per call and returned negative values for a < -8).
+inline double probit(const double a) { return 0.5 * std::erfc(-a / std::sqrt(2.0)); }
 
 inline double logit(const double a) { return 1 / (1 + std::exp(-a)); }
 

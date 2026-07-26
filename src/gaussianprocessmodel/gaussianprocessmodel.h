@@ -132,7 +132,11 @@ class GaussianProcessModel : public InternalModel {
 
   Eigen::VectorXd extract(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(n_feat));
-    for (size_t i = 0; i < n_feat; ++i) x[static_cast<Eigen::Index>(i)] = sample[feat_indices[i]].value.value;
+    for (size_t i = 0; i < n_feat; ++i) {
+      const Value& v = sample[feat_indices[i]].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for GaussianProcess input");
+      x[static_cast<Eigen::Index>(i)] = v.value;
+    }
     return x;
   }
 

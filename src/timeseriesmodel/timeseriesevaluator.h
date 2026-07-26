@@ -36,8 +36,13 @@ class TimeSeriesEvaluator : public InternalEvaluator {
     if (auto it = arguments.find("horizon"); it != arguments.end()) {
       if (std::holds_alternative<int>(it->second))
         horizon = std::get<int>(it->second);
-      else if (std::holds_alternative<std::string>(it->second))
-        horizon = std::stoi(std::get<std::string>(it->second));
+      else if (std::holds_alternative<std::string>(it->second)) {
+        try {
+          horizon = std::stoi(std::get<std::string>(it->second));
+        } catch (const std::exception&) {
+          throw cpmml::ParsingException("TimeSeriesModel: 'horizon' is not a valid integer");
+        }
+      }
     }
     if (horizon <= 0)
       throw cpmml::ParsingException("TimeSeriesModel requires 'horizon' > 0 in evaluate() arguments");

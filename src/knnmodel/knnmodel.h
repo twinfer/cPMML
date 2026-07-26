@@ -288,8 +288,11 @@ class NearestNeighborModel : public InternalModel {
 
   Eigen::VectorXd build_query(const Sample& sample) const {
     Eigen::VectorXd q(static_cast<Eigen::Index>(knn_inputs.size()));
-    for (size_t i = 0; i < knn_inputs.size(); i++)
-      q[static_cast<Eigen::Index>(i)] = sample[knn_inputs[i].field_index].value.value;
+    for (size_t i = 0; i < knn_inputs.size(); i++) {
+      const Value& v = sample[knn_inputs[i].field_index].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for KNN input");
+      q[static_cast<Eigen::Index>(i)] = v.value;
+    }
     return q;
   }
 
@@ -323,6 +326,7 @@ class NearestNeighborModel : public InternalModel {
       const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
       votes[training_targets[idx]] += w;
     }
+    if (votes.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for classification");
     return std::max_element(votes.begin(), votes.end(),
                             [](const auto& a, const auto& b) { return a.second < b.second; })
         ->first;
@@ -331,6 +335,7 @@ class NearestNeighborModel : public InternalModel {
   // --- Regression aggregation ---
 
   std::string regress(const std::vector<std::pair<double, int>>& neighbors) const {
+    if (neighbors.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for regression");
     if (continuous_method == "median") {
       std::vector<double> vals;
       for (const auto& [dist, idx] : neighbors) vals.push_back(to_double(training_targets[idx]));

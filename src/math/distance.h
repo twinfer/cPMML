@@ -16,24 +16,33 @@
  */
 enum class CompareFunc { ABS_DIFF, GAUSS_SIM, DELTA, EQUAL };
 
-inline CompareFunc parse_compare_func(const std::string& s) {
+inline CompareFunc parse_compare_func(const std::string& s, CompareFunc fallback = CompareFunc::ABS_DIFF) {
   // Caller is expected to pass a lowered string.
+  if (s == "absdiff") return CompareFunc::ABS_DIFF;
   if (s == "gausssim") return CompareFunc::GAUSS_SIM;
   if (s == "delta") return CompareFunc::DELTA;
   if (s == "equal") return CompareFunc::EQUAL;
-  return CompareFunc::ABS_DIFF;
+  return fallback;  // absent/unknown → the model-level default
 }
 
-inline double field_compare(double xi, double yi, CompareFunc cf) {
+// Every compare function returns a DISSIMILARITY (0 = identical), so that
+// compute_distance is uniformly "smaller = closer" for ranking. Similarity
+// compare functions from the spec are therefore flipped: gaussSim's
+// c(x,y) = exp(-ln(2)·(x−y)²/s²) becomes 1−c (s is the PMML similarityScale
+// attribute); equal's 1-if-equal becomes 0-if-equal.
+inline double field_compare(double xi, double yi, CompareFunc cf, double scale = 1.0) {
   switch (cf) {
     case CompareFunc::ABS_DIFF:
       return std::abs(xi - yi);
-    case CompareFunc::GAUSS_SIM:
-      return 1.0 - std::exp(-(xi - yi) * (xi - yi));
+    case CompareFunc::GAUSS_SIM: {
+      const double d = xi - yi;
+      const double s2 = scale * scale;
+      return 1.0 - std::exp(-std::log(2.0) * d * d / (s2 > 0 ? s2 : 1.0));
+    }
     case CompareFunc::DELTA:
       return (xi != yi) ? 1.0 : 0.0;
     case CompareFunc::EQUAL:
-      return (xi == yi) ? 1.0 : 0.0;
+      return (xi != yi) ? 1.0 : 0.0;
   }
   return std::abs(xi - yi);
 }
@@ -64,15 +73,16 @@ enum class DistanceMetric {
  * @tparam GetRow     callable(size_t i) -> double  (train/centroid feature i)
  * @tparam GetWeight  callable(size_t i) -> double  (field weight i)
  * @tparam GetCF      callable(size_t i) -> CompareFunc
+ * @tparam GetScale   callable(size_t i) -> double  (similarityScale for gaussSim)
  */
-template <typename GetQuery, typename GetRow, typename GetWeight, typename GetCF>
+template <typename GetQuery, typename GetRow, typename GetWeight, typename GetCF, typename GetScale>
 double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, GetQuery q, GetRow r, GetWeight w,
-                        GetCF cf) {
+                        GetCF cf, GetScale sc) {
   switch (metric) {
     case DistanceMetric::EUCLIDEAN: {
       double sum = 0.0;
       for (size_t i = 0; i < n; i++) {
-        double d = field_compare(q(i), r(i), cf(i));
+        double d = field_compare(q(i), r(i), cf(i), sc(i));
         sum += w(i) * d * d;
       }
       return std::sqrt(sum);
@@ -80,24 +90,24 @@ double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, Get
     case DistanceMetric::SQUARED_EUCLIDEAN: {
       double sum = 0.0;
       for (size_t i = 0; i < n; i++) {
-        double d = field_compare(q(i), r(i), cf(i));
+        double d = field_compare(q(i), r(i), cf(i), sc(i));
         sum += w(i) * d * d;
       }
       return sum;
     }
     case DistanceMetric::CITYBLOCK: {
       double sum = 0.0;
-      for (size_t i = 0; i < n; i++) sum += w(i) * field_compare(q(i), r(i), cf(i));
+      for (size_t i = 0; i < n; i++) sum += w(i) * field_compare(q(i), r(i), cf(i), sc(i));
       return sum;
     }
     case DistanceMetric::CHEBYSHEV: {
       double mx = 0.0;
-      for (size_t i = 0; i < n; i++) mx = std::max(mx, w(i) * field_compare(q(i), r(i), cf(i)));
+      for (size_t i = 0; i < n; i++) mx = std::max(mx, w(i) * field_compare(q(i), r(i), cf(i), sc(i)));
       return mx;
     }
     case DistanceMetric::MINKOWSKI: {
       double sum = 0.0;
-      for (size_t i = 0; i < n; i++) sum += w(i) * std::pow(field_compare(q(i), r(i), cf(i)), minkowski_p);
+      for (size_t i = 0; i < n; i++) sum += w(i) * std::pow(field_compare(q(i), r(i), cf(i), sc(i)), minkowski_p);
       return std::pow(sum, 1.0 / minkowski_p);
     }
     case DistanceMetric::SIMPLE_MATCHING: {
@@ -134,9 +144,16 @@ double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, Get
     case DistanceMetric::BINARY_SIMILARITY:
       // binarySimilarity is equivalent to simpleMatching when custom c/d
       // parameters are not provided (PMML default c11=c10=c01=c00=d11=d10=d01=d00=1).
-      return compute_distance(DistanceMetric::SIMPLE_MATCHING, n, minkowski_p, q, r, w, cf);
+      return compute_distance(DistanceMetric::SIMPLE_MATCHING, n, minkowski_p, q, r, w, cf, sc);
   }
   return 0.0;
+}
+
+// Convenience overload without per-field similarityScale (scale = 1).
+template <typename GetQuery, typename GetRow, typename GetWeight, typename GetCF>
+double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, GetQuery q, GetRow r, GetWeight w,
+                        GetCF cf) {
+  return compute_distance(metric, n, minkowski_p, q, r, w, cf, [](size_t) { return 1.0; });
 }
 
 #endif  // CPMML_DISTANCE_H

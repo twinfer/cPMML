@@ -39,6 +39,7 @@ class ClusteringModel : public InternalModel {
     size_t field_index;
     CompareFunc compare_func;
     double field_weight;
+    double similarity_scale = 1.0;  // gaussSim similarityScale
   };
 
   struct Cluster {
@@ -51,7 +52,9 @@ class ClusteringModel : public InternalModel {
 
   DistanceMetric metric;
   double minkowski_p;
-  bool is_similarity;  // true → pick max; false → pick min distance
+  bool is_similarity;  // kind="similarity"; compute_distance flips similarities
+                       // to dissimilarities, so selection always minimizes
+  CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // model-level ComparisonMeasure/@compareFunction
 
   std::vector<ClusteringField> fields;
   std::vector<Cluster> clusters;
@@ -80,11 +83,30 @@ class ClusteringModel : public InternalModel {
 
   inline std::string predict_raw(const Sample& sample) const override { return find_cluster(sample); }
 
+  // Distance (dissimilarity) to the nearest cluster centroid, with the full
+  // prepare/transform pipeline applied. Used by AnomalyDetection
+  // clusterMeanDist, where the score is the distance itself, not the cluster id.
+  double min_distance(const std::unordered_map<std::string, std::string>& sample) const {
+    Value::ScopedIndexer _scope(indexer.get());
+    Sample internal_sample = base_sample;
+    mining_schema.prepare(internal_sample, sample);
+    if (!transformation_dictionary.empty)
+      for (const auto& derivedfield_name : derivedfields_dag)
+        transformation_dictionary[derivedfield_name].prepare(internal_sample);
+
+    const Eigen::VectorXd q = build_query(internal_sample);
+    double best = std::numeric_limits<double>::max();
+    for (const auto& cluster : clusters) best = std::min(best, compute_distance_to(q, cluster.centroid));
+    return best;
+  }
+
  private:
   void parse_comparison_measure(const XmlNode& node) {
     if (!node.exists_child("ComparisonMeasure")) return;
     const XmlNode cm = node.get_child("ComparisonMeasure");
     is_similarity = (to_lower(cm.get_attribute("kind")) == "similarity");
+    // Model-wide default compare function that ClusteringFields inherit.
+    default_compare_func = parse_compare_func(to_lower(cm.get_attribute("compareFunction")));
 
     if (cm.exists_child("squaredEuclidean")) { metric = DistanceMetric::SQUARED_EUCLIDEAN; return; }
     if (cm.exists_child("cityBlock")) { metric = DistanceMetric::CITYBLOCK; return; }
@@ -95,6 +117,11 @@ class ClusteringModel : public InternalModel {
       if (mn.exists_attribute("p")) minkowski_p = to_double(mn.get_attribute("p"));
       return;
     }
+    // Similarity measures (aggregated as 1−s dissimilarities in compute_distance)
+    if (cm.exists_child("simpleMatching")) { metric = DistanceMetric::SIMPLE_MATCHING; return; }
+    if (cm.exists_child("jaccard")) { metric = DistanceMetric::JACCARD; return; }
+    if (cm.exists_child("tanimoto")) { metric = DistanceMetric::TANIMOTO; return; }
+    if (cm.exists_child("binarySimilarity")) { metric = DistanceMetric::BINARY_SIMILARITY; return; }
     // default: euclidean
   }
 
@@ -103,8 +130,9 @@ class ClusteringModel : public InternalModel {
       ClusteringField f;
       f.field_name = cf.get_attribute("field");
       f.field_index = indexer->get_index(f.field_name);
-      f.compare_func = parse_compare_func(cf.get_attribute("compareFunction"));
+      f.compare_func = parse_compare_func(to_lower(cf.get_attribute("compareFunction")), default_compare_func);
       f.field_weight = cf.exists_attribute("fieldWeight") ? to_double(cf.get_attribute("fieldWeight")) : 1.0;
+      f.similarity_scale = cf.exists_attribute("similarityScale") ? to_double(cf.get_attribute("similarityScale")) : 1.0;
       fields.push_back(std::move(f));
     }
   }
@@ -129,8 +157,11 @@ class ClusteringModel : public InternalModel {
 
   Eigen::VectorXd build_query(const Sample& sample) const {
     Eigen::VectorXd q(static_cast<Eigen::Index>(fields.size()));
-    for (size_t i = 0; i < fields.size(); i++)
-      q[static_cast<Eigen::Index>(i)] = sample[fields[i].field_index].value.value;
+    for (size_t i = 0; i < fields.size(); i++) {
+      const Value& v = sample[fields[i].field_index].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for clustering field");
+      q[static_cast<Eigen::Index>(i)] = v.value;
+    }
     return q;
   }
 
@@ -138,17 +169,20 @@ class ClusteringModel : public InternalModel {
     const size_t n = fields.size();
     return compute_distance(
         metric, n, minkowski_p, [&](size_t i) { return q[i]; }, [&](size_t i) { return c[i]; },
-        [&](size_t i) { return fields[i].field_weight; }, [&](size_t i) { return fields[i].compare_func; });
+        [&](size_t i) { return fields[i].field_weight; }, [&](size_t i) { return fields[i].compare_func; },
+        [&](size_t i) { return fields[i].similarity_scale; });
   }
 
   std::string find_cluster(const Sample& sample) const {
     const Eigen::VectorXd q = build_query(sample);
-    double best_val = is_similarity ? -std::numeric_limits<double>::max() : std::numeric_limits<double>::max();
+    // compute_distance is uniformly a dissimilarity (similarity measures are
+    // flipped to 1−s), so the closest cluster is always the minimum.
+    double best_val = std::numeric_limits<double>::max();
     size_t best_idx = 0;
 
     for (size_t i = 0; i < clusters.size(); i++) {
       const double d = compute_distance_to(q, clusters[i].centroid);
-      if (is_similarity ? (d > best_val) : (d < best_val)) {
+      if (d < best_val) {
         best_val = d;
         best_idx = i;
       }

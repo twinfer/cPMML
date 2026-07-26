@@ -95,10 +95,30 @@ class SupportVectorMachineModel : public InternalModel {
     for (const auto& svm_node : node.get_childs("SupportVectorMachine"))
       machines.push_back(parse_machine(svm_node, vector_dict));
 
-    if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto& m : machines) classes.push_back(m.target_category);
-    else
+    // Spec attribute for binary OVA: the category predicted when the decision
+    // value does not exceed the threshold. Must be resolved before collecting
+    // the class list below.
+    if (node.exists_attribute("alternateBinaryTargetCategory"))
+      for (auto& m : machines)
+        if (m.alternate_category == "null" || m.alternate_category.empty())
+          m.alternate_category = node.get_attribute("alternateBinaryTargetCategory");
+
+    if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
+      // Collect the distinct classes in document order. alternateTargetCategory
+      // must be included: in one-against-one the last class typically appears
+      // ONLY as an alternate (machines (A,B),(A,C),(B,C) → C is never a
+      // target_category) and would otherwise be unpredictable.
+      auto add_class = [this](const std::string& cls) {
+        if (cls.empty() || cls == "null") return;
+        if (std::find(classes.begin(), classes.end(), cls) == classes.end()) classes.push_back(cls);
+      };
+      for (const auto& m : machines) {
+        add_class(m.target_category);
+        add_class(m.alternate_category);
+      }
+    } else {
       classes.push_back(mining_schema.target.name);
+    }
 
     // Infer alternate_category for binary OVA when not specified in PMML
     if (!is_ovo && machines.size() == 1 && machines[0].alternate_category == "null") {
@@ -161,8 +181,11 @@ class SupportVectorMachineModel : public InternalModel {
 
   Eigen::VectorXd sample_to_vector(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(field_indices.size()));
-    for (size_t i = 0; i < field_indices.size(); i++)
-      x[static_cast<Eigen::Index>(i)] = sample[field_indices[i]].value.value;
+    for (size_t i = 0; i < field_indices.size(); i++) {
+      const Value& v = sample[field_indices[i]].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for SVM vector field");
+      x[static_cast<Eigen::Index>(i)] = v.value;
+    }
     return x;
   }
 

@@ -7,6 +7,7 @@
 #ifndef CPMML_NORMALIZATIONMETHODS_H
 #define CPMML_NORMALIZATIONMETHODS_H
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <vector>
@@ -24,9 +25,13 @@
 inline std::vector<double> categorical_softmax(const std::vector<double>& values) {
   std::vector<double> exps;
   std::vector<double> result;
+  if (values.empty()) return result;
+  // Subtract the max before exponentiating: exp(710) overflows to inf and
+  // softmax would return NaN for moderate raw scores.
+  const double max_value = *std::max_element(values.cbegin(), values.cend());
   double sum = 0;
   for (auto i = 0u; i < values.size(); i++) {
-    exps.push_back(std::exp(values[i]));
+    exps.push_back(std::exp(values[i] - max_value));
     sum += exps.back();
   }
 
@@ -40,6 +45,7 @@ inline std::vector<double> categorical_simplemax(const std::vector<double>& valu
   double sum = 0;
 
   for (const auto& value : values) sum += value;
+  if (sum == 0) return std::vector<double>(values.size(), 0.0);  // avoid 0/0 → NaN
 
   for (const auto& value : values) result.push_back(value / sum);
 

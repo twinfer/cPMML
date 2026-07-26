@@ -209,7 +209,9 @@ class NeuralNetworkModel : public InternalModel {
     Eigen::VectorXd x(static_cast<Eigen::Index>(neural_inputs.size()));
     for (size_t i = 0; i < neural_inputs.size(); i++) {
       neural_inputs[i].derived_field.prepare(local);
-      x[static_cast<Eigen::Index>(i)] = local[neural_inputs[i].derived_field.index].value.value;
+      const Value& v = local[neural_inputs[i].derived_field.index].value;
+      if (v.missing) throw cpmml::MissingValueException("missing value for NeuralInput");
+      x[static_cast<Eigen::Index>(i)] = v.value;
     }
 
     // Layer-by-layer forward pass

@@ -136,26 +136,27 @@ class NaiveBayesModel : public InternalModel {
     log_posts.reserve(classes.size());
     for (const auto& cls : classes) log_posts.push_back(log_priors.at(cls));
 
-    // Discrete likelihoods
+    // Discrete likelihoods. PMML defines threshold as the *default
+    // probability* substituted when the count for (value, class) is zero —
+    // not a pseudo-count added to the totals.
     for (const auto& di : discrete_inputs) {
-      const double x = sample[di.field_index].value.value;
+      const Value& xv = sample[di.field_index].value;
+      if (xv.missing) continue;  // missing input: skip the feature entirely
+      const double x = xv.value;
       const auto it = di.counts.find(x);
       for (size_t i = 0; i < classes.size(); i++) {
-        double cnt = threshold;
+        double cnt = 0.0;
+        double class_total = 0.0;
+        for (const auto& [v, cls_map] : di.counts) {
+          const auto jt = cls_map.find(classes[i]);
+          if (jt != cls_map.end()) class_total += jt->second;
+        }
         if (it != di.counts.end()) {
           const auto jt = it->second.find(classes[i]);
-          if (jt != it->second.end()) cnt = jt->second > 0 ? jt->second : threshold;
+          if (jt != it->second.end()) cnt = jt->second;
         }
-        // Normalize: count / sum of counts for this class
-        double class_total = threshold * di.counts.size();
-        if (it != di.counts.end()) {
-          class_total = 0.0;
-          for (const auto& [v, cls_map] : di.counts) {
-            const auto jt = cls_map.find(classes[i]);
-            class_total += (jt != cls_map.end() && jt->second > 0) ? jt->second : threshold;
-          }
-        }
-        log_posts[i] += std::log(cnt / class_total);
+        const double p = (cnt > 0 && class_total > 0) ? cnt / class_total : threshold;
+        log_posts[i] += std::log(p);
       }
     }
 
