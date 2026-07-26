@@ -112,17 +112,7 @@ class ScorecardModel : public InternalModel {
             attr.complex_score = ExpressionBuilder::build(expr_children[0], dummy_index, double_type, indexer);
         }
 
-        // Predicate: first child element of Attribute
-        attr.predicate = pb.build(attr_node.get_child_bypattern("Predicate"));
-        if (attr.predicate.is_empty) {
-          for (const auto& child : attr_node.get_childs()) {
-            Predicate p = pb.build(child);
-            if (!p.is_empty) {
-              attr.predicate = p;
-              break;
-            }
-          }
-        }
+        attr.predicate = pb.build_from_parent(attr_node);
         ch.attributes.push_back(std::move(attr));
       }
 

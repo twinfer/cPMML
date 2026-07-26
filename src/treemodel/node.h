@@ -49,12 +49,12 @@ class Node {
         record_count(node.get_double_attribute("recordCount")),
         default_child(node.exists_attribute("defaultChild") ? node.get_attribute("defaultChild") : ""),
         children(to_nodes(node.get_childs("Node"), predicate_builder, target_datatype)),
-        predicate(to_function(predicate_builder.build(node.get_child_bypattern("Predicate")))),
+        predicate(to_function(predicate_builder.build_from_parent(node))),
         root(root),
         leaf(children.size() == 0),
         score(simple_score, id, target_datatype, node.get_childs("ScoreDistribution")) {};
 
-  constexpr bool match(const Sample& sample) const { return predicate(sample); }
+  inline bool match(const Sample& sample) const { return predicate(sample); }
 
   static std::vector<Node> to_nodes(const std::vector<XmlNode>& nodes, const PredicateBuilder& predicateBuilder,
                                     const DataType& target_datatype) {

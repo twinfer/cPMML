@@ -103,16 +103,7 @@ class RuleSetModel : public InternalModel {
         rule.weight = child.exists_attribute("weight") ? to_double(child.get_attribute("weight")) : 1.0;
 
         // Build this rule's own predicate
-        Predicate rule_pred = pb.build(child.get_child_bypattern("Predicate"));
-        if (rule_pred.is_empty) {
-          for (const auto& c : child.get_childs()) {
-            Predicate p = pb.build(c);
-            if (!p.is_empty) {
-              rule_pred = p;
-              break;
-            }
-          }
-        }
+        Predicate rule_pred = pb.build_from_parent(child);
 
         // AND with ancestor CompoundRule predicate (if any)
         rule.predicate = (!parent_pred.is_empty && !rule_pred.is_empty)
@@ -122,16 +113,7 @@ class RuleSetModel : public InternalModel {
 
       } else if (child.name() == "CompoundRule") {
         // Build this compound rule's own predicate
-        Predicate compound_pred = pb.build(child.get_child_bypattern("Predicate"));
-        if (compound_pred.is_empty) {
-          for (const auto& c : child.get_childs()) {
-            Predicate p = pb.build(c);
-            if (!p.is_empty) {
-              compound_pred = p;
-              break;
-            }
-          }
-        }
+        Predicate compound_pred = pb.build_from_parent(child);
 
         // Combine with parent predicate and recurse
         Predicate combined = (!parent_pred.is_empty && !compound_pred.is_empty)

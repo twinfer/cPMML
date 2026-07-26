@@ -136,25 +136,24 @@ class Target {
             }
           }
 
-          if (score.probabilities.find(target_value.value) == score.probabilities.cend()) {
-            if (target_value.has_prior_probability) {
-              if (target_value.has_display_value) {
-                score.probabilities[target_value.display_value] = target_value.prior_probability;
-              } else {
-                score.probabilities[target_value.value] = target_value.prior_probability;
-              }
-            } else {
-              if (target_value.has_display_value) {
-                score.probabilities[target_value.display_value] = score.probabilities[target_value.value];
-                score.probabilities.erase(target_value.value);
-              }
+          const auto it = score.probabilities.find(target_value.value);
+          if (it != score.probabilities.cend()) {
+            // Class present in the score: rename its key to the display value.
+            if (target_value.has_display_value && target_value.display_value != target_value.value) {
+              score.probabilities[target_value.display_value] = it->second;
+              score.probabilities.erase(target_value.value);
             }
+          } else if (target_value.has_prior_probability) {
+            // Class absent: fill in with the prior probability.
+            score.probabilities[target_value.has_display_value ? target_value.display_value : target_value.value] =
+                target_value.prior_probability;
           }
         }
         break;
 
       case MiningFunction::MiningFunctionType::REGRESSION:
         if (score.empty) {
+          if (target_values.empty()) break;
           score.double_score = target_values[0].default_value;
           score.score = std::to_string(score.double_score);
         } else {
@@ -188,10 +187,13 @@ class Target {
         break;
 
       case MiningFunction::MiningFunctionType::REGRESSION:
-        predicted_double = to_double(predicted);
-        if (predicted == "")
+        // Empty prediction must be checked before conversion: to_double("")
+        // throws, which made the defaultValue branch unreachable.
+        if (predicted == "") {
+          if (target_values.empty()) return predicted;
           return std::to_string(target_values[0].default_value);
-        else {
+        } else {
+          predicted_double = to_double(predicted);
           if (has_min && predicted_double < min)
             predicted_double = min;
           else if (has_max && predicted_double > max)

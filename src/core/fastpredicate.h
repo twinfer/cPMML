@@ -47,6 +47,16 @@ inline bool is_notin(const Sample& other, const std::set<Value>& values, const s
   return other[feature].cvalue().is_not_in(values);
 }
 
+inline bool is_in_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
+                       const size_t& feature) {
+  return other[feature].cvalue().is_in(values);
+}
+
+inline bool is_notin_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
+                          const size_t& feature) {
+  return other[feature].cvalue().is_not_in(values);
+}
+
 inline bool is_missing(const Sample& other, const size_t& feature) { return other[feature].value.missing; }
 
 inline bool is_not_missing(const Sample& other, const size_t& feature) { return !other[feature].value.missing; }
@@ -69,13 +79,11 @@ inline bool _or(const Sample& other, const std::vector<std::function<bool(const 
   return false;
 }
 
+// Parity XOR: true when an odd number of operands are true.
 inline bool _xor(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
-  bool first = predicates.front()(other);
-
-  for (auto it = predicates.cbegin() + 1; it != predicates.cend(); it++)
-    if (it->operator()(other) != first) return true;
-
-  return false;
+  bool acc = false;
+  for (const auto& predicate : predicates) acc ^= predicate(other);
+  return acc;
 }
 
 inline bool surrogate(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
@@ -110,8 +118,15 @@ inline std::function<bool(const Sample&)> to_function(const Predicate& predicate
     case PredicateOpType::PredicateOpTypeValue::LESS_OR_EQUAL:
       return std::bind(less_orequal, std::placeholders::_1, predicate.value, predicate.feature);
     case PredicateOpType::PredicateOpTypeValue::IS_IN:
+      // Large sets are stored in values_hash (see PredicateBuilder's
+      // SET_THRESHOLD); binding the wrong member would evaluate against an
+      // empty set.
+      if (predicate.is_hash_set)
+        return std::bind(is_in_hash, std::placeholders::_1, predicate.values_hash, predicate.feature);
       return std::bind(is_in, std::placeholders::_1, predicate.values, predicate.feature);
     case PredicateOpType::PredicateOpTypeValue::IS_NOT_IN:
+      if (predicate.is_hash_set)
+        return std::bind(is_notin_hash, std::placeholders::_1, predicate.values_hash, predicate.feature);
       return std::bind(is_notin, std::placeholders::_1, predicate.values, predicate.feature);
     case PredicateOpType::PredicateOpTypeValue::AND:
       return std::bind(_and, std::placeholders::_1, to_function(predicate.predicates));

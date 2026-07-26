@@ -26,8 +26,23 @@ class PredicateBuilder {
 
   explicit PredicateBuilder(const std::shared_ptr<Indexer>& indexer) : indexer(indexer) {}
 
+  // The five element names of the PMML PREDICATE group. Lookup must be by exact
+  // name: pattern matching on "Predicate" misses <True/> and <False/>.
+  static const std::unordered_set<std::string>& predicate_names() {
+    static const std::unordered_set<std::string> names = {"SimplePredicate", "CompoundPredicate", "SimpleSetPredicate",
+                                                          "True", "False"};
+    return names;
+  }
+
+  // Build the predicate of an element that contains one PREDICATE child among
+  // other children (Segment, Node, SimpleRule, Attribute, ...). Returns an
+  // empty predicate when no PREDICATE child exists.
+  inline Predicate build_from_parent(const XmlNode& parent) const {
+    return build(parent.get_child_bylist(predicate_names()));
+  }
+
   inline Predicate build(XmlNode node) const {
-    if (node.is_empty()) return Predicate("true");
+    if (node.is_empty()) return Predicate();
 
     Predicate result;
     PredicateType predicatetype(node.name());
@@ -60,7 +75,7 @@ class PredicateBuilder {
         return Predicate(predicates, node.get_attribute("booleanOperator"));
     }
 
-    return Predicate("true");
+    return Predicate();
   }
 };
 

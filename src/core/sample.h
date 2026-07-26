@@ -69,10 +69,9 @@ class Sample {
   inline void change_value(const size_t& feature_index, const Value& value) { features[feature_index].value = value; }
 
   inline void change_value_if_missing(const size_t& feature_index, const Value& value) {
-    if (features[feature_index].value.missing) {
-      features[feature_index].value = value;
-      features[feature_index].value.missing = false;
-    }
+    // Assigning a missing Value must not mark the slot as present: downstream
+    // consumers (e.g. model-chain segments) would read the sentinel as data.
+    if (features[feature_index].value.missing && !value.missing) features[feature_index].value = value;
   }
 
   std::vector<Feature> features;

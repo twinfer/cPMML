@@ -34,8 +34,8 @@ class Segment {
 
   Segment(const XmlNode& node, const PredicateBuilder& predicate_builder, const std::shared_ptr<InternalModel>& model)
       : id(node.get_attribute("id")),
-        weight(node.get_double_attribute("weight")),
-        predicate(predicate_builder.build(node.get_child_bypattern("Predicate"))),
+        weight(node.get_double_attribute("weight", 1)),  // PMML default weight is 1
+        predicate(predicate_builder.build_from_parent(node)),
         model(model) {}
 
   inline std::unique_ptr<InternalScore> score(const Sample& sample) const { return model->score_raw(sample); }

@@ -41,10 +41,39 @@ class XmlNode {
     return attr.value();
   }
 
+  // Overloads taking an explicit default: return it when the attribute is
+  // absent or unparsable, so PMML attribute defaults are not clobbered by the
+  // legacy "null"/DBL_MIN sentinels of the no-default overloads above/below.
+  std::string get_attribute(const std::string& attribute_name, const std::string& default_value) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr) return default_value;
+    return attr.value();
+  }
+
+  double get_double_attribute(const std::string& attribute_name, const double default_value) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr) return default_value;
+    try {
+      return std::stod(attr.value());
+    } catch (const std::exception&) {
+      return default_value;
+    }
+  }
+
+  long get_long_attribute(const std::string& attribute_name, const long default_value) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr) return default_value;
+    try {
+      return std::stol(attr.value());
+    } catch (const std::exception&) {
+      return default_value;
+    }
+  }
+
   double get_double_attribute(const std::string& attribute_name) const {
     try {
       return std::stod(get_attribute(attribute_name));
-    } catch (const std::invalid_argument&) {
+    } catch (const std::exception&) {
       return std::numeric_limits<double>::min();
     }
   }
@@ -57,7 +86,7 @@ class XmlNode {
   long get_long_attribute(const std::string& attribute_name) const {
     try {
       return std::stol(get_attribute(attribute_name));
-    } catch (const std::invalid_argument&) {
+    } catch (const std::exception&) {
       return std::numeric_limits<long>::max();
     }
   }
@@ -104,8 +133,10 @@ class XmlNode {
 
   std::vector<XmlNode> get_childs_bypattern(const std::string& pattern) const {
     std::vector<XmlNode> result;
+    const std::string lower_pattern = to_lower(pattern);
     for (auto child : node.children()) {
-      if (to_lower(std::string(child.name())).find(pattern) != std::string::npos) result.push_back(XmlNode(child));
+      if (to_lower(std::string(child.name())).find(lower_pattern) != std::string::npos)
+        result.push_back(XmlNode(child));
     }
     return result;
   }

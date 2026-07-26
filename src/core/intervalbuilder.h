@@ -23,8 +23,9 @@ class IntervalBuilder {
     std::vector<Predicate> tmp_constraints;
 
     Closure closure(node.get_attribute("closure"));
+    // An absent margin means the interval is unbounded on that side.
     Value left_margin = node.exists_attribute("leftMargin") ? Value(node.get_attribute("leftMargin"), dataType)
-                                                            : Value(std::numeric_limits<double>::max(), dataType);
+                                                            : Value(std::numeric_limits<double>::lowest(), dataType);
     Value right_margin = node.exists_attribute("rightMargin") ? Value(node.get_attribute("rightMargin"), dataType)
                                                               : Value(std::numeric_limits<double>::max(), dataType);
     switch (closure.value) {
