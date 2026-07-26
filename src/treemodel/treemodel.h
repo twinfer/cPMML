@@ -31,7 +31,15 @@
  */
 class TreeModel : public InternalModel {
  public:
-  bool return_last_prediction = false;
+  // What to do when a child's predicate evaluates to UNKNOWN because an input
+  // it needs is missing. "none" (the default) treats UNKNOWN as false.
+  enum class MissingValueStrategy { NONE, LAST_PREDICTION, NULL_PREDICTION, DEFAULT_CHILD };
+
+  // What to do when no child evaluates to TRUE.
+  enum class NoTrueChildStrategy { RETURN_NULL_PREDICTION, RETURN_LAST_PREDICTION };
+
+  MissingValueStrategy missing_value_strategy = MissingValueStrategy::NONE;
+  NoTrueChildStrategy no_true_child_strategy = NoTrueChildStrategy::RETURN_NULL_PREDICTION;
   Node root_node;
 
   TreeModel() = default;
@@ -39,90 +47,109 @@ class TreeModel : public InternalModel {
   TreeModel(const XmlNode& node, const DataDictionary& data_dictionary, const PredicateBuilder& predicate_builder,
             const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, indexer),
-        return_last_prediction(node.get_attribute("noTrueChildStrategy") == "returnLastPrediction"),
+        missing_value_strategy(to_missing_value_strategy(node.get_attribute("missingValueStrategy", "none"))),
+        no_true_child_strategy(to_no_true_child_strategy(node.get_attribute("noTrueChildStrategy", "returnNullPrediction"))),
         root_node(Node(node.get_child("Node"), true, predicate_builder, target_field.datatype)) {};
 
   TreeModel(const XmlNode& node, const DataDictionary& data_dictionary,
             const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),
-        return_last_prediction(node.get_attribute("noTrueChildStrategy") == "returnLastPrediction"),
+        missing_value_strategy(to_missing_value_strategy(node.get_attribute("missingValueStrategy", "none"))),
+        no_true_child_strategy(to_no_true_child_strategy(node.get_attribute("noTrueChildStrategy", "returnNullPrediction"))),
         root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)) {};
 
+  static MissingValueStrategy to_missing_value_strategy(const std::string& value) {
+    if (value == "none") return MissingValueStrategy::NONE;
+    if (value == "lastPrediction") return MissingValueStrategy::LAST_PREDICTION;
+    if (value == "nullPrediction") return MissingValueStrategy::NULL_PREDICTION;
+    if (value == "defaultChild") return MissingValueStrategy::DEFAULT_CHILD;
+    // weightedConfidence/aggregateNodes would need a different result than a
+    // single node's score; scoring them as "none" would be silently wrong.
+    throw cpmml::ParsingException("TreeModel missingValueStrategy=\"" + value + "\" is not supported");
+  }
+
+  static NoTrueChildStrategy to_no_true_child_strategy(const std::string& value) {
+    if (value == "returnNullPrediction") return NoTrueChildStrategy::RETURN_NULL_PREDICTION;
+    if (value == "returnLastPrediction") return NoTrueChildStrategy::RETURN_LAST_PREDICTION;
+    throw cpmml::ParsingException("TreeModel noTrueChildStrategy=\"" + value + "\" is not supported");
+  }
+
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    return std::make_unique<TreeScore>(scoreR(sample, root_node));
+    const Node* predicting_node = walk(sample, root_node);
+    if (predicting_node == nullptr || !predicting_node->has_score()) return std::make_unique<TreeScore>();
+
+    return std::make_unique<TreeScore>(predicting_node->score);
   };
 
   inline std::string predict_raw(const Sample& sample) const override {
-    return std::string(simple_scoreR(sample, root_node));
+    const Node* predicting_node = walk(sample, root_node);
+
+    return predicting_node != nullptr ? predicting_node->simple_score : "";
   };
 
-  inline TreeScore scoreR(const Sample& sample, const Node& current_node) const {
+  /**
+   * Single traversal shared by scoring and prediction: returns the node whose
+   * score is the prediction, or nullptr when the tree yields none.
+   *
+   * missingValuePenalty is deliberately not honoured: it scales the
+   * *confidence* of a prediction, which cPMML does not expose as an output
+   * distinct from probability, and the reference implementation leaves
+   * probabilities untouched (see the fix_tree_mvs_penalty fixture).
+   */
+  inline const Node* walk(const Sample& sample, const Node& current_node) const {
 #ifdef DEBUG
     static int depth = 0;
     std::cout << std::string(depth, '\t') << current_node.predicate << (current_node.leaf ? " !!! MATCH !!!" : "")
               << std::endl;
 #endif
 
-    TreeScore result;
+    if (current_node.leaf) return &current_node;
 
-    if (current_node.leaf) return current_node.score;
+    for (const auto& child : current_node.children) {
+      const PredicateResult result = child.evaluate(sample);
 
-    for (const auto& child : current_node.children)
-      if (child.match(sample)) {
+      if (result == PredicateResult::TRUE_) {
 #ifdef DEBUG
         depth++;
 #endif
-        result = scoreR(sample, child);
+        const Node* selected = walk(sample, child);
 #ifdef DEBUG
         depth--;
 #endif
-        if (result.is_score) return result;
+        return selected;
       }
 
-    // PMML missingValueStrategy="defaultChild": fall back to the named child
-    if (!current_node.default_child.empty()) {
-      for (const auto& child : current_node.children) {
-        if (child.id == current_node.default_child) return scoreR(sample, child);
+      if (result == PredicateResult::FALSE_) continue;
+
+      // UNKNOWN: an input this predicate needs is missing.
+      switch (missing_value_strategy) {
+        case MissingValueStrategy::NONE:
+          continue;  // UNKNOWN behaves as false; keep scanning the siblings
+        case MissingValueStrategy::LAST_PREDICTION:
+          return &current_node;
+        case MissingValueStrategy::NULL_PREDICTION:
+          return nullptr;
+        case MissingValueStrategy::DEFAULT_CHILD: {
+          const Node* default_child = find_default_child(current_node);
+
+          return default_child != nullptr ? walk(sample, *default_child) : nullptr;
+        }
       }
     }
 
-    if (return_last_prediction) return current_node.score;
+    // No child evaluated TRUE.
+    if (no_true_child_strategy == NoTrueChildStrategy::RETURN_LAST_PREDICTION) return &current_node;
 
-    return TreeScore();
+    return nullptr;
   }
 
-  inline std::string_view simple_scoreR(const Sample& sample, const Node& current_node) const {
-#ifdef DEBUG
-    static int depth = 0;
-    depth++;
-    std::cout << std::string(depth, '\t') << current_node.predicate << (current_node.leaf ? " !!! MATCH !!!" : "")
-              << std::endl;
-    if (current_node.leaf) depth--;
-#endif
-
-    std::string_view result;
-
-    if (current_node.leaf) return std::string_view(current_node.simple_score);
+  static inline const Node* find_default_child(const Node& current_node) {
+    if (current_node.default_child.empty()) return nullptr;
 
     for (const auto& child : current_node.children)
-      if (child.match(sample)) {
-        result = simple_scoreR(sample, child);
-#ifdef DEBUG
-        if (result != "") depth--;
-#endif
-        if (!result.empty()) return result;
-      }
+      if (child.id == current_node.default_child) return &child;
 
-    // PMML missingValueStrategy="defaultChild"
-    if (!current_node.default_child.empty()) {
-      for (const auto& child : current_node.children) {
-        if (child.id == current_node.default_child) return simple_scoreR(sample, child);
-      }
-    }
-
-    if (return_last_prediction) return std::string_view(current_node.simple_score);
-
-    return result;
+    return nullptr;
   }
 };
 

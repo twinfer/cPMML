@@ -54,8 +54,16 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
   while (!row.empty()) {
     const std::string& expected = row.at(out_col);
 
-    // Skip rows where the oracle expected value is absent (null prediction)
-    if (expected.empty()) {
+    // The oracle emits "N/A" (and hand-written fixtures leave the cell blank)
+    // when the model yields no prediction: require the same of cPMML rather
+    // than skipping the row.
+    if (expected.empty() || expected == "N/A") {
+      const std::string predicted = model.evaluate(to_input(row)).as_string();
+      if (!predicted.empty()) {
+        std::cerr << "predicted: " << predicted << "  expected: no prediction"
+                  << "  sample: " << to_string(row) << std::endl;
+        return -1;
+      }
       row = reader.read();
       continue;
     }

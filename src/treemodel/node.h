@@ -35,7 +35,7 @@ class Node {
   double record_count = double_min();
   std::string default_child;
   std::vector<Node> children;
-  std::function<bool(const Sample&)> predicate;
+  PredicateFunction predicate;
   bool root = false;
   bool leaf = false;
   TreeScore score;
@@ -54,7 +54,11 @@ class Node {
         leaf(children.size() == 0),
         score(simple_score, id, target_datatype, node.get_childs("ScoreDistribution")) {};
 
-  inline bool match(const Sample& sample) const { return predicate(sample); }
+  inline PredicateResult evaluate(const Sample& sample) const { return predicate(sample); }
+
+  inline bool match(const Sample& sample) const { return predicate(sample) == PredicateResult::TRUE_; }
+
+  inline bool has_score() const { return !simple_score.empty(); }
 
   static std::vector<Node> to_nodes(const std::vector<XmlNode>& nodes, const PredicateBuilder& predicateBuilder,
                                     const DataType& target_datatype) {

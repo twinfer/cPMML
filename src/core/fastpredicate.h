@@ -11,95 +11,138 @@
 #include "predicateoptype.h"
 #include "sample.h"
 
-constexpr bool _false(const Sample& other) { return false; }
+/**
+ * Compiled counterpart of Predicate, used on the TreeModel hot path.
+ *
+ * Like Predicate these are three-valued: a comparison against a missing value
+ * is UNKNOWN, not false. The tree traversal needs that distinction to apply
+ * missingValueStrategy, and treating missing as "compares less than anything"
+ * (the previous behaviour, inherited from the Value sentinel) silently took
+ * the wrong branch.
+ */
+using PredicateResult = Predicate::Result;
+using PredicateFunction = std::function<PredicateResult(const Sample&)>;
 
-constexpr bool _true(const Sample& other) { return true; }
-
-inline bool equal(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() == value;
+inline PredicateResult to_predicate_result(const bool value) {
+  return value ? PredicateResult::TRUE_ : PredicateResult::FALSE_;
 }
 
-inline bool not_equal(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() != value;
+constexpr PredicateResult _false(const Sample& other) { return PredicateResult::FALSE_; }
+
+constexpr PredicateResult _true(const Sample& other) { return PredicateResult::TRUE_; }
+
+inline PredicateResult equal(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() == value);
 }
 
-inline bool greater_than(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() > value;
+inline PredicateResult not_equal(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() != value);
 }
 
-inline bool greater_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() >= value;
+inline PredicateResult greater_than(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() > value);
 }
 
-inline bool less_than(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() < value;
+inline PredicateResult greater_orequal(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() >= value);
 }
 
-inline bool less_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  return other[feature].cvalue() <= value;
+inline PredicateResult less_than(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() < value);
 }
 
-inline bool is_in(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  return other[feature].cvalue().is_in(values);
+inline PredicateResult less_orequal(const Sample& other, const Value& value, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue() <= value);
 }
 
-inline bool is_notin(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  return other[feature].cvalue().is_not_in(values);
+inline PredicateResult is_in(const Sample& other, const std::set<Value>& values, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue().is_in(values));
 }
 
-inline bool is_in_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
-                       const size_t& feature) {
-  return other[feature].cvalue().is_in(values);
+inline PredicateResult is_notin(const Sample& other, const std::set<Value>& values, const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue().is_not_in(values));
 }
 
-inline bool is_notin_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
-                          const size_t& feature) {
-  return other[feature].cvalue().is_not_in(values);
+inline PredicateResult is_in_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
+                                  const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue().is_in(values));
 }
 
-inline bool is_missing(const Sample& other, const size_t& feature) { return other[feature].value.missing; }
-
-inline bool is_not_missing(const Sample& other, const size_t& feature) { return !other[feature].value.missing; }
-// inline bool is_in (const Sample& other, const std::unordered_set<Value,
-// Value::ValueHash>& values, const size_t& feature){return
-// other[feature].value.is_in(values);} inline bool is_notin (const
-// Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
-// const size_t& feature){return other[feature].value.is_not_in(values);}
-inline bool _and(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
-  for (const auto& predicate : predicates)
-    if (!predicate(other)) return false;
-
-  return true;
+inline PredicateResult is_notin_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
+                                     const size_t& feature) {
+  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  return to_predicate_result(other[feature].cvalue().is_not_in(values));
 }
 
-inline bool _or(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
-  for (const auto& predicate : predicates)
-    if (predicate(other)) return true;
-
-  return false;
+inline PredicateResult is_missing(const Sample& other, const size_t& feature) {
+  return to_predicate_result(other[feature].value.missing);
 }
 
-// Parity XOR: true when an odd number of operands are true.
-inline bool _xor(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
+inline PredicateResult is_not_missing(const Sample& other, const size_t& feature) {
+  return to_predicate_result(!other[feature].value.missing);
+}
+
+// Three-valued AND: any FALSE → FALSE; else any UNKNOWN → UNKNOWN.
+inline PredicateResult _and(const Sample& other, const std::vector<PredicateFunction>& predicates) {
+  bool unknown = false;
+  for (const auto& predicate : predicates) {
+    const PredicateResult result = predicate(other);
+    if (result == PredicateResult::FALSE_) return PredicateResult::FALSE_;
+    if (result == PredicateResult::UNKNOWN) unknown = true;
+  }
+
+  return unknown ? PredicateResult::UNKNOWN : PredicateResult::TRUE_;
+}
+
+// Three-valued OR: any TRUE → TRUE; else any UNKNOWN → UNKNOWN.
+inline PredicateResult _or(const Sample& other, const std::vector<PredicateFunction>& predicates) {
+  bool unknown = false;
+  for (const auto& predicate : predicates) {
+    const PredicateResult result = predicate(other);
+    if (result == PredicateResult::TRUE_) return PredicateResult::TRUE_;
+    if (result == PredicateResult::UNKNOWN) unknown = true;
+  }
+
+  return unknown ? PredicateResult::UNKNOWN : PredicateResult::FALSE_;
+}
+
+// Parity XOR: true when an odd number of operands are true; any UNKNOWN → UNKNOWN.
+inline PredicateResult _xor(const Sample& other, const std::vector<PredicateFunction>& predicates) {
   bool acc = false;
-  for (const auto& predicate : predicates) acc ^= predicate(other);
-  return acc;
+  for (const auto& predicate : predicates) {
+    const PredicateResult result = predicate(other);
+    if (result == PredicateResult::UNKNOWN) return PredicateResult::UNKNOWN;
+    acc ^= (result == PredicateResult::TRUE_);
+  }
+
+  return to_predicate_result(acc);
 }
 
-inline bool surrogate(const Sample& other, const std::vector<std::function<bool(const Sample&)>>& predicates) {
+// Surrogate: the first predicate whose result is not UNKNOWN wins.
+inline PredicateResult surrogate(const Sample& other, const std::vector<PredicateFunction>& predicates) {
   for (const auto& predicate : predicates) {
     try {
-      return predicate(other);
+      const PredicateResult result = predicate(other);
+      if (result != PredicateResult::UNKNOWN) return result;
     } catch (const cpmml::Exception& e) {
     }
   }
 
-  return false;
+  return PredicateResult::UNKNOWN;
 }
 
-inline std::vector<std::function<bool(const Sample&)>> to_function(const std::vector<Predicate>& predicates);
+inline std::vector<PredicateFunction> to_function(const std::vector<Predicate>& predicates);
 
-inline std::function<bool(const Sample&)> to_function(const Predicate& predicate) {
+inline PredicateFunction to_function(const Predicate& predicate) {
   switch (predicate.predicatetype.value) {
     case PredicateOpType::PredicateOpTypeValue::TRUE:
       return std::bind(_true, std::placeholders::_1);
@@ -145,8 +188,8 @@ inline std::function<bool(const Sample&)> to_function(const Predicate& predicate
   return std::bind(_false, std::placeholders::_1);
 }
 
-inline std::vector<std::function<bool(const Sample&)>> to_function(const std::vector<Predicate>& predicates) {
-  std::vector<std::function<bool(const Sample&)>> result;
+inline std::vector<PredicateFunction> to_function(const std::vector<Predicate>& predicates) {
+  std::vector<PredicateFunction> result;
 
   for (const auto& predicate : predicates) result.push_back(to_function(predicate));
 
