@@ -155,7 +155,7 @@ class Target {
         if (score.empty) {
           if (target_values.empty()) break;
           score.double_score = target_values[0].default_value;
-          score.score = std::to_string(score.double_score);
+          score.score = double_to_string(score.double_score);
         } else {
           if (has_min && score.double_score < min)
             score.double_score = min;
@@ -167,7 +167,7 @@ class Target {
           if (!cast.empty) score.double_score = cast(score.double_score);
 
           // score string representation must be updated accordingly
-          score.score = std::to_string(score.double_score);
+          score.score = double_to_string(score.double_score);
         }
         break;
 
@@ -191,7 +191,7 @@ class Target {
         // throws, which made the defaultValue branch unreachable.
         if (predicted == "") {
           if (target_values.empty()) return predicted;
-          return std::to_string(target_values[0].default_value);
+          return double_to_string(target_values[0].default_value);
         } else {
           predicted_double = to_double(predicted);
           if (has_min && predicted_double < min)
@@ -204,7 +204,7 @@ class Target {
           if (!cast.empty) predicted_double = cast(predicted_double);
 
           // score string representation must be updated accordingly
-          return std::to_string(predicted_double);
+          return double_to_string(predicted_double);
         }
         break;
 

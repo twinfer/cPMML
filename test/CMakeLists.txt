@@ -1,6 +1,8 @@
 file(COPY data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
-add_custom_target(unit_tests ALL)
+# Not part of ALL: a plain `make` builds the tester but does not run the suite.
+# Run the fixtures with `ctest --output-on-failure` or `make unit_tests`.
+add_custom_target(unit_tests)
 
 add_executable(pmml_tester.exe pmml_tester.cc)
 target_include_directories(pmml_tester.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
@@ -22,6 +24,19 @@ foreach(_zip ${_model_zips})
         add_test(${_stem} pmml_tester.exe
             "data/model/${_stem}.zip"
             "data/dataset/${_stem}.csv")
+    endif()
+endforeach()
+
+# Locale-independence guard: numeric parsing and formatting must not go through
+# LC_NUMERIC, so these fixtures must produce identical results under a
+# comma-decimal locale. Skipped (exit 77) when the host lacks the locale.
+foreach(_stem HousingGBTRegressor IrisMultinomReg)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/dataset/${_stem}.csv")
+        add_test(${_stem}_comma_locale pmml_tester.exe
+            "data/model/${_stem}.zip"
+            "data/dataset/${_stem}.csv"
+            --locale de_DE.UTF-8)
+        set_tests_properties(${_stem}_comma_locale PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 endforeach()
 

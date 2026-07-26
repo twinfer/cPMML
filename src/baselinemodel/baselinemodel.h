@@ -117,7 +117,7 @@ class BaselineModel : public InternalModel {
     return std::make_unique<InternalScore>(compute(sample));
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return std::to_string(compute(sample)); }
+  inline std::string predict_raw(const Sample& sample) const override { return double_to_string(compute(sample)); }
 
  private:
   double compute(const Sample& sample) const {

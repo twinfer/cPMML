@@ -83,7 +83,7 @@ class GaussianProcessModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
-    return std::to_string(compute_k_star(sample).dot(alpha));
+    return double_to_string(compute_k_star(sample).dot(alpha));
   }
 
  private:

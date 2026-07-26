@@ -83,7 +83,7 @@ class RegressionModel : public InternalModel {
   inline std::string predict_raw(const Sample& sample) const override {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::REGRESSION:
-        return std::to_string(regression_normalization(regression_tables[0].score(sample)));
+        return double_to_string(regression_normalization(regression_tables[0].score(sample)));
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         return get_class(classification_normalization(get_scores(sample)));
       default:

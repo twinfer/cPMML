@@ -121,11 +121,11 @@ class AssociationOutput : public OutputExpression {
       case RuleFeature::RULE:
         return "{" + mr.antecedent + "}->{" + mr.consequent + "}";
       case RuleFeature::SUPPORT:
-        return std::to_string(mr.support);
+        return double_to_string(mr.support);
       case RuleFeature::CONFIDENCE:
-        return std::to_string(mr.confidence);
+        return double_to_string(mr.confidence);
       case RuleFeature::LIFT:
-        return std::to_string(mr.lift);
+        return double_to_string(mr.lift);
     }
     return "";
   }

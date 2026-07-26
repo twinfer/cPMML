@@ -37,11 +37,22 @@ CPMAddPackage(
 )
 
 # BUILD OPTIONS
+# BUILD_TYPE is this project's legacy knob; an explicit -DCMAKE_BUILD_TYPE from
+# the caller must still win, otherwise it is silently overwritten below.
 if(NOT DEFINED BUILD_TYPE)
-    set(BUILD_TYPE Release)
+    if(CMAKE_BUILD_TYPE)
+        set(BUILD_TYPE ${CMAKE_BUILD_TYPE})
+    else()
+        set(BUILD_TYPE Release)
+    endif()
 endif()
-set(RELEASE_FLAGS "-std=c++20 -Wall -O3 -ffast-math -flto")
-set(DEBUG_FLAGS "-std=c++20 -Wall -g -Og")
+
+# No -ffast-math: this is a numerical scoring library whose results are compared
+# against a reference implementation (JPMML), and -ffast-math both perturbs those
+# results and makes NaN/inf handling undefined.
+set(RELEASE_FLAGS "-Wall -O3 -flto")
+set(DEBUG_FLAGS "-Wall -g -Og")
+set(LINK_FLAGS_RELEASE "-flto")
 set(VERBOSE OFF)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -50,10 +61,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE ${BUILD_TYPE})
 set(CMAKE_CXX_FLAGS_RELEASE ${RELEASE_FLAGS})
 set(CMAKE_CXX_FLAGS_DEBUG ${DEBUG_FLAGS})
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE ${RELEASE_FLAGS})
-set(CMAKE_EXE_LINKER_FLAGS_DEBUG ${DEBUG_FLAGS})
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE ${RELEASE_FLAGS})
-set(CMAKE_SHARED_LINKER_FLAGS_DEBUG ${DEBUG_FLAGS})
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE ${LINK_FLAGS_RELEASE})
+set(CMAKE_EXE_LINKER_FLAGS_DEBUG "")
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE ${LINK_FLAGS_RELEASE})
+set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "")
 
 if(BUILD_TYPE MATCHES "Debug")
     set(VERBOSE ON)

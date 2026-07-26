@@ -1,6 +1,7 @@
 file(COPY data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
-add_custom_target(benchmark ALL)
+# Not part of ALL: run the 11 benchmarks explicitly with `make benchmark`.
+add_custom_target(benchmark)
 
 add_executable(model_benchmark.exe model_benchmark.cc)
 target_include_directories(model_benchmark.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)

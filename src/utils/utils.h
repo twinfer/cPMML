@@ -8,14 +8,19 @@
 #define CPMML_UTILS_H
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <charconv>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <locale>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,14 +39,61 @@ inline std::string to_lower(std::string value) {
   return value;
 }
 
+/**
+ * Locale-independent numeric parsing.
+ *
+ * `std::stod`/`std::stol` honour LC_NUMERIC: a host application that installs
+ * a comma-decimal locale would silently mis-parse every PMML coefficient
+ * ("1.5" -> 1). `std::from_chars` is locale-independent by definition, but is
+ * also stricter than `stod` — it rejects leading whitespace and a leading '+',
+ * both of which XSD permits — so those are handled here. Trailing characters
+ * are ignored, as `stod` ignores them.
+ */
+inline const char* skip_numeric_prefix(const char* first, const char* const last) {
+  while (first != last && std::isspace(static_cast<unsigned char>(*first))) first++;
+  if (first != last && *first == '+') first++;
+
+  return first;
+}
+
+inline bool try_to_double(const std::string_view value, double& parsed) {
+  const char* const last = value.data() + value.size();
+  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
+
+  return result.ec == std::errc();
+}
+
+inline bool try_to_long(const std::string_view value, long& parsed) {
+  const char* const last = value.data() + value.size();
+  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
+
+  return result.ec == std::errc();
+}
+
 inline static double to_double(const std::string& value) {
-  try {
-    return std::stod(value);
-  } catch (const std::invalid_argument& exception) {
-    throw cpmml::ParsingException(value + " cannot be converted to double (invalid argument)");
-  } catch (const std::out_of_range& exception) {
+  const char* const last = value.data() + value.size();
+  double parsed = 0.0;
+  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
+
+  if (result.ec == std::errc::result_out_of_range)
     throw cpmml::ParsingException(value + " cannot be converted to double (overflow)");
-  }
+  if (result.ec != std::errc())
+    throw cpmml::ParsingException(value + " cannot be converted to double (invalid argument)");
+
+  return parsed;
+}
+
+/**
+ * Locale-independent equivalent of `std::to_string(double)`, which formats
+ * through `sprintf("%f")` and therefore honours LC_NUMERIC. Same output as
+ * `std::to_string` under the classic locale: fixed notation, six decimals.
+ */
+inline std::string double_to_string(const double value) {
+  std::array<char, 512> buffer{};
+  const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::fixed, 6);
+  if (result.ec != std::errc()) return std::to_string(value);  // unreachable for finite doubles
+
+  return std::string(buffer.data(), result.ptr);
 }
 
 template <class T>
@@ -55,6 +107,7 @@ T parse_string(const std::string& value) {
 template <class T>
 std::string to_string(const T& value) {
   std::stringstream buffer;
+  buffer.imbue(std::locale::classic());  // never format numbers through the host locale
 
   buffer << value;
 

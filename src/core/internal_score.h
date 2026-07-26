@@ -52,7 +52,7 @@ class InternalScore {
 
   InternalScore() = default;
 
-  explicit InternalScore(const double& score) : empty(false), score(std::to_string(score)), double_score(score) {}
+  explicit InternalScore(const double& score) : empty(false), score(double_to_string(score)), double_score(score) {}
 
   explicit InternalScore(const std::string& score) : empty(false), score(score) {
     try {
@@ -63,7 +63,7 @@ class InternalScore {
   }
 
   InternalScore(const double& score, const std::unordered_map<std::string, double>& probabilities)
-      : empty(false), score(std::to_string(score)), double_score(score), probabilities(probabilities) {}
+      : empty(false), score(double_to_string(score)), double_score(score), probabilities(probabilities) {}
 
   InternalScore(const std::string& score, const std::unordered_map<std::string, double>& probabilities)
       : empty(false), score(score), probabilities(probabilities) {

@@ -53,29 +53,23 @@ class XmlNode {
   double get_double_attribute(const std::string& attribute_name, const double default_value) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
     if (!attr) return default_value;
-    try {
-      return std::stod(attr.value());
-    } catch (const std::exception&) {
-      return default_value;
-    }
+    double parsed = 0.0;
+
+    return try_to_double(attr.value(), parsed) ? parsed : default_value;
   }
 
   long get_long_attribute(const std::string& attribute_name, const long default_value) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
     if (!attr) return default_value;
-    try {
-      return std::stol(attr.value());
-    } catch (const std::exception&) {
-      return default_value;
-    }
+    long parsed = 0;
+
+    return try_to_long(attr.value(), parsed) ? parsed : default_value;
   }
 
   double get_double_attribute(const std::string& attribute_name) const {
-    try {
-      return std::stod(get_attribute(attribute_name));
-    } catch (const std::exception&) {
-      return std::numeric_limits<double>::min();
-    }
+    double parsed = 0.0;
+
+    return try_to_double(get_attribute(attribute_name), parsed) ? parsed : std::numeric_limits<double>::min();
   }
 
   bool get_bool_attribute(const std::string& attribute_name) const {
@@ -84,11 +78,9 @@ class XmlNode {
   }
 
   long get_long_attribute(const std::string& attribute_name) const {
-    try {
-      return std::stol(get_attribute(attribute_name));
-    } catch (const std::exception&) {
-      return std::numeric_limits<long>::max();
-    }
+    long parsed = 0;
+
+    return try_to_long(get_attribute(attribute_name), parsed) ? parsed : std::numeric_limits<long>::max();
   }
 
   XmlNode get_child(const std::string& child_name) const { return XmlNode(node.child(child_name.c_str())); }

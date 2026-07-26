@@ -83,7 +83,7 @@ class ScorecardModel : public InternalModel {
     return score;
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return std::to_string(compute(sample).first); }
+  inline std::string predict_raw(const Sample& sample) const override { return double_to_string(compute(sample).first); }
 
  private:
   void parse_characteristics(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {

@@ -141,7 +141,7 @@ class GeneralRegressionModel : public InternalModel {
       auto [winner, scores] = predict_ordinal(sample);
       return winner;
     }
-    return std::to_string(predict_continuous(sample));
+    return double_to_string(predict_continuous(sample));
   }
 
  private:

@@ -342,7 +342,7 @@ class NearestNeighborModel : public InternalModel {
       std::sort(vals.begin(), vals.end());
       const size_t mid = vals.size() / 2;
       const double med = (vals.size() % 2 == 0) ? (vals[mid - 1] + vals[mid]) / 2.0 : vals[mid];
-      return std::to_string(med);
+      return double_to_string(med);
     }
 
     const bool weighted = (continuous_method == "weightedaverage");
@@ -352,7 +352,7 @@ class NearestNeighborModel : public InternalModel {
       sum += w * to_double(training_targets[idx]);
       weight_sum += w;
     }
-    return std::to_string(weight_sum > 0.0 ? sum / weight_sum : 0.0);
+    return double_to_string(weight_sum > 0.0 ? sum / weight_sum : 0.0);
   }
 };
 

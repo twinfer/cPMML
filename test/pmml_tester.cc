@@ -2,16 +2,21 @@
 /*******************************************************************************
  * Unified test harness for all cPMML model types.
  *
- * Usage: pmml_tester.exe <model.zip> <fixture.csv>
+ * Usage: pmml_tester.exe <model.zip> <fixture.csv> [--locale <name>]
  *
  * Mode is determined by model.mining_function():
  *   "TIMESERIES"         →  forecast mode
  *   "ASSOCIATION_RULES"  →  transactional or scoring mode (auto-detected)
  *   otherwise            →  scoring mode
+ *
+ * --locale installs a host locale before scoring: results must be identical
+ * under a comma-decimal locale. Exits 77 (ctest SKIP) if it is unavailable.
  *******************************************************************************/
 
+#include <clocale>
 #include <cmath>
 #include <iostream>
+#include <locale>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -280,8 +285,22 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::cerr << "usage: pmml_tester.exe model.zip fixture.csv\n";
+    std::cerr << "usage: pmml_tester.exe model.zip fixture.csv [--locale <name>]\n";
     return -1;
+  }
+
+  if (argc >= 5 && std::string(argv[3]) == "--locale") {
+    if (std::setlocale(LC_ALL, argv[4]) == nullptr) {
+      std::cerr << "locale '" << argv[4] << "' unavailable on this host\n";
+      return 77;  // ctest SKIP_RETURN_CODE
+    }
+    try {
+      std::locale::global(std::locale(argv[4]));
+    } catch (const std::exception&) {
+      std::cerr << "locale '" << argv[4] << "' unavailable to std::locale\n";
+      return 77;
+    }
+    std::cout << "running under locale " << argv[4] << "\n";
   }
 
   try {

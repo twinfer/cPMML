@@ -148,7 +148,7 @@ class SupportVectorMachineModel : public InternalModel {
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
       const double val = machines[0].decision(x, kernel);
-      return std::make_unique<RegressionScore>(std::to_string(val), val, classes, std::vector<double>{val});
+      return std::make_unique<RegressionScore>(double_to_string(val), val, classes, std::vector<double>{val});
     }
 
     std::vector<double> scores;
@@ -164,7 +164,7 @@ class SupportVectorMachineModel : public InternalModel {
     const Eigen::VectorXd x = sample_to_vector(sample);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION)
-      return std::to_string(machines[0].decision(x, kernel));
+      return double_to_string(machines[0].decision(x, kernel));
 
     return is_ovo ? predict_ovo(x) : predict_ova_str(x);
   }
