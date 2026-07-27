@@ -7,7 +7,10 @@
 #ifndef CPMML_BUILTINFUNCTIONS_H
 #define CPMML_BUILTINFUNCTIONS_H
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
+#include <vector>
 
 #include "cPMML.h"
 #include "enum_parser.h"
@@ -37,7 +40,7 @@ class BuiltInFunction {  // inputs are mapped by position
     SUM,
     AVG,
     EXP,
-    LOG,
+    LN,
     LOG10,
     SQRT,
     ABS,
@@ -64,6 +67,32 @@ class BuiltInFunction {  // inputs are mapped by position
     TRIM_BLANKS,
     CONCAT,
     STRING_LENGTH,
+    // Arithmetic and boolean members the table never had
+    MEDIAN,
+    PRODUCT,
+    THRESHOLD,
+    MODULO,
+    NOT,
+    // "Further mathematical functions"
+    EXPM1,
+    LN1P,
+    HYPOT,
+    RINT,
+    SIN,
+    ASIN,
+    SINH,
+    COS,
+    ACOS,
+    COSH,
+    TAN,
+    ATAN,
+    TANH,
+    // Distribution functions
+    ERF,
+    NORMAL_CDF,
+    NORMAL_PDF,
+    STD_NORMAL_CDF,
+    STD_NORMAL_PDF,
     IDENTITY  // introduced to have "empty" function type
   };
 
@@ -92,13 +121,13 @@ class BuiltInFunction {  // inputs are mapped by position
       {"sum", BuiltInFunctionType::SUM, "sum"},
       {"avg", BuiltInFunctionType::AVG, "avg"},
       {"exp", BuiltInFunctionType::EXP, "exp"},
-      {"log", BuiltInFunctionType::LOG, "log"},
+      {"ln", BuiltInFunctionType::LN, "ln"},
       {"log10", BuiltInFunctionType::LOG10, "log10"},
       {"sqrt", BuiltInFunctionType::SQRT, "sqrt"},
       {"abs", BuiltInFunctionType::ABS, "abs"},
       {"round", BuiltInFunctionType::ROUND, "round"},
       {"floor", BuiltInFunctionType::FLOOR, "floor"},
-      {"ceiling", BuiltInFunctionType::CEIL, "ceiling"},
+      {"ceil", BuiltInFunctionType::CEIL, "ceil"},
       {"pow", BuiltInFunctionType::POW, "pow"},
       {"if", BuiltInFunctionType::IF, "if"},
       {"ismissing", BuiltInFunctionType::IS_MISSING, "isMissing"},
@@ -119,12 +148,47 @@ class BuiltInFunction {  // inputs are mapped by position
       {"trimblanks", BuiltInFunctionType::TRIM_BLANKS, "trimBlanks"},
       {"concat", BuiltInFunctionType::CONCAT, "concat"},
       {"stringlength", BuiltInFunctionType::STRING_LENGTH, "stringLength"},
+      {"median", BuiltInFunctionType::MEDIAN, "median"},
+      {"product", BuiltInFunctionType::PRODUCT, "product"},
+      {"threshold", BuiltInFunctionType::THRESHOLD, "threshold"},
+      {"modulo", BuiltInFunctionType::MODULO, "modulo"},
+      {"not", BuiltInFunctionType::NOT, "not"},
+      {"expm1", BuiltInFunctionType::EXPM1, "expm1"},
+      {"ln1p", BuiltInFunctionType::LN1P, "ln1p"},
+      {"hypot", BuiltInFunctionType::HYPOT, "hypot"},
+      {"rint", BuiltInFunctionType::RINT, "rint"},
+      {"sin", BuiltInFunctionType::SIN, "sin"},
+      {"asin", BuiltInFunctionType::ASIN, "asin"},
+      {"sinh", BuiltInFunctionType::SINH, "sinh"},
+      {"cos", BuiltInFunctionType::COS, "cos"},
+      {"acos", BuiltInFunctionType::ACOS, "acos"},
+      {"cosh", BuiltInFunctionType::COSH, "cosh"},
+      {"tan", BuiltInFunctionType::TAN, "tan"},
+      {"atan", BuiltInFunctionType::ATAN, "atan"},
+      {"tanh", BuiltInFunctionType::TANH, "tanh"},
+      {"erf", BuiltInFunctionType::ERF, "erf"},
+      {"normalcdf", BuiltInFunctionType::NORMAL_CDF, "normalCDF"},
+      {"normalpdf", BuiltInFunctionType::NORMAL_PDF, "normalPDF"},
+      {"stdnormalcdf", BuiltInFunctionType::STD_NORMAL_CDF, "stdNormalCDF"},
+      {"stdnormalpdf", BuiltInFunctionType::STD_NORMAL_PDF, "stdNormalPDF"},
   };
 
   // Apply/@function is required, and a name that is not a PMML built-in is
   // either a DefineFunction cPMML does not support or a typo. Either way there
   // is no function to apply.
   static BuiltInFunctionType from_string(const std::string& builtinfunction) {
+    // "log" and "ceiling" are what this table used to hold. Neither is a PMML
+    // built-in, and "log" is worse than merely non-conforming: several systems
+    // spell log10 that way, so a document meaning log10 would have got a
+    // natural logarithm. Point at the real name rather than fail blankly.
+    const std::string given = to_lower(builtinfunction);
+    if (given == "log")
+      throw cpmml::ParsingException(
+          "function \"" + builtinfunction +
+          "\" is not a PMML built-in: the natural logarithm is \"ln\" and the base-10 logarithm is \"log10\"");
+    if (given == "ceiling")
+      throw cpmml::ParsingException("function \"" + builtinfunction + "\" is not a PMML built-in: it is \"ceil\"");
+
     return enum_value(builtinfunction, TABLE, "function");
   }
 
@@ -143,13 +207,16 @@ class BuiltInFunction {  // inputs are mapped by position
       case BuiltInFunctionType::GREATER_THAN:
       case BuiltInFunctionType::GREATER_THAN_EQUAL:
       case BuiltInFunctionType::MATCHES:
+      case BuiltInFunctionType::THRESHOLD:
+      case BuiltInFunctionType::MODULO:
+      case BuiltInFunctionType::HYPOT:
         return 2;
       case BuiltInFunctionType::IF:
         return -1;  // if(condition, then[, else]) — the else part is optional
       case BuiltInFunctionType::IS_MISSING:
       case BuiltInFunctionType::IS_NOT_MISSING:
       case BuiltInFunctionType::EXP:
-      case BuiltInFunctionType::LOG:
+      case BuiltInFunctionType::LN:
       case BuiltInFunctionType::LOG10:
       case BuiltInFunctionType::SQRT:
       case BuiltInFunctionType::ABS:
@@ -160,9 +227,27 @@ class BuiltInFunction {  // inputs are mapped by position
       case BuiltInFunctionType::LOWERCASE:
       case BuiltInFunctionType::TRIM_BLANKS:
       case BuiltInFunctionType::STRING_LENGTH:
+      case BuiltInFunctionType::NOT:
+      case BuiltInFunctionType::EXPM1:
+      case BuiltInFunctionType::LN1P:
+      case BuiltInFunctionType::RINT:
+      case BuiltInFunctionType::SIN:
+      case BuiltInFunctionType::ASIN:
+      case BuiltInFunctionType::SINH:
+      case BuiltInFunctionType::COS:
+      case BuiltInFunctionType::ACOS:
+      case BuiltInFunctionType::COSH:
+      case BuiltInFunctionType::TAN:
+      case BuiltInFunctionType::ATAN:
+      case BuiltInFunctionType::TANH:
+      case BuiltInFunctionType::ERF:
+      case BuiltInFunctionType::STD_NORMAL_CDF:
+      case BuiltInFunctionType::STD_NORMAL_PDF:
         return 1;
       case BuiltInFunctionType::REPLACE:
       case BuiltInFunctionType::SUBSTRING:
+      case BuiltInFunctionType::NORMAL_CDF:
+      case BuiltInFunctionType::NORMAL_PDF:
         return 3;
       default:
         return -1;  // variadic: max, min, sum, avg, concat, isIn, isNotIn
@@ -180,6 +265,8 @@ class BuiltInFunction {  // inputs are mapped by position
       case BuiltInFunctionType::SUM:
       case BuiltInFunctionType::AVG:
       case BuiltInFunctionType::CONCAT:
+      case BuiltInFunctionType::MEDIAN:
+      case BuiltInFunctionType::PRODUCT:
         return 1;
       case BuiltInFunctionType::IF:
         return 2;  // if(condition, then[, else])
@@ -208,8 +295,8 @@ class BuiltInFunction {  // inputs are mapped by position
         return avg;
       case BuiltInFunctionType::EXP:
         return exp;
-      case BuiltInFunctionType::LOG:
-        return log;
+      case BuiltInFunctionType::LN:
+        return ln;
       case BuiltInFunctionType::LOG10:
         return log10;
       case BuiltInFunctionType::SQRT:
@@ -262,6 +349,52 @@ class BuiltInFunction {  // inputs are mapped by position
         return str_concat;
       case BuiltInFunctionType::STRING_LENGTH:
         return str_length;
+      case BuiltInFunctionType::MEDIAN:
+        return median;
+      case BuiltInFunctionType::PRODUCT:
+        return product;
+      case BuiltInFunctionType::THRESHOLD:
+        return threshold;
+      case BuiltInFunctionType::MODULO:
+        return modulo;
+      case BuiltInFunctionType::NOT:
+        return logical_not;
+      case BuiltInFunctionType::EXPM1:
+        return unary(std::expm1);
+      case BuiltInFunctionType::LN1P:
+        return unary(std::log1p);
+      case BuiltInFunctionType::HYPOT:
+        return hypot;
+      case BuiltInFunctionType::RINT:
+        return unary(std::rint);
+      case BuiltInFunctionType::SIN:
+        return unary(std::sin);
+      case BuiltInFunctionType::ASIN:
+        return unary(std::asin);
+      case BuiltInFunctionType::SINH:
+        return unary(std::sinh);
+      case BuiltInFunctionType::COS:
+        return unary(std::cos);
+      case BuiltInFunctionType::ACOS:
+        return unary(std::acos);
+      case BuiltInFunctionType::COSH:
+        return unary(std::cosh);
+      case BuiltInFunctionType::TAN:
+        return unary(std::tan);
+      case BuiltInFunctionType::ATAN:
+        return unary(std::atan);
+      case BuiltInFunctionType::TANH:
+        return unary(std::tanh);
+      case BuiltInFunctionType::ERF:
+        return unary(std::erf);
+      case BuiltInFunctionType::NORMAL_CDF:
+        return normal_cdf;
+      case BuiltInFunctionType::NORMAL_PDF:
+        return normal_pdf;
+      case BuiltInFunctionType::STD_NORMAL_CDF:
+        return std_normal_cdf;
+      case BuiltInFunctionType::STD_NORMAL_PDF:
+        return std_normal_pdf;
       default:
         throw cpmml::ParsingException("unsupported function");
     }
@@ -315,7 +448,7 @@ class BuiltInFunction {  // inputs are mapped by position
   inline static Value exp(const std::vector<Value>& input) {
     return Value(std::exp(input[0].value), DataType::DataTypeValue::DOUBLE);
   }
-  inline static Value log(const std::vector<Value>& input) {
+  inline static Value ln(const std::vector<Value>& input) {
     return Value(std::log(input[0].value), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value log10(const std::vector<Value>& input) {
@@ -397,6 +530,121 @@ class BuiltInFunction {  // inputs are mapped by position
   inline static Value str_length(const std::vector<Value>& input) {
     return Value(static_cast<double>(input[0].svalue.size()), DataType::DataTypeValue::DOUBLE);
   }
+
+  // --- Functions the table was missing entirely ---
+  //
+  // PMML defines around sixty built-ins; cPMML implemented thirty-six of them
+  // and misnamed two. The ones below are the arithmetic, boolean and
+  // mathematical members whose definition is a single expression. What is still
+  // absent, and why, is at the bottom of this file.
+
+  // Every one-argument numeric built-in is the same wrapper around a different
+  // <cmath> function.
+  inline static std::function<Value(const std::vector<Value>&)> unary(double (*f)(double)) {
+    return [f](const std::vector<Value>& input) {
+      return Value(f(input[0].value), DataType::DataTypeValue::DOUBLE);
+    };
+  }
+
+  // "Returns one if x>y and zero otherwise." Note it returns a number, not a
+  // boolean, which is why it is not written with the comparison functions.
+  inline static Value threshold(const std::vector<Value>& input) {
+    return Value(input[0].value > input[1].value ? 1.0 : 0.0, DataType::DataTypeValue::DOUBLE);
+  }
+
+  /**
+   * "the remainder after x is divided by y, computed according to XQuery
+   *  rules", which the specification then pins down as
+   *  a - floor(a/b)*b -- the sign of the divisor, like Python's %, not
+   *  std::fmod's sign-of-the-dividend. Its own examples are the test:
+   *  modulo(11,3)=2, modulo(-17.2,0.5)=0.3, modulo(9,-7)=-5, modulo(-4,-9)=-4.
+   *  std::fmod would give 2, 0.3, 2 and -4 -- so two of the four differ.
+   */
+  inline static Value modulo(const std::vector<Value>& input) {
+    const double a = input[0].value;
+    const double b = input[1].value;
+
+    return Value(a - std::floor(a / b) * b, DataType::DataTypeValue::DOUBLE);
+  }
+
+  inline static Value hypot(const std::vector<Value>& input) {
+    return Value(std::hypot(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
+  }
+
+  inline static Value logical_not(const std::vector<Value>& input) {
+    return Value(!(input[0].value != 0.0), DataType::DataTypeValue::BOOLEAN);
+  }
+
+  inline static Value product(const std::vector<Value>& input) {
+    double result = 1.0;
+    for (const auto& v : input) result *= v.value;
+
+    return Value(result, DataType::DataTypeValue::DOUBLE);
+  }
+
+  // The specification does not say what an even number of arguments gives. The
+  // mean of the two central values is the usual reading and is what the
+  // ensemble median already does here, so the two agree.
+  inline static Value median(const std::vector<Value>& input) {
+    std::vector<double> values;
+    values.reserve(input.size());
+    for (const auto& v : input) values.push_back(v.value);
+    std::sort(values.begin(), values.end());
+
+    const size_t mid = values.size() / 2;
+    const double result = (values.size() % 2 == 0) ? (values[mid - 1] + values[mid]) / 2.0 : values[mid];
+
+    return Value(result, DataType::DataTypeValue::DOUBLE);
+  }
+
+  // Φ(x) = ½·erfc(−x/√2). Written with erfc rather than 1−½erfc(x/√2) because
+  // the latter loses every significant digit in the left tail.
+  inline static Value std_normal_cdf(const std::vector<Value>& input) {
+    return Value(0.5 * std::erfc(-input[0].value / std::sqrt(2.0)), DataType::DataTypeValue::DOUBLE);
+  }
+
+  inline static Value std_normal_pdf(const std::vector<Value>& input) {
+    const double x = input[0].value;
+
+    return Value(std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI), DataType::DataTypeValue::DOUBLE);
+  }
+
+  inline static Value normal_cdf(const std::vector<Value>& input) {
+    const double sigma = input[2].value;
+    if (!(sigma > 0.0)) throw cpmml::InvalidValueException("normalCDF: sigma must be positive");
+
+    return Value(0.5 * std::erfc(-(input[0].value - input[1].value) / (sigma * std::sqrt(2.0))),
+                 DataType::DataTypeValue::DOUBLE);
+  }
+
+  inline static Value normal_pdf(const std::vector<Value>& input) {
+    const double sigma = input[2].value;
+    if (!(sigma > 0.0)) throw cpmml::InvalidValueException("normalPDF: sigma must be positive");
+
+    const double z = (input[0].value - input[1].value) / sigma;
+
+    return Value(std::exp(-0.5 * z * z) / (sigma * std::sqrt(2.0 * M_PI)), DataType::DataTypeValue::DOUBLE);
+  }
+
+  /**
+   * Still not implemented, and each for a reason rather than by oversight:
+   *
+   *   isValid / isNotValid   need the field's DataDictionary Value constraints,
+   *                          which a built-in taking a vector<Value> cannot
+   *                          reach -- validity is decided in MiningSchema.
+   *   normalIDF / stdNormalIDF
+   *                          the inverse normal CDF, which needs a rational
+   *                          approximation whose accuracy should be pinned by
+   *                          an oracle before it is shipped.
+   *   formatNumber / formatDatetime / dateDaysSinceYear /
+   *   dateSecondsSinceYear / dateSecondsSinceMidnight
+   *                          cPMML carries every date and time type as an
+   *                          epoch double with no record of which epoch, so
+   *                          there is nothing to format or offset from.
+   *
+   * All five groups fail at load with the name that was asked for, which is the
+   * right answer until they exist.
+   */
 };
 
 #endif
