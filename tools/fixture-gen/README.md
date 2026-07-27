@@ -47,6 +47,7 @@ developers and CI.
 | Generator | Oracle | Covers |
 |---|---|---|
 | `gen_gp.py` | scikit-learn `GaussianProcessRegressor` | `GaussianProcessModel`, all four kernels |
+| `gen_timeseries.py` | statsmodels `SARIMAX`, plus spec transcription | `TimeSeriesModel`: ARIMA and `StateSpaceModel` |
 
 JPMML remains the oracle for everything it supports, via
 `test/generate_fixtures_jpmml.py` and `tools/cross-validate.sh`. It supports
@@ -66,6 +67,35 @@ cPMML's own formula, so the multi-input case is left uncovered.
 `GeneralizedExponentialKernel` is covered at `degree=1` and `degree=2`, where
 the spec formula degenerates to the two kernels above. Other degrees have no
 scikit-learn equivalent.
+
+`gen_timeseries.py` uses **two** oracles, split by whether a third-party
+implementation actually constrains the answer:
+
+- **statsmodels `SARIMAX`** for pure AR models with non-seasonal and seasonal
+  differencing. Real recursion, genuinely independent.
+- **Spec transcription** (`oracle_spec.py`) for everything SARIMAX cannot
+  express: MA terms driven by the `<Residuals>` the document supplies rather
+  than residuals re-derived by filtering, and `StateSpaceModel`, whose forecast
+  the spec defines as the closed form `Y = G·Fʰ·X` with "the errors ignored" —
+  there is no Kalman filter to mirror and no Q/H that PMML ever states.
+
+A transcription is weaker evidence than an independent implementation, so it is
+constrained two ways: every pure-AR fixture is computed by *both* oracles and
+the generator fails if they disagree, and `fix_arima_spec_example` reproduces
+the worked example the specification computes arithmetically in full. That
+example is the strongest fixture in the repository — its expected value is the
+DMG's own number.
+
+Note that `fix_arima_spec_example` is not on its own discriminating: the
+series runs in the thousands, so an error of ±1.6 in the MA term sits inside
+the harness's 1e-3 relative tolerance. `fix_arima_ma2` uses small magnitudes
+for that reason. Prefer small-magnitude series when the point is to pin a
+formula rather than to reproduce a document.
+
+PsiVector is parsed and its variance formula is transcribed in
+`oracle_spec.psi_variance`, but no fixture asserts it: forecast mode compares
+only the point forecasts (`result.series()`), so there is no channel for a
+predictive variance. Asserting it would need a tester change.
 
 ## Invariants the generators assert
 

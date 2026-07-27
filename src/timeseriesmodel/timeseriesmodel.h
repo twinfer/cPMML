@@ -363,7 +363,10 @@ class TimeSeriesModel {
     for (int h = 1; h <= horizon; ++h) {
       double yh = a.include_constant ? a.constant : 0.0;
       for (int i = 0; i < p_eff && i < static_cast<int>(y.size()); ++i) yh += a.phi[i] * y[i];
-      for (int j = 0; j < q_eff && j < static_cast<int>(eps.size()); ++j) yh += a.theta[j] * eps[j];
+      // PMML writes the MA polynomial as (1 - theta_1 B - theta_2 B^2 - ...),
+      // so the residual terms are subtracted. The spec's own worked example
+      // spells this out: "- theta_1 a_t" with theta_1 = -0.4 contributes +0.8.
+      for (int j = 0; j < q_eff && j < static_cast<int>(eps.size()); ++j) yh -= a.theta[j] * eps[j];
       w_out.push_back(yh);
       y.insert(y.begin(), yh);
       eps.insert(eps.begin(), 0.0);
@@ -559,16 +562,26 @@ class TimeSeriesModel {
 
   static std::vector<double> undifference_sarima(const std::vector<double>& w_fcast, int d, int D, int m,
                                                  const std::vector<double>& z_tail, const std::vector<double>& y_tail) {
-    // Step 1: undo d regular differences → z_fcast
-    std::vector<double> z_fcast;
-    if (d == 0) {
-      z_fcast = w_fcast;
-    } else {
-      z_fcast.reserve(w_fcast.size());
-      double prev = z_tail.empty() ? 0.0 : z_tail.back();
-      for (double w : w_fcast) {
-        prev += w;
-        z_fcast.push_back(prev);
+    // Step 1: undo d regular differences → z_fcast.
+    //
+    // Integrating once recovers the (d-1)-times-differenced series, not the
+    // original, so this runs d times. Each pass needs the last observed value
+    // at its own differencing level, which is recovered by differencing z_tail
+    // — the last d values of the series — the corresponding number of times.
+    std::vector<double> z_fcast = w_fcast;
+    for (int level = d - 1; level >= 0; --level) {
+      std::vector<double> tail(z_tail);
+      for (int i = 0; i < level && tail.size() > 1; ++i) {
+        std::vector<double> differenced;
+        differenced.reserve(tail.size() - 1);
+        for (size_t k = 1; k < tail.size(); ++k) differenced.push_back(tail[k] - tail[k - 1]);
+        tail = std::move(differenced);
+      }
+
+      double prev = tail.empty() ? 0.0 : tail.back();
+      for (double& value : z_fcast) {
+        prev += value;
+        value = prev;
       }
     }
 
@@ -742,22 +755,48 @@ class TimeSeriesModel {
   // parse_ssm
   // =========================================================================
 
-  void parse_ssm(const XmlNode& node) {
-    auto load_matrix = [](const XmlNode& m, int rows, int cols) {
-      auto vals = parse_array(m);
-      Eigen::MatrixXd mat(rows, cols);
-      for (int r = 0; r < rows; ++r)
-        for (int c = 0; c < cols; ++c) mat(r, c) = vals[static_cast<size_t>(r * cols + c)];
-      return mat;
-    };
+  /**
+   * Read a <TransitionMatrix>/<MeasurementMatrix> wrapper.
+   *
+   * Both hold a <Matrix> whose rows are one <Array> each, per GeneralStructure:
+   * "If arrays are used, then each array contains elements of one row in the
+   * matrix." nbRows/nbCols are optional -- "if one of them is not specified,
+   * the respective dimension is implicitly given by the representation" -- so
+   * they are validated when present rather than required.
+   */
+  static Eigen::MatrixXd load_matrix(const XmlNode& wrapper, const std::string& element) {
+    if (!wrapper.exists_child("Matrix"))
+      throw cpmml::ParsingException(element + " must contain a Matrix element");
 
-    if (node.exists_attribute("transformation"))
-      ssm.transform = parse_transform(to_lower(node.get_attribute("transformation")));
+    const XmlNode matrix = wrapper.get_child("Matrix");
+    if (matrix.exists_child("MatCell"))
+      throw cpmml::ParsingException(element + ": sparse Matrix (MatCell) is not supported");
+
+    std::vector<std::vector<double>> rows;
+    for (const auto& array : matrix.get_childs("Array")) rows.push_back(parse_array(array));
+
+    if (rows.empty()) throw cpmml::ParsingException(element + ": Matrix has no Array rows");
+
+    const size_t cols = rows.front().size();
+    for (const auto& row : rows)
+      if (row.size() != cols) throw cpmml::ParsingException(element + ": Matrix rows have differing lengths");
+
+    if (matrix.exists_attribute("nbRows") && static_cast<size_t>(matrix.get_long_attribute("nbRows")) != rows.size())
+      throw cpmml::ParsingException(element + ": nbRows disagrees with the number of Array rows");
+    if (matrix.exists_attribute("nbCols") && static_cast<size_t>(matrix.get_long_attribute("nbCols")) != cols)
+      throw cpmml::ParsingException(element + ": nbCols disagrees with the Array length");
+
+    Eigen::MatrixXd mat(static_cast<Eigen::Index>(rows.size()), static_cast<Eigen::Index>(cols));
+    for (size_t r = 0; r < rows.size(); ++r)
+      for (size_t c = 0; c < cols; ++c)
+        mat(static_cast<Eigen::Index>(r), static_cast<Eigen::Index>(c)) = rows[r][c];
+
+    return mat;
+  }
+
+  void parse_ssm(const XmlNode& node) {
     if (node.exists_attribute("intercept")) ssm.intercept = node.get_double_attribute("intercept");
-    if (node.exists_attribute("RMSE")) {
-      double rmse = node.get_double_attribute("RMSE");
-      ssm.sigma2 = rmse * rmse;
-    }
+    if (node.exists_attribute("variance")) ssm.sigma2 = node.get_double_attribute("variance");
 
     // PsiVector: MA(∞) weights ψ₀,ψ₁,... for exact h-step variance
     // var(h) = σ² × Σ_{j=0}^{h-1} ψ_j²   (PMML 4.4 spec §TimeSeriesModel)
@@ -768,19 +807,20 @@ class TimeSeriesModel {
       if (pv.exists_child("Array")) ssm.psi = parse_array(pv.get_child("Array"));
     }
 
-    XmlNode sv = node.get_child("StateVector");
-    int n = static_cast<int>(sv.get_long_attribute("n"));
-    auto vals = parse_array(sv);
-    ssm.x.resize(n);
-    for (int i = 0; i < n; ++i) ssm.x[i] = vals[static_cast<size_t>(i)];
+    // StateVector holds a REAL-ARRAY; the n attribute belongs to the Array.
+    const XmlNode sv = node.get_child("StateVector");
+    if (!sv.exists_child("Array")) throw cpmml::ParsingException("StateVector must contain an Array element");
+    const std::vector<double> vals = parse_array(sv.get_child("Array"));
+    ssm.x.resize(static_cast<Eigen::Index>(vals.size()));
+    for (size_t i = 0; i < vals.size(); ++i) ssm.x[static_cast<Eigen::Index>(i)] = vals[i];
 
-    XmlNode tm = node.get_child("TransitionMatrix");
-    ssm.F = load_matrix(tm, static_cast<int>(tm.get_long_attribute("rows")),
-                        static_cast<int>(tm.get_long_attribute("cols")));
+    ssm.F = load_matrix(node.get_child("TransitionMatrix"), "TransitionMatrix");
+    ssm.G = load_matrix(node.get_child("MeasurementMatrix"), "MeasurementMatrix");
 
-    XmlNode mm = node.get_child("MeasurementMatrix");
-    ssm.G = load_matrix(mm, static_cast<int>(mm.get_long_attribute("rows")),
-                        static_cast<int>(mm.get_long_attribute("cols")));
+    if (ssm.F.rows() != ssm.F.cols() || ssm.F.cols() != ssm.x.size())
+      throw cpmml::ParsingException("StateSpaceModel: TransitionMatrix must be square and match the StateVector");
+    if (ssm.G.cols() != ssm.x.size())
+      throw cpmml::ParsingException("StateSpaceModel: MeasurementMatrix columns must match the StateVector");
   }
 
   // =========================================================================
