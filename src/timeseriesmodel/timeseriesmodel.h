@@ -58,7 +58,10 @@ class TimeSeriesModel {
     double alpha = 0.0, gamma = 0.0, delta = 0.0, phi = 1.0;
     double l = 0.0, b = 0.0;
     int period = 1;
-    std::vector<double> s;  // seasonal components [s(T-m+1),..,s(T)]
+    // Season index of the last known data point, 1-based. The spec defaults it
+    // to period, which is why omitting it lines the array up with h=1.
+    int phase = 0;
+    std::vector<double> s;  // seasonal components, one per season index
     Transform transform = Transform::NONE;
     double rmse = 1.0;  // in-sample RMSE for variance
   } ets;
@@ -290,7 +293,11 @@ class TimeSeriesModel {
 
       double base = mult_trend ? (e.l * trend_mult) : (e.l + trend_add);
 
-      double seas = has_seas ? e.s[static_cast<size_t>((h - 1) % m)] : (e.seasonal == "multiplicative" ? 1.0 : 0.0);
+      // phase is the season index of the last known point, so step h lands on
+      // index (phase + h - 1) mod period. The default phase == period makes
+      // that (h - 1) mod period, which is what this used to assume outright.
+      const int index = ((e.phase + h - 1) % m + m) % m;
+      double seas = has_seas ? e.s[static_cast<size_t>(index)] : (e.seasonal == "multiplicative" ? 1.0 : 0.0);
 
       double y_hat;
       if (!has_seas || e.seasonal == "none")
@@ -725,6 +732,16 @@ class TimeSeriesModel {
     if (node.exists_child("Trend_ExpoSmooth")) {
       XmlNode tr = node.get_child("Trend_ExpoSmooth");
       ets.trend = tr.exists_attribute("trend") ? to_lower(tr.get_attribute("trend")) : "additive";
+      // Brown's polynomial models read their smoothed coefficients from the
+      // Array sub-element rather than smoothedValue, and forecast by a
+      // different rule than the Gardner trends below. Scoring one as though it
+      // had no trend at all would silently return a flat line.
+      if (ets.trend == "polynomial_exponential")
+        throw cpmml::ParsingException(
+            "ExponentialSmoothing trend=\"polynomial_exponential\" (Brown's polynomial model) is not supported");
+      if (ets.trend != "additive" && ets.trend != "damped_additive" && ets.trend != "multiplicative" &&
+          ets.trend != "damped_multiplicative")
+        throw cpmml::ParsingException("ExponentialSmoothing trend=\"" + ets.trend + "\" is not supported");
       ets.gamma = tr.exists_attribute("gamma") ? tr.get_double_attribute("gamma") : 0.0;
       ets.phi = tr.exists_attribute("phi") ? tr.get_double_attribute("phi") : 1.0;
       ets.b = tr.get_double_attribute("smoothedValue");
@@ -736,6 +753,7 @@ class TimeSeriesModel {
       ets.seasonal = se.exists_attribute("type") ? to_lower(se.get_attribute("type")) : "additive";
       ets.delta = se.exists_attribute("delta") ? se.get_double_attribute("delta") : 0.0;
       ets.period = static_cast<int>(se.get_long_attribute("period"));
+      ets.phase = se.exists_attribute("phase") ? static_cast<int>(se.get_long_attribute("phase")) : ets.period;
       if (se.exists_child("Array")) {
         ets.s = parse_array(se.get_child("Array"));
       } else {

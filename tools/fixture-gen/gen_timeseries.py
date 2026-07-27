@@ -124,6 +124,35 @@ def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0,
     return _document(name, note, "\n".join(parts) + "\n", series)
 
 
+def garch_document(name, *, ar, ma, residuals, constant) -> str:
+    """A GARCH model. Only the ARMAPart drives the forecast cPMML produces, but
+    GARCHPart is required by the schema, so it carries plausible values."""
+    body = (
+        f'    <GARCH>\n'
+        f'      <ARMAPart p="{len(ar)}" q="{len(ma)}" constant="{format_number(constant)}">\n'
+        f"        <AR>\n{_array(ar, '          ')}\n        </AR>\n"
+        f"        <MA>\n"
+        f"          <MACoefficients>\n{_array(ma, '            ')}\n          </MACoefficients>\n"
+        f"          <Residuals>\n{_array(residuals, '            ')}\n          </Residuals>\n"
+        f"        </MA>\n"
+        f"      </ARMAPart>\n"
+        f'      <GARCHPart gp="1" gq="1" constant="0.2">\n'
+        f"        <ResidualSquareCoefficients>\n"
+        f"          <MACoefficients>\n{_array([0.3], '            ')}\n          </MACoefficients>\n"
+        f"          <Residuals>\n{_array([1.0], '            ')}\n          </Residuals>\n"
+        f"        </ResidualSquareCoefficients>\n"
+        f"        <VarianceCoefficients>\n"
+        f"          <MACoefficients>\n{_array([0.5], '            ')}\n          </MACoefficients>\n"
+        f"          <PastVariances>\n{_array([2.0], '            ')}\n          </PastVariances>\n"
+        f"        </VarianceCoefficients>\n"
+        f"      </GARCHPart>\n"
+        f"    </GARCH>\n"
+    )
+    note = ("PMML 4.4 spec transcription; GARCH ARMAPart conditional mean. The spec writes the MA term "
+            "as +theta*eps here, the opposite sign to the ARIMA section")
+    return _document(name, note, body, SERIES).replace('bestFit="ARIMA"', 'bestFit="GARCH"')
+
+
 def _matrix(element: str, rows: list[list[float]]) -> str:
     arrays = "\n".join(_array(row, "          ") for row in rows)
     return (
@@ -252,7 +281,21 @@ def build() -> list[Fixture]:
         )
     )
 
-    # --- 4. StateSpaceModel, in the schema-conformant encoding ---------------
+    # --- 4. GARCH conditional mean ------------------------------------------
+    # The only GARCH fixture in the repository was an AR(1) in disguise: q=0,
+    # so its expected values were identical to ARIMA_AR1's and the ARMAPart's
+    # MA handling was never exercised. This uses q=2 to pin the sign, which the
+    # spec deliberately writes the opposite way round from ARIMA.
+    garch_kw = dict(ar=[0.5, -0.2], ma=[0.3, 0.15], residuals=[1.5, -2.0], constant=1.25)
+    fixtures.append(
+        forecast_fixture(
+            "fix_garch_mean_ma2",
+            garch_document("fix_garch_mean_ma2", **garch_kw),
+            oracle_spec.garch_mean_forecast(SERIES, horizon, **garch_kw),
+        )
+    )
+
+    # --- 5. StateSpaceModel, in the schema-conformant encoding ---------------
     # The three pre-existing SSM_* fixtures are regenerated here rather than
     # left alone: they encoded the matrices in a shape PMML does not define
     # (rows/cols attributes and flat text on TransitionMatrix), so they had to

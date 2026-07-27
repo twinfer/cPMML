@@ -47,7 +47,8 @@ developers and CI.
 | Generator | Oracle | Covers |
 |---|---|---|
 | `gen_gp.py` | scikit-learn `GaussianProcessRegressor` | `GaussianProcessModel`, all four kernels |
-| `gen_timeseries.py` | statsmodels `SARIMAX`, plus spec transcription | `TimeSeriesModel`: ARIMA and `StateSpaceModel` |
+| `gen_timeseries.py` | statsmodels `SARIMAX`, plus spec transcription | `TimeSeriesModel`: ARIMA, `StateSpaceModel`, GARCH conditional mean |
+| `gen_ets.py` | statsmodels Holt-Winters | `TimeSeriesModel`: `ExponentialSmoothing` |
 
 JPMML remains the oracle for everything it supports, via
 `test/generate_fixtures_jpmml.py` and `tools/cross-validate.sh`. It supports
@@ -91,6 +92,22 @@ series runs in the thousands, so an error of ±1.6 in the MA term sits inside
 the harness's 1e-3 relative tolerance. `fix_arima_ma2` uses small magnitudes
 for that reason. Prefer small-magnitude series when the point is to pin a
 formula rather than to reproduce a document.
+
+`gen_ets.py` is the clearest case for a third-party oracle in the whole
+repository: the spec declines to write the ETS forecast equations at all,
+deferring to Gardner (2005), so there is nothing to transcribe and statsmodels'
+Holt-Winters implementation of that same taxonomy is genuine evidence. PMML's
+*final* smoothed states are injected by zeroing every smoothing weight, which
+collapses the state update into the forecast recursion — legitimate because the
+spec says the weights are "not needed for scoring". `fix_ets_weights` asserts
+exactly that. `trend="polynomial_exponential"` (Brown's method) is uncovered:
+statsmodels does not implement it either, and cPMML now rejects it at load.
+
+GARCH is covered for the **conditional mean only**. The variance recursion is
+not implemented in cPMML, and forecast mode has no channel for it — see m-S7.
+The mean fixture exists mainly to pin the MA sign, which the GARCH section of
+the spec deliberately writes the opposite way round from the ARIMA section
+(`+θ·ε` rather than `(1 − θB)`). The two forecast paths must not be unified.
 
 PsiVector is parsed and its variance formula is transcribed in
 `oracle_spec.psi_variance`, but no fixture asserts it: forecast mode compares

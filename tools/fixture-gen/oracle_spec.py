@@ -169,6 +169,49 @@ def arima_cls_forecast(
     return np.asarray(out, dtype=float)
 
 
+def garch_mean_forecast(
+    series: list[float],
+    horizon: int,
+    ar: list[float] | None = None,
+    ma: list[float] | None = None,
+    residuals: list[float] | None = None,
+    constant: float = 0.0,
+) -> np.ndarray:
+    """Conditional mean of a PMML GARCH model (the ARMAPart).
+
+    The GARCH section writes the mean equation out in full, and with the
+    OPPOSITE MA sign to the ARIMA section:
+
+        Y_t = mu + sum_{i=1..p} phi_i Y_{t-i} + sum_{j=1..q} theta_j eps_{t-j} + eps_t
+
+    ARIMA writes its MA polynomial as (1 - theta B), so its residual terms are
+    subtracted; GARCH writes "+ sum theta_j eps_{t-j}", so they are added. That
+    divergence is in the specification itself, not a transcription slip, and it
+    is why the two forecast paths in cPMML must not be unified.
+
+    Only the conditional mean is computed. PMML's variance recursion
+    (h_t = alpha_0 + sum alpha_i eps^2_{t-i} + sum beta_j h_{t-j}) has nowhere
+    to go: cPMML does not compute it and forecast mode compares point
+    forecasts only.
+    """
+    phi = list(ar or [])
+    theta = list(ma or [])
+    history = list(reversed([float(v) for v in series]))  # most recent first
+    errors = list(residuals or [])
+
+    out = []
+    for _ in range(horizon):
+        value = constant
+        value += sum(phi[i] * history[i] for i in range(len(phi)) if i < len(history))
+        value += sum(theta[j] * errors[j] for j in range(len(theta)) if j < len(errors))
+
+        out.append(value)
+        history.insert(0, value)
+        errors.insert(0, 0.0)
+
+    return np.asarray(out, dtype=float)
+
+
 def psi_variance(sigma2: float, psi: list[float], horizon: int) -> np.ndarray:
     """sigma^2_{t+h} = sigma^2 (1 + psi_1^2 + ... + psi_{h-1}^2), h = 1..horizon.
 
