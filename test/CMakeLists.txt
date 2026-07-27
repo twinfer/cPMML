@@ -11,6 +11,16 @@ target_include_directories(pmml_tester.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_p
 target_link_libraries(pmml_tester.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
 add_dependencies(unit_tests pmml_tester.exe)
 
+# Guards the fixture suite cannot express: default-constructed API objects,
+# empty containers, and documents that are malformed rather than merely wrong.
+add_executable(api_guards.exe api_guards.cc)
+target_include_directories(api_guards.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(api_guards.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(api_guards.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(api_guards.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests api_guards.exe)
+add_test(api_guards api_guards.exe)
+
 # Auto-discover fixtures: every test/data/model/<name>.zip that has a matching
 # test/data/dataset/<name>.csv is registered as a test automatically.
 # CONFIGURE_DEPENDS re-triggers cmake when the glob result changes, so new

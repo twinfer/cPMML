@@ -53,15 +53,12 @@ class InternalModel {
 
   InternalModel() = default;
 
-  InternalModel(const XmlNode& node, const DataDictionary& data_dictionary, const std::shared_ptr<Indexer>& indexer)
-      : indexer(indexer),
-        mining_function(node.get_attribute("functionName")),
-        mining_schema(MiningSchema(node.get_child("MiningSchema"), data_dictionary)),
-        target_field(get_target(mining_function, mining_schema, indexer)),
-        has_local_transformations(false),
-        target(get_target(node, mining_schema, transformation_dictionary, mining_function)),
-        output(get_output(node, indexer, target_field.name)),
-        is_scorable(check_scorable(node)) {}
+  // There was a second constructor here taking no TransformationDictionary. It
+  // left base_sample empty and derivedfields_dag unbuilt, so any model built
+  // through it would have indexed out of bounds on the first score. Nothing
+  // reached it — only TreeModel's and RegressionModel's own uncalled overloads
+  // did, and those are gone too. Deleted rather than repaired: a second way to
+  // half-construct a model is not worth keeping for a caller that never came.
 
   InternalModel(const XmlNode& node, const DataDictionary& data_dictionary,
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)

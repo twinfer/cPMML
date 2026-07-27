@@ -60,7 +60,12 @@ class Value {
 
   class ValueHash {
    public:
-    size_t operator()(const Value& obj) const { return static_cast<size_t>(obj.value); }
+    // Equality compares `value`, so the hash has to be derived from it and from
+    // nothing else. Casting the double to size_t is undefined whenever it is
+    // negative or out of range, and it collapses every value in [0,1) onto the
+    // same bucket besides. std::hash<double> is defined over the whole range and
+    // agrees with operator== on the one case that matters here, -0.0 == 0.0.
+    size_t operator()(const Value& obj) const { return std::hash<double>{}(obj.value); }
   };
 
   Value() = default;

@@ -31,36 +31,52 @@ class DagBuilder {
                                         const TransformationDictionary& transformation_dictionary) {
     std::unordered_set<std::string> visited;
     std::unordered_set<std::string> removed;
+    std::unordered_set<std::string> in_progress;
     std::vector<std::string> dag;
 
     for (const auto& derived_field : transformation_dictionary.derivedfields)
-      buildR(derived_field, dag, visited, removed, mining_schema, transformation_dictionary);
+      buildR(derived_field, dag, visited, removed, in_progress, mining_schema, transformation_dictionary);
 
     return dag;
   }
 
  private:
+  // `visited` is only set once a field is fully resolved, so it cannot catch a
+  // cycle on the way down: a DerivedField that reaches itself through its own
+  // inputs recurses until the stack runs out, at load time, on input the parser
+  // otherwise accepts. `in_progress` marks the current path so the second
+  // arrival is a diagnosable error instead. The DAG this class is named for is
+  // an assumption about the document, and nothing was checking it.
   static void buildR(const DerivedField& derived_field, std::vector<std::string>& dag,
                      std::unordered_set<std::string>& visited, std::unordered_set<std::string>& removed,
-                     const MiningSchema& minining_schema, const TransformationDictionary& transformation_dictionary) {
+                     std::unordered_set<std::string>& in_progress, const MiningSchema& minining_schema,
+                     const TransformationDictionary& transformation_dictionary) {
     if (visited.find(derived_field.name) != visited.cend()) return;
+    if (!in_progress.insert(derived_field.name).second)
+      throw cpmml::ParsingException("DerivedField \"" + derived_field.name +
+                                    "\" depends on itself; TransformationDictionary must be acyclic");
+
     for (const auto& input : derived_field.expression->inputs) {
       if (removed.find(input) != removed.cend()) {
         removed.insert(derived_field.name);
         visited.insert(derived_field.name);
+        in_progress.erase(derived_field.name);
         return;
       }
 
       if (transformation_dictionary.contains(input)) {
-        buildR(transformation_dictionary[input], dag, visited, removed, minining_schema, transformation_dictionary);
+        buildR(transformation_dictionary[input], dag, visited, removed, in_progress, minining_schema,
+               transformation_dictionary);
       } else if (!minining_schema.contains(input)) {
         removed.insert(derived_field.name);
         visited.insert(derived_field.name);
+        in_progress.erase(derived_field.name);
         return;
       }
     }
 
     visited.insert(derived_field.name);
+    in_progress.erase(derived_field.name);
     dag.push_back(derived_field.name);
 
     return;

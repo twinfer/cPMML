@@ -44,13 +44,6 @@ class TreeModel : public InternalModel {
 
   TreeModel() = default;
 
-  TreeModel(const XmlNode& node, const DataDictionary& data_dictionary, const PredicateBuilder& predicate_builder,
-            const std::shared_ptr<Indexer>& indexer)
-      : InternalModel(node, data_dictionary, indexer),
-        missing_value_strategy(to_missing_value_strategy(node.get_attribute("missingValueStrategy", "none"))),
-        no_true_child_strategy(to_no_true_child_strategy(node.get_attribute("noTrueChildStrategy", "returnNullPrediction"))),
-        root_node(Node(node.get_child("Node"), true, predicate_builder, target_field.datatype)) {};
-
   TreeModel(const XmlNode& node, const DataDictionary& data_dictionary,
             const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),

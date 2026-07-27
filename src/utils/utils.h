@@ -114,49 +114,42 @@ std::string to_string(const T& value) {
   return buffer.str();
 }
 
-template <class T>
-std::string mkstring(const std::vector<T>& values, const std::string& separator = ",") {
+/**
+ * Join [first, last) into "[a,b,c]", writing each element through `format`.
+ *
+ * The separator is decided by looking *back* at whether anything has been
+ * written, not forward with a lookahead iterator. Every mkstring overload used
+ * to open with `auto jt = values.cbegin(); jt++;`, which is undefined on an
+ * empty container — there is no position past cbegin() to advance to — and the
+ * empty case is reachable from every one of them.
+ */
+template <class It, class Format>
+std::string join_bracketed(It first, It last, const std::string& separator, Format format) {
   std::stringstream buffer;
 
   buffer << "[";
-  auto it = values.cbegin();
-  auto jt = it;
-  jt++;
-  for (; it != values.cend(); it++, jt++) buffer << *it << (jt == values.cend() ? "" : separator);
-
+  for (It it = first; it != last; ++it) {
+    if (it != first) buffer << separator;
+    buffer << format(*it);
+  }
   buffer << "]";
 
   return buffer.str();
+}
+
+template <class T>
+std::string mkstring(const std::vector<T>& values, const std::string& separator = ",") {
+  return join_bracketed(values.cbegin(), values.cend(), separator, [](const T& v) -> const T& { return v; });
 }
 
 template <class T>
 std::string mkstring(const std::set<T>& values, const std::string& separator = ",") {
-  std::stringstream buffer;
-
-  buffer << "[";
-  auto it = values.cbegin();
-  auto jt = it;
-  jt++;
-  for (; it != values.cend(); it++, jt++) buffer << *it << (jt == values.cend() ? "" : separator);
-
-  buffer << "]";
-
-  return buffer.str();
+  return join_bracketed(values.cbegin(), values.cend(), separator, [](const T& v) -> const T& { return v; });
 }
 
 template <class T, class H>
 std::string mkstring(const std::unordered_set<T, H>& values, const std::string& separator = ",") {
-  std::stringstream buffer;
-
-  buffer << "[";
-  auto it = values.cbegin();
-  auto jt = it;
-  jt++;
-  for (; it != values.cend(); it++, jt++) buffer << *it << (jt == values.cend() ? "" : separator);
-
-  buffer << "]";
-
-  return buffer.str();
+  return join_bracketed(values.cbegin(), values.cend(), separator, [](const T& v) -> const T& { return v; });
 }
 
 template <class K, class V, class H>
@@ -174,21 +167,10 @@ std::string to_string(const std::unordered_map<K, V, H>& values, const std::stri
   return buffer.str();
 }
 
-template <class T, class U>
-std::string mkstring(const std::vector<std::pair<T, U>>& values, const std::string& separator = ",") {
-  std::stringstream buffer;
-
-  buffer << "[";
-  auto it = values.cbegin();
-  auto jt = it;
-  jt++;
-  for (; it != values.cend(); it++, jt++) buffer << to_string<T, U>(*it) << (jt == values.cend() ? "" : separator);
-
-  buffer << "]";
-
-  return buffer.str();
-}
-
+// Declared before the mkstring overload that calls it. The call names a
+// std::pair, so ADL only reaches namespace std and the name has to be visible
+// at the point of definition; it went unnoticed because that overload had no
+// callers and so was never instantiated.
 template <class T, class V>
 std::string to_string(const std::pair<T, V>& value) {
   std::stringstream buffer;
@@ -198,6 +180,12 @@ std::string to_string(const std::pair<T, V>& value) {
   buffer << "}";
 
   return buffer.str();
+}
+
+template <class T, class U>
+std::string mkstring(const std::vector<std::pair<T, U>>& values, const std::string& separator = ",") {
+  return join_bracketed(values.cbegin(), values.cend(), separator,
+                        [](const std::pair<T, U>& v) { return to_string<T, U>(v); });
 }
 
 template <class K, class V>
