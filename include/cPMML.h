@@ -128,6 +128,31 @@ class ParsingException : public Exception {
    */
   explicit ParsingException(const std::string& message);
 };
+
+/**
+ * @class EvaluationException
+ * @brief Reports errors that arise while scoring a record, as opposed to while
+ * reading the PMML document.
+ *
+ * The distinction matters to a caller processing a batch: a ParsingException
+ * means the model is unusable and every subsequent record will fail the same
+ * way, while an EvaluationException is about this call -- a missing required
+ * argument, a model the document marks isScorable="false" -- and the next
+ * record may well score.
+ *
+ * These conditions used to be reported as ParsingException, which reads in a
+ * log as though the PMML failed to parse.
+ *
+ * @see Model
+ */
+class EvaluationException : public Exception {
+ public:
+  /**
+   * Constructs a new EvaluationException object.
+   * @param message explanatory string providing more details about the error.
+   */
+  explicit EvaluationException(const std::string& message);
+};
 }  // namespace cpmml
 
 class InternalScore;
@@ -265,6 +290,7 @@ class Model {
    * @throws cpmml::InvalidValueException
    * @throws cpmml::MissingValueException
    * @throws cpmml::MathException
+   * @throws cpmml::EvaluationException
    * @throws cpmml::ParsingException
    */
   Result evaluate(const Input& arguments = {}) const;

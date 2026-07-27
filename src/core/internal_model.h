@@ -159,7 +159,8 @@ class InternalModel {
   };
 
   inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const {
-    if (!is_scorable) throw cpmml::ParsingException("The model is defined as non-scorable (isScorable=false)");
+    if (!is_scorable)
+      throw cpmml::EvaluationException("The model is defined as non-scorable (isScorable=false)");
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);

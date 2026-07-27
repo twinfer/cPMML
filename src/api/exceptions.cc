@@ -18,4 +18,6 @@ InvalidValueException::InvalidValueException(const std::string& message) : Excep
 MathException::MathException(const std::string& message) : Exception(message) {}
 
 ParsingException::ParsingException(const std::string& message) : Exception(message) {}
+
+EvaluationException::EvaluationException(const std::string& message) : Exception(message) {}
 }  // namespace cpmml

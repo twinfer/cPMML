@@ -40,12 +40,12 @@ class TimeSeriesEvaluator : public InternalEvaluator {
         try {
           horizon = std::stoi(std::get<std::string>(it->second));
         } catch (const std::exception&) {
-          throw cpmml::ParsingException("TimeSeriesModel: 'horizon' is not a valid integer");
+          throw cpmml::EvaluationException("TimeSeriesModel: 'horizon' is not a valid integer");
         }
       }
     }
     if (horizon <= 0)
-      throw cpmml::ParsingException("TimeSeriesModel requires 'horizon' > 0 in evaluate() arguments");
+      throw cpmml::EvaluationException("TimeSeriesModel requires 'horizon' > 0 in evaluate() arguments");
 
     // Check for "_variance" flag
     bool with_variance = false;

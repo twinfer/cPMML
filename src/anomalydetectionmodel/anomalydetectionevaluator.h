@@ -90,7 +90,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
         return std::make_unique<InternalScore>(to_double(inner->predict(flat)));
     }
 
-    throw cpmml::ParsingException("AnomalyDetectionModel: unreachable algorithmType");
+    throw cpmml::EvaluationException("AnomalyDetectionModel: unreachable algorithmType");
   }
 
   inline bool validate(const Input& arguments) const override {

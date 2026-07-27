@@ -389,6 +389,58 @@ static void unrecognised_enum_tokens_are_rejected() {
   CHECK(regression_loads("", R"(usageType="predicted")", ""));  // pre-4.1 spelling for target
 }
 
+// A failure while scoring a record is not a failure to read the document, and a
+// caller processing a batch needs to tell them apart: a ParsingException means
+// every subsequent record will fail the same way, an EvaluationException is
+// about this call. Both used to be ParsingException.
+static const char* NONSCORABLE_PMML = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4">
+  <DataDictionary numberOfFields="2">
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression" isScorable="false">
+    <MiningSchema>
+      <MiningField name="x" usageType="active"/>
+      <MiningField name="y" usageType="target"/>
+    </MiningSchema>
+    <RegressionTable intercept="0.0">
+      <NumericPredictor name="x" coefficient="1.0"/>
+    </RegressionTable>
+  </RegressionModel>
+</PMML>
+)";
+
+static void scoring_failures_are_evaluation_errors() {
+  const std::string path = "nonscorable.pmml";
+  {
+    FILE* out = std::fopen(path.c_str(), "w");
+    if (out == nullptr) {
+      std::cerr << "FAIL could not write " << path << "\n";
+      ++failures;
+      return;
+    }
+    std::fputs(NONSCORABLE_PMML, out);
+    std::fclose(out);
+  }
+
+  bool loaded = false;
+  bool evaluation_error = false;
+  try {
+    cpmml::Model model(path, false);
+    loaded = true;  // isScorable="false" is a well-formed document
+    model.evaluate(cpmml::Input{{"x", "1.0"}});
+  } catch (const cpmml::EvaluationException&) {
+    evaluation_error = true;
+  } catch (const cpmml::Exception&) {
+  }
+
+  CHECK(loaded);
+  CHECK(evaluation_error);
+
+  std::remove(path.c_str());
+}
+
 int main() {
   default_result_is_answerable();
   default_model_throws();
@@ -398,6 +450,7 @@ int main() {
   mean_cluster_distances_is_validated();
   csvreader_reads_past_a_long_row();
   unrecognised_enum_tokens_are_rejected();
+  scoring_failures_are_evaluation_errors();
 
   if (failures > 0) {
     std::cerr << failures << " assertion(s) failed\n";

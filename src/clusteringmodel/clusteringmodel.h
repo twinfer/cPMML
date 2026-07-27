@@ -72,6 +72,11 @@ class ClusteringModel : public InternalModel {
     parse_comparison_measure(node);
     parse_clustering_fields(node, indexer);
     parse_clusters(node);
+
+    // A ClusteringModel with no Cluster has nothing to assign a case to. This
+    // was detected on the first score instead, so a document that could never
+    // produce an answer loaded successfully and failed one record at a time.
+    if (clusters.empty()) throw cpmml::ParsingException("ClusteringModel: no Cluster elements");
   }
 
   // --- Scoring ---
@@ -177,9 +182,8 @@ class ClusteringModel : public InternalModel {
         [&](size_t i) { return fields[i].similarity_scale; });
   }
 
+  // clusters is non-empty: the constructor refuses a model without one.
   Nearest nearest_of(const Sample& sample) const {
-    if (clusters.empty()) throw cpmml::ParsingException("ClusteringModel: no Cluster elements");
-
     const Eigen::VectorXd q = build_query(sample);
     // compute_distance is uniformly a dissimilarity (similarity measures are
     // flipped to 1−s), so the closest cluster is always the minimum.
