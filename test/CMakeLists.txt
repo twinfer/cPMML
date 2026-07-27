@@ -21,6 +21,24 @@ target_link_libraries(api_guards.exe ${PROJECT_NAME} pugixml::pugixml miniz Eige
 add_dependencies(unit_tests api_guards.exe)
 add_test(api_guards api_guards.exe)
 
+# Concurrent scoring: a data race does not fail a single-threaded fixture, so
+# nothing else in the suite would notice if R3 regressed. Two models, one with
+# categorical string inputs (the string-interning path) and one ensemble (the
+# OMP segment loop).
+add_executable(concurrency.exe concurrency.cc)
+target_include_directories(concurrency.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(concurrency.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(concurrency.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(concurrency.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+find_package(Threads REQUIRED)
+target_link_libraries(concurrency.exe Threads::Threads)
+add_dependencies(unit_tests concurrency.exe)
+
+add_test(concurrency_tree concurrency.exe
+    "data/model/AuditTree.zip" "data/dataset/AuditTree.csv" "Employment")
+add_test(concurrency_forest concurrency.exe
+    "data/model/AuditRandomForest.zip" "data/dataset/AuditRandomForest.csv" "Occupation")
+
 # Auto-discover fixtures: every test/data/model/<name>.zip that has a matching
 # test/data/dataset/<name>.csv is registered as a test automatically.
 # CONFIGURE_DEPENDS re-triggers cmake when the glob result changes, so new

@@ -70,6 +70,17 @@ set(DEBUG_FLAGS "-Wall -g -Og")
 set(LINK_FLAGS_RELEASE "-flto")
 set(VERBOSE OFF)
 
+# SANITIZE=thread|address|undefined|address,undefined. Off by default; the
+# concurrency test in particular only proves anything under -fsanitize=thread,
+# because a data race passes a plain build almost every time. -Wextra is on
+# here rather than in the default flags so that turning it on does not turn
+# every warning in the dependencies into noise.
+set(SANITIZE "" CACHE STRING "Comma-separated sanitizers to build with (thread, address, undefined)")
+if(SANITIZE)
+    add_compile_options(-fsanitize=${SANITIZE} -fno-omit-frame-pointer -g -Wextra)
+    add_link_options(-fsanitize=${SANITIZE})
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
