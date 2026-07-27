@@ -52,7 +52,10 @@ class CastInteger {
     }
   }
 
-  constexpr double operator()(const double value) const { return cast_function(value); }
+  // Not constexpr: no instantiation of this can be a constant expression, since
+  // it calls std::function::operator(). That makes it ill-formed, no diagnostic
+  // required -- a compiler is free to reject it and none is obliged to say why.
+  inline double operator()(const double value) const { return cast_function(value); }
 };
 
 class TargetValue {

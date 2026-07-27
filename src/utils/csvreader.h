@@ -13,8 +13,6 @@
 
 #include "utils.h"
 
-#define MAX_LINE_LENGTH 8192
-
 /**
  * @class CSVReader
  *
@@ -27,62 +25,75 @@
 class CSVReader {
  public:
   explicit CSVReader(const std::string& filename) : file(filename) {
-    this->file.getline(line, MAX_LINE_LENGTH);
-    std::stringstream line_stream(line);
-    std::string field;
-    while (getline(line_stream, field, ',')) this->header.push_back(remove_all(remove_all(field, '\r'), '"'));
+    for (const auto& field : split_row(read_line())) this->header.push_back(field);
   }
 
   std::unordered_map<std::string, std::string> read() {
     std::unordered_map<std::string, std::string> result;
-    line[0] = 0;
-    this->file.getline(line, MAX_LINE_LENGTH);
-    if (line[0] == 0) return result;
+    const std::string row = read_line();
+    if (row.empty()) return result;
 
-    std::string row(line);
-    // Remove trailing CR if present
-    if (!row.empty() && row.back() == '\r') row.pop_back();
-
-    std::vector<std::string> fields;
-    size_t pos = 0;
-    while (pos <= row.size()) {
-      std::string field;
-      if (pos < row.size() && row[pos] == '"') {
-        // Quoted field: read until closing quote
-        ++pos;
-        while (pos < row.size() && row[pos] != '"') field += row[pos++];
-        if (pos < row.size()) ++pos;  // skip closing quote
-        // skip comma after closing quote
-        if (pos < row.size() && row[pos] == ',') ++pos;
-      } else {
-        size_t comma = row.find(',', pos);
-        if (comma == std::string::npos) {
-          field = row.substr(pos);
-          pos = row.size() + 1;
-        } else {
-          field = row.substr(pos, comma - pos);
-          pos = comma + 1;
-        }
-      }
-      fields.push_back(field);
-      if (fields.size() >= header.size()) break;
-    }
-
-    for (size_t i = 0; i < header.size() && i < fields.size(); i++)
-      result[header[i]] = fields[i];
+    const std::vector<std::string> fields = split_row(row);
+    for (size_t i = 0; i < header.size() && i < fields.size(); i++) result[header[i]] = fields[i];
 
     return result;
   }
 
-  std::string read_raw() {
-    this->file.getline(line, MAX_LINE_LENGTH);
-    return line;
-  }
+  std::string read_raw() { return read_line(); }
 
  private:
+  // std::istream::getline into a fixed buffer sets failbit on an over-long
+  // line, so a single row past the buffer did not merely truncate itself -- it
+  // wedged the stream and every subsequent read() returned nothing, silently
+  // ending the fixture early. std::getline grows the string instead.
+  std::string read_line() {
+    std::string row;
+    if (!std::getline(file, row)) return std::string();
+    if (!row.empty() && row.back() == '\r') row.pop_back();
+    return row;
+  }
+
+  // RFC 4180 quoting: a field may be quoted, and inside a quoted field a
+  // literal double quote is written as two of them. The old reader treated the
+  // first inner quote as the terminator, so a value like "say ""hi""" came back
+  // as `say ` with the rest of the row shifted into the wrong columns.
+  static std::vector<std::string> split_row(const std::string& row) {
+    std::vector<std::string> fields;
+    size_t pos = 0;
+
+    while (true) {
+      std::string field;
+      if (pos < row.size() && row[pos] == '"') {
+        ++pos;
+        while (pos < row.size()) {
+          if (row[pos] == '"') {
+            if (pos + 1 < row.size() && row[pos + 1] == '"') {  // "" is one literal quote
+              field += '"';
+              pos += 2;
+              continue;
+            }
+            ++pos;  // closing quote
+            break;
+          }
+          field += row[pos++];
+        }
+      } else {
+        const size_t comma = row.find(',', pos);
+        const size_t end = (comma == std::string::npos) ? row.size() : comma;
+        field = row.substr(pos, end - pos);
+        pos = end;
+      }
+
+      fields.push_back(remove_all(field, '\r'));
+      if (pos >= row.size()) break;
+      if (row[pos] == ',') ++pos;
+    }
+
+    return fields;
+  }
+
   std::ifstream file;
   std::vector<std::string> header;
-  char line[MAX_LINE_LENGTH];
 };
 
 #endif

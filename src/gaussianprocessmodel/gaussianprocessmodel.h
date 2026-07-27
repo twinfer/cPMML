@@ -189,7 +189,7 @@ class GaussianProcessModel : public InternalModel {
   void parse_lambdas(const XmlNode& k) {
     if (k.exists_child("Lambda")) {
       XmlNode arr = k.get_child("Lambda").get_child("Array");
-      std::vector<std::string> parts = split(arr.value(), " ");
+      std::vector<std::string> parts = parse_array(arr.value());
       lambdas.resize(static_cast<Eigen::Index>(parts.size()));
       for (size_t i = 0; i < parts.size(); ++i) lambdas[static_cast<Eigen::Index>(i)] = to_double(parts[i]);
     }

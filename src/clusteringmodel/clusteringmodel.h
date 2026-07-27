@@ -146,7 +146,7 @@ class ClusteringModel : public InternalModel {
 
       // Parse Array: space-separated real values
       const XmlNode arr = cl.get_child("Array");
-      const std::vector<std::string> vals = split(arr.value(), " ");
+      const std::vector<std::string> vals = parse_array(arr.value());
       c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
       for (size_t i = 0; i < vals.size(); i++) c.centroid[static_cast<Eigen::Index>(i)] = to_double(vals[i]);
 

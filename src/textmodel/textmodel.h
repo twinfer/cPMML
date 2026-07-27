@@ -98,7 +98,7 @@ class TextEvaluator : public InternalEvaluator {
 
   void parse_vocabulary(const XmlNode& model) {
     XmlNode arr = model.get_child("TextDictionary").get_child("Array");
-    std::vector<std::string> terms = split(arr.value(), " ");
+    std::vector<std::string> terms = parse_array(arr.value());
     for (size_t i = 0; i < terms.size(); ++i) {
       vocabulary.push_back(terms[i]);
       vocab_index[terms[i]] = i;
@@ -123,7 +123,7 @@ class TextEvaluator : public InternalEvaluator {
       // Dense (kind="any"): one Array element per row
       int r = 0;
       for (const auto& row_arr : mat.get_childs("Array")) {
-        std::vector<std::string> vals = split(row_arr.value(), " ");
+        std::vector<std::string> vals = parse_array(row_arr.value());
         for (int c = 0; c < static_cast<int>(vals.size()) && c < n_cols; ++c)
           doc_matrix(r, c) = to_double(vals[static_cast<size_t>(c)]);
         ++r;
@@ -142,7 +142,7 @@ class TextEvaluator : public InternalEvaluator {
   void parse_labels(const XmlNode& model) {
     if (!model.exists_child("ClassLabels")) return;
     XmlNode arr = model.get_child("ClassLabels").get_child("Array");
-    class_labels = split(arr.value(), " ");
+    class_labels = parse_array(arr.value());
   }
 
   // TextModelSimilarity element (default: cosineSimilarity)

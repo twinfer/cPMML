@@ -1,0 +1,7 @@
+city,region_out
+"New York",east
+"Los Angeles",east
+"San Jose",west
+Reno,west
+"say ""hi""",quoted
+Paris,N/A

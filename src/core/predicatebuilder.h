@@ -61,7 +61,7 @@ class PredicateBuilder {
                          Value(node.get_attribute("value"), indexer->get_type(node.get_attribute("field"))));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
-        std::vector<std::string> values = split(node.get_child("Array").value(), " ");
+        std::vector<std::string> values = parse_array(node.get_child("Array").value());
         if (values.size() > SET_THRESHOLD)
           return Predicate(indexer->get_index(node.get_attribute("field")), node.get_attribute("booleanOperator"),
                            Value::createUnorderedValues(values, indexer->get_type(node.get_attribute("field"))));

@@ -841,7 +841,7 @@ class TimeSeriesModel {
 
   static std::vector<double> parse_array(const XmlNode& node) {
     std::vector<double> v;
-    for (const auto& p : split(node.value(), " "))
+    for (const auto& p : ::parse_array(node.value()))
       if (!p.empty()) v.push_back(to_double(p));
     return v;
   }

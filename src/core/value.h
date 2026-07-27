@@ -179,9 +179,14 @@ class Value {
     return std::numeric_limits<double>::min();
   }
 
+  // These used to strip every double quote from each member, compensating for a
+  // splitter that left the delimiters attached to the token. parse_array now
+  // consumes the delimiters and honours the spec's \" escape, so stripping here
+  // would delete quotes that are part of the value: `"say \"hi\""` is the one
+  // member `say "hi"`, and it matched nothing while this ran over it.
   inline static std::set<Value> createValues(const std::vector<std::string>& values, DataType datatype) {
     std::set<Value> result;
-    for (const auto& value : values) result.insert(Value(remove_all(value, '"'), datatype));
+    for (const auto& value : values) result.insert(Value(value, datatype));
 
     return result;
   }
@@ -189,7 +194,7 @@ class Value {
   inline static std::unordered_set<Value, ValueHash> createUnorderedValues(const std::vector<std::string>& values,
                                                                            DataType datatype) {
     std::unordered_set<Value, ValueHash> result;
-    for (const auto& value : values) result.insert(Value(remove_all(value, '"'), datatype));
+    for (const auto& value : values) result.insert(Value(value, datatype));
 
     return result;
   }

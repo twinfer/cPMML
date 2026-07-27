@@ -43,9 +43,24 @@ class TransformationDictionary {
 
   inline const DerivedField& operator[](const size_t& feature_index) const { return derivedfields[feature_index]; }
 
+  // The two views have to agree: the map is keyed by name and the vector is
+  // what operator[](size_t) and every range-for over derivedfields walk. A
+  // LocalTransformations DerivedField that shadows a global one used to
+  // overwrite the map entry but *append* to the vector, leaving the superseded
+  // definition still reachable by index and still evaluated on every score.
   inline void add_derived_field(const DerivedField& derived_field) {
+    const bool shadows = raw_derivedfields.find(derived_field.name) != raw_derivedfields.cend();
     raw_derivedfields[derived_field.name] = derived_field;
-    derivedfields.push_back(derived_field);
+
+    if (shadows) {
+      for (auto& existing : derivedfields)
+        if (existing.name == derived_field.name) {
+          existing = derived_field;
+          break;
+        }
+    } else {
+      derivedfields.push_back(derived_field);
+    }
     empty = false;
   }
 };

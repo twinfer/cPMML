@@ -215,6 +215,11 @@ std::vector<K> to_keys(const std::unordered_map<K, V>& values) {
   return result;
 }
 
+// Interior empty tokens are dropped but the remainder was pushed
+// unconditionally, so a trailing separator produced an empty last member --
+// which for a PMML Array meant a phantom category. The remainder is now held to
+// the same rule, with the empty input still yielding one empty token so callers
+// that index parts[0] keep working.
 inline std::vector<std::string> split(std::string value, const std::string& separator) {
   size_t pos = 0;
   std::string token;
@@ -226,7 +231,49 @@ inline std::vector<std::string> split(std::string value, const std::string& sepa
     value.erase(0, pos + separator.length());
   }
 
-  tokens.push_back(value);
+  if (!value.empty() || tokens.empty()) tokens.push_back(value);
+
+  return tokens;
+}
+
+/**
+ * The content of a PMML Array, per the spec's own description:
+ *
+ *   "The content of Array is a blank separated sequence of values, multiple
+ *    blanks are as good as one blank. String values may be enclosed within
+ *    double quotes ", which are not considered to be part of the value. If a
+ *    string value contains the double quote character ", then it must be
+ *    escaped by a backslash character \ (that is the same escaping mechanism
+ *    as used in C/C++)."
+ *
+ * so `ab  "a b"   "with \"quotes\" "` is the three values `ab`, `a b` and
+ * `with "quotes" `. Splitting on blanks alone tore quoted values apart at every
+ * space they contained, which is how a category named "New York" became two
+ * categories that matched nothing.
+ */
+inline std::vector<std::string> parse_array(const std::string& value) {
+  std::vector<std::string> tokens;
+  size_t pos = 0;
+
+  while (pos < value.size()) {
+    while (pos < value.size() && std::isspace(static_cast<unsigned char>(value[pos]))) pos++;
+    if (pos >= value.size()) break;
+
+    std::string token;
+    if (value[pos] == '"') {
+      pos++;  // opening quote, not part of the value
+      while (pos < value.size() && value[pos] != '"') {
+        // A backslash escapes the next character; the spec names the double
+        // quote, and C/C++ escaping makes \\ a literal backslash.
+        if (value[pos] == '\\' && pos + 1 < value.size()) pos++;
+        token += value[pos++];
+      }
+      if (pos < value.size()) pos++;  // closing quote
+    } else {
+      while (pos < value.size() && !std::isspace(static_cast<unsigned char>(value[pos]))) token += value[pos++];
+    }
+    tokens.push_back(std::move(token));
+  }
 
   return tokens;
 }
@@ -289,7 +336,11 @@ static inline std::vector<char> read_zip(const std::string& filepath) {
   void* p;
 
   memset(&zip_archive, 0, sizeof(zip_archive));
-  if (mz_zip_reader_init_file(&zip_archive, filepath.c_str(), 0) != MZ_STREAM_END)
+  // mz_zip_reader_init_file returns mz_bool, not a stream status. It compared
+  // against MZ_STREAM_END, which is 1 and so happened to agree with MZ_TRUE --
+  // the right answer for the wrong reason, and wrong the moment miniz renumbers
+  // its status enum.
+  if (!mz_zip_reader_init_file(&zip_archive, filepath.c_str(), 0))
     throw cpmml::ParsingException("unzip - err: reading archive");
   if (mz_zip_reader_get_num_files(&zip_archive) < 1) mz_reader_error(&zip_archive, "no file in archive");
   if (mz_zip_reader_is_file_a_directory(&zip_archive, 0)) mz_reader_error(&zip_archive, "directory in archive");
