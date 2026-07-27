@@ -70,6 +70,7 @@ class NearestNeighborModel : public InternalModel {
   std::vector<std::string> training_targets;
   std::vector<std::string> training_instance_ids;  // per-instance ID (instanceIdVariable)
   std::vector<std::string> classes;
+  std::vector<size_t> class_train_counts;  // aligned to classes; the spec's first tie-break
 
   // --- Constructors ---
 
@@ -98,6 +99,14 @@ class NearestNeighborModel : public InternalModel {
       std::unordered_set<std::string> seen;
       for (const auto& t : training_targets)
         if (seen.insert(t).second) classes.push_back(t);
+
+      // "the category with the largest number of cases in the training data" --
+      // the first tie-break, so the counts have to survive parsing.
+      class_train_counts.assign(classes.size(), 0);
+      for (const auto& t : training_targets) {
+        const auto it = std::find(classes.cbegin(), classes.cend(), t);
+        if (it != classes.cend()) class_train_counts[static_cast<size_t>(std::distance(classes.cbegin(), it))]++;
+      }
     } else if (!is_clustering) {
       classes.push_back(mining_schema.target.name);
     }
@@ -129,14 +138,24 @@ class NearestNeighborModel : public InternalModel {
       return std::make_unique<InternalScore>(val);
     }
 
-    const std::string winner = classify(neighbors);
-    std::vector<double> scores(classes.size(), 0.0);
-    for (const auto& [dist, idx] : neighbors) {
-      auto it = std::find(classes.begin(), classes.end(), training_targets[idx]);
-      if (it != classes.end()) scores[std::distance(classes.begin(), it)] += 1.0;
-    }
-    for (auto& s : scores) s /= static_cast<double>(k);
-    return std::make_unique<RegressionScore>(winner, 1.0, classes, scores);
+    // PMML defines no probability distribution for a NearestNeighborModel --
+    // jpmml returns an AffinityDistribution and refuses a probability request
+    // outright -- so what cPMML reports here is an extension. It is at least
+    // made an honest one: the same ballot that elects the winner, normalized by
+    // the weight actually cast. It used to be unweighted counts divided by k,
+    // which is two separate defects: under weightedMajorityVote the reported
+    // winner could be the class with the *lower* probability, and whenever
+    // fewer than k training instances existed the distribution summed to less
+    // than 1.
+    const std::vector<double> votes = vote(neighbors);
+    const double total = std::accumulate(votes.cbegin(), votes.cend(), 0.0);
+
+    std::vector<double> probabilities(classes.size(), 0.0);
+    if (total > 0.0)
+      for (size_t i = 0; i < votes.size(); i++) probabilities[i] = votes[i] / total;
+
+    const size_t best = argmax(votes);
+    return std::make_unique<RegressionScore>(classes[best], probabilities[best], classes, probabilities);
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
@@ -203,13 +222,20 @@ class NearestNeighborModel : public InternalModel {
       id_col = field_to_col.count(instance_id_variable) ? field_to_col.at(instance_id_variable) : instance_id_variable;
 
     // Target column (skip for clustering which has no target)
+    // The target column is the InstanceField declaring the mining schema's
+    // target. This used to switch to a *different* target field whenever the
+    // declared one was a string -- so a classification model with a string
+    // target and any second numeric target field silently trained on the wrong
+    // column. A model with several targets now falls back only when the
+    // declared one has no InstanceField at all, which is the case that
+    // fallback was reaching for.
     std::string target_col;
     if (!is_clustering && !mining_schema.target.empty) {
       std::string primary_target_field = mining_schema.target.name;
-      if (indexer->get_type(primary_target_field).value == DataType::DataTypeValue::STRING) {
+      if (!field_to_col.count(primary_target_field)) {
         for (const auto& mf : mining_schema.miningfields) {
           if (mf.field_usage_type == FieldUsageType::FieldUsageTypeValue::TARGET &&
-              indexer->get_type(mf.name).value != DataType::DataTypeValue::STRING) {
+              field_to_col.count(mf.name)) {
             primary_target_field = mf.name;
             break;
           }
@@ -319,17 +345,52 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Classification voting ---
 
-  std::string classify(const std::vector<std::pair<double, int>>& neighbors) const {
-    std::unordered_map<std::string, double> votes;
+  // One ballot, aligned to `classes`, used both to pick the winner and to
+  // report the distribution -- so the two cannot disagree.
+  std::vector<double> vote(const std::vector<std::pair<double, int>>& neighbors) const {
+    if (neighbors.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for classification");
+
     const bool weighted = (categorical_method == "weightedmajorityvote");
+    std::vector<double> votes(classes.size(), 0.0);
     for (const auto& [dist, idx] : neighbors) {
       const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
-      votes[training_targets[idx]] += w;
+      const auto it = std::find(classes.cbegin(), classes.cend(), training_targets[idx]);
+      if (it != classes.cend()) votes[static_cast<size_t>(std::distance(classes.cbegin(), it))] += w;
     }
-    if (votes.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for classification");
-    return std::max_element(votes.begin(), votes.end(),
-                            [](const auto& a, const auto& b) { return a.second < b.second; })
-        ->first;
+
+    return votes;
+  }
+
+  /**
+   * The spec's tie-break, which cPMML did not implement at all:
+   *
+   *   "In case of a tie, the category with the largest number of cases in the
+   *    training data is the winner. If multiple categories are tied on the
+   *    largest number of cases in the training data, then the category with the
+   *    smallest data value (in lexical order) among the tied categories is the
+   *    winner."
+   *
+   * Ties were previously resolved by max_element over an unordered_map, i.e. by
+   * hash bucket layout -- not merely non-conformant but not even stable across
+   * runs of the same binary.
+   */
+  size_t argmax(const std::vector<double>& votes) const {
+    size_t best = 0;
+    for (size_t i = 1; i < votes.size(); i++) {
+      if (votes[i] > votes[best]) {
+        best = i;
+      } else if (votes[i] == votes[best]) {
+        if (class_train_counts[i] > class_train_counts[best] ||
+            (class_train_counts[i] == class_train_counts[best] && classes[i] < classes[best]))
+          best = i;
+      }
+    }
+
+    return best;
+  }
+
+  std::string classify(const std::vector<std::pair<double, int>>& neighbors) const {
+    return classes[argmax(vote(neighbors))];
   }
 
   // --- Regression aggregation ---

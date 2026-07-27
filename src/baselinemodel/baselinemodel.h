@@ -26,33 +26,31 @@
  * Computes a statistical test statistic comparing an observed field value to a
  * reference baseline distribution.
  *
- * Supported test statistics:
- * - zScore / zValue : (x - mean) / sqrt(variance)
- *     GaussianDistribution baseline: mean and variance attributes
- *     PoissonDistribution baseline: mean attribute (variance = mean)
- *     UniformDistribution baseline: lower, upper; mean=(L+U)/2, var=(U-L)²/12
- * - chiSquare       : (x - expected)² / expected  (CountTable / NormalizedCountTable)
- * - logProb         : log P(x) using DiscreteDistribution / CountTable baseline
+ * Only zValue is implemented -- see parse_test_statistic for why the other four
+ * cannot be, one record at a time:
+ *
+ *   "the value of defects is converted to a standard score or z-value using the
+ *    formula score = (defects - mean) / sqrt (variance)"
+ *
+ * so the baseline has to supply a mean and a variance:
+ *   GaussianDistribution : mean and variance attributes
+ *   PoissonDistribution  : mean attribute (variance = mean)
+ *   UniformDistribution  : lower, upper; mean=(L+U)/2, var=(U-L)^2/12
+ *
+ * A CountTable, NormalizedCountTable, DiscreteDistribution or AnyDistribution
+ * baseline supplies neither, so it is rejected too.
  */
 class BaselineModel : public InternalModel {
  public:
-  enum class TestStat { ZSCORE, CHI_SQUARE, LOG_PROB };
-
   struct BaselineDist {
-    // Gaussian
     double mean = 0.0;
     double variance = 1.0;
-    // Discrete: category encoded value → count
-    std::unordered_map<double, double> counts;
-    double total = 0.0;
-    bool is_gaussian = true;
   };
 
   // --- Members ---
 
   std::string test_field;
   size_t test_field_idx = 0;
-  TestStat stat = TestStat::ZSCORE;
   BaselineDist baseline;
 
   // --- Constructors ---
@@ -66,13 +64,7 @@ class BaselineModel : public InternalModel {
     test_field = td.get_attribute("field");
     test_field_idx = indexer->get_index(test_field);
 
-    std::string stat_str = to_lower(td.get_attribute("testStatistic"));
-    if (stat_str == "zscore" || stat_str == "zvalue")
-      stat = TestStat::ZSCORE;
-    else if (stat_str == "chisquare")
-      stat = TestStat::CHI_SQUARE;
-    else
-      stat = TestStat::LOG_PROB;
+    parse_test_statistic(td.get_attribute("testStatistic"));
 
     XmlNode base_node = td.get_child("Baseline");
 
@@ -80,35 +72,28 @@ class BaselineModel : public InternalModel {
       XmlNode g = base_node.get_child("GaussianDistribution");
       baseline.mean = g.get_double_attribute("mean");
       baseline.variance = g.get_double_attribute("variance");
-      baseline.is_gaussian = true;
     } else if (base_node.exists_child("PoissonDistribution")) {
       XmlNode p = base_node.get_child("PoissonDistribution");
       baseline.mean = p.get_double_attribute("mean");
       baseline.variance = baseline.mean;  // Poisson: variance = mean
-      baseline.is_gaussian = true;
     } else if (base_node.exists_child("UniformDistribution")) {
       XmlNode u = base_node.get_child("UniformDistribution");
       double lower = u.get_double_attribute("lower");
       double upper = u.get_double_attribute("upper");
       baseline.mean = (lower + upper) / 2.0;
       baseline.variance = (upper - lower) * (upper - lower) / 12.0;
-      baseline.is_gaussian = true;
     } else {
-      // Discrete distribution: CountTable, NormalizedCountTable, or DiscreteDistribution
-      baseline.is_gaussian = false;
-      std::string table_tag = "DiscreteDistribution";
-      if (base_node.exists_child("CountTable"))
-        table_tag = "CountTable";
-      else if (base_node.exists_child("NormalizedCountTable"))
-        table_tag = "NormalizedCountTable";
-      XmlNode table = base_node.get_child(table_tag);
-      for (const auto& fv : table.get_childs("FieldValue")) {
-        double key = Value(fv.get_attribute("value")).value;
-        double count = to_double(fv.get_attribute("count"));
-        baseline.counts[key] = count;
-        baseline.total += count;
-      }
+      throw cpmml::ParsingException(
+          "BaselineModel: testStatistic=\"zValue\" needs a baseline supplying a mean and a variance "
+          "(GaussianDistribution, PoissonDistribution or UniformDistribution)");
     }
+
+    // sqrt(0) is 0 and the division that follows is 1/0. A degenerate baseline
+    // yields no z-value at all, so it is refused at load rather than turned
+    // into an infinity halfway through a batch.
+    if (!(baseline.variance > 0.0))
+      throw cpmml::ParsingException("BaselineModel: baseline variance must be positive, got " +
+                                    double_to_string(baseline.variance));
   }
 
   // --- Scoring ---
@@ -120,33 +105,56 @@ class BaselineModel : public InternalModel {
   inline std::string predict_raw(const Sample& sample) const override { return double_to_string(compute(sample)); }
 
  private:
+  /**
+   * PMML 4.4 enumerates testStatistic as zValue, chiSquareIndependence,
+   * chiSquareDistribution, CUSUM and scalarProduct. cPMML recognised neither
+   * chi-square token, and anything it did not recognise -- including CUSUM and
+   * scalarProduct -- fell through to a logProb branch that the spec does not
+   * define at all.
+   *
+   * The four statistics beyond zValue are rejected rather than approximated,
+   * because each needs an *aggregated observed distribution* that single-record
+   * scoring cannot form:
+   *
+   *   chiSquareDistribution  "a reference to a field describing the sampled
+   *                           distribution and a discrete distribution
+   *                           describing the expectations is required. A field
+   *                           reference to a sampled distribution can be
+   *                           provided using the Aggregate element."
+   *   chiSquareIndependence  needs a contingency table built from field
+   *                           references describing its rows.
+   *   scalarProduct          "sum over i of Ci x ci/N" over an observed
+   *                           distribution, incremented per record via
+   *                           weightField.
+   *   CUSUM                  a running sum across records, and requires an
+   *                           Alternate element.
+   *
+   * All four are defined over a window of records ("windowSize... how much
+   * history the model uses"), which cPMML has no notion of. What was computed
+   * for "chiSquare" was (x - count(x))^2 / count(x): a category's *encoded
+   * value* differenced against that category's *count*, which is not a
+   * quantity. A load failure naming the reason beats a number that means
+   * nothing.
+   */
+  static void parse_test_statistic(const std::string& raw) {
+    const std::string s = to_lower(raw);
+    // "zscore" is not a spec token; kept as an alias because it is what cPMML
+    // has always accepted and what its own fixtures were written with.
+    if (s == "zvalue" || s == "zscore") return;
+
+    if (s == "chisquareindependence" || s == "chisquaredistribution" || s == "chisquare" || s == "cusum" ||
+        s == "scalarproduct")
+      throw cpmml::ParsingException(
+          "BaselineModel: testStatistic=\"" + raw +
+          "\" is not supported: it is defined over an aggregated distribution across a window of records, "
+          "which single-record scoring cannot form");
+
+    throw cpmml::ParsingException("BaselineModel: unsupported testStatistic: " + raw);
+  }
+
   double compute(const Sample& sample) const {
     const double x = sample[test_field_idx].value.value;
-    switch (stat) {
-      case TestStat::ZSCORE:
-        return (x - baseline.mean) / std::sqrt(baseline.variance);
-      case TestStat::CHI_SQUARE: {
-        // (x - expected)^2 / expected; for continuous: (x - mean)^2 / variance
-        if (baseline.is_gaussian) {
-          return (x - baseline.mean) * (x - baseline.mean) / baseline.variance;
-        } else {
-          // For count data: sum of (observed - expected)^2 / expected across cells
-          // Single-cell form: use the count for x as observed vs proportional expected
-          auto it = baseline.counts.find(x);
-          if (it == baseline.counts.end() || baseline.total <= 0) return 0.0;
-          double expected = it->second;
-          double diff = x - expected;
-          return (expected > 0) ? diff * diff / expected : 0.0;
-        }
-      }
-      case TestStat::LOG_PROB: {
-        auto it = baseline.counts.find(x);
-        double p = (it != baseline.counts.end() && baseline.total > 0) ? it->second / baseline.total
-                                                                       : 1.0 / (baseline.total + 1.0);
-        return std::log(p);
-      }
-    }
-    return 0.0;
+    return (x - baseline.mean) / std::sqrt(baseline.variance);
   }
 };
 

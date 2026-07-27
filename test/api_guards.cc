@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "cPMML.h"
+#include "utils/csvreader.h"
 #include "utils/utils.h"
 
 static int failures = 0;
@@ -133,11 +134,118 @@ static void cyclic_derived_fields_are_rejected() {
   std::remove(path.c_str());
 }
 
+// A BaselineModel test statistic that cPMML cannot compute must be refused at
+// load. Every one of these needs an observed distribution aggregated over a
+// window of records; cPMML scores one record at a time, and what it used to do
+// with "chiSquare" -- difference a category's encoded value against that
+// category's count -- is not a quantity at all. Anything it failed to recognise,
+// CUSUM and scalarProduct included, silently became a logProb the spec does not
+// define.
+static const char* BASELINE_PMML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4">
+  <DataDictionary numberOfFields="2">
+    <DataField name="v" optype="continuous" dataType="double"/>
+    <DataField name="s" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <BaselineModel functionName="regression">
+    <MiningSchema>
+      <MiningField name="v" usageType="active"/>
+      <MiningField name="s" usageType="predicted"/>
+    </MiningSchema>
+    <TestDistributions field="v" testStatistic="@STAT@">
+      <Baseline>@BASELINE@</Baseline>
+    </TestDistributions>
+  </BaselineModel>
+</PMML>
+)";
+
+static bool baseline_loads(const std::string& statistic, const std::string& baseline) {
+  std::string pmml = BASELINE_PMML_TEMPLATE;
+  pmml.replace(pmml.find("@STAT@"), 6, statistic);
+  pmml.replace(pmml.find("@BASELINE@"), 10, baseline);
+
+  const std::string path = "baseline_guard.pmml";
+  FILE* out = std::fopen(path.c_str(), "w");
+  if (out == nullptr) {
+    std::cerr << "FAIL could not write " << path << "\n";
+    ++failures;
+    return false;
+  }
+  std::fputs(pmml.c_str(), out);
+  std::fclose(out);
+
+  bool loaded = false;
+  try {
+    cpmml::Model model(path, false);
+    loaded = true;
+  } catch (const cpmml::Exception&) {
+  }
+
+  std::remove(path.c_str());
+  return loaded;
+}
+
+static void unsupported_baseline_statistics_are_rejected() {
+  const std::string gaussian = R"(<GaussianDistribution mean="35.0" variance="100.0"/>)";
+  const std::string counts =
+      R"(<CountTable><FieldValue field="v" value="1" count="10"/></CountTable>)";
+
+  CHECK(baseline_loads("zValue", gaussian));
+  CHECK(baseline_loads("zScore", gaussian));  // tolerated alias
+
+  CHECK(!baseline_loads("chiSquareIndependence", counts));
+  CHECK(!baseline_loads("chiSquareDistribution", counts));
+  CHECK(!baseline_loads("chiSquare", counts));
+  CHECK(!baseline_loads("CUSUM", gaussian));
+  CHECK(!baseline_loads("scalarProduct", counts));
+  CHECK(!baseline_loads("notAStatistic", gaussian));
+
+  // zValue needs a mean and a variance, which a count table does not supply,
+  // and sqrt(0) would make the division that follows 1/0.
+  CHECK(!baseline_loads("zValue", counts));
+  CHECK(!baseline_loads("zValue", R"(<GaussianDistribution mean="1.0" variance="0.0"/>)"));
+}
+
+// getline into a fixed 8192-byte buffer sets failbit on a longer line, so one
+// over-long row did not merely truncate itself: it wedged the stream and every
+// row after it read as end-of-file, ending a fixture early and silently.
+static void csvreader_reads_past_a_long_row() {
+  const std::string path = "long_row.csv";
+  {
+    FILE* out = std::fopen(path.c_str(), "w");
+    if (out == nullptr) {
+      std::cerr << "FAIL could not write " << path << "\n";
+      ++failures;
+      return;
+    }
+    std::fputs("a,b\n", out);
+    std::fputs((std::string(20000, 'x') + ",1\n").c_str(), out);
+    std::fputs("short,2\n", out);
+    std::fputs("\"say \"\"hi\"\"\",3\n", out);  // "" is one literal quote
+    std::fclose(out);
+  }
+
+  CSVReader reader(path);
+  const auto first = reader.read();
+  const auto second = reader.read();
+  const auto third = reader.read();
+
+  CHECK(first.count("a") && first.at("a").size() == 20000);
+  CHECK(first.count("b") && first.at("b") == "1");
+  CHECK(second.count("a") && second.at("a") == "short");  // empty before the fix
+  CHECK(third.count("a") && third.at("a") == "say \"hi\"");
+  CHECK(third.count("b") && third.at("b") == "3");
+
+  std::remove(path.c_str());
+}
+
 int main() {
   default_result_is_answerable();
   default_model_throws();
   mkstring_handles_empty();
   cyclic_derived_fields_are_rejected();
+  unsupported_baseline_statistics_are_rejected();
+  csvreader_reads_past_a_long_row();
 
   if (failures > 0) {
     std::cerr << failures << " assertion(s) failed\n";

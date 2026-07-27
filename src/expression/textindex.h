@@ -10,102 +10,235 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <sstream>
+#include <memory>
+#include <regex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "core/value.h"
 #include "expression.h"
+#include "fieldref.h"
 
 /**
  * @class TextIndex
  *
  * Implementation of <a
- * href="http://dmg.org/pmml/v4-4/Text.html#xsdElement_TextIndex">PMML TextIndex</a>.
+ * href="http://dmg.org/pmml/v4-4/Transformations.html#xsdElement_TextIndex">PMML
+ * TextIndex</a>.
  *
- * A TextIndex DerivedField computes how many times a search term occurs in a
- * text field, optionally applying a local term-weight transformation:
- *   - termFrequency (default): raw count
- *   - binary: 1 if count > 0, else 0
- *   - logarithmic: log(1 + count)
+ * Counts how often a search term occurs in a text field and applies a local
+ * term-weight transformation.
  *
- * Supported attributes:
- *   textField              : name of the input text field
- *   localTermWeights       : termFrequency | binary | logarithmic
- *   isCaseSensitive        : false (default)
- *   maxLevenshteinDistance : 0 (only exact match supported)
- *   countHits              : allHits (default)
- *   tokenize               : true (default)
+ * Tokenization follows the spec: the text is split on `wordSeparatorCharacterRE`,
+ * whose default is `\s+`. There is no character-class filtering anywhere in the
+ * definition -- this used to strip every non-alphabetic character out of each
+ * token while leaving the search term untouched, so a term containing a digit
+ * ("covid19") or punctuation could never match anything, and a term of more
+ * than one word could not match either because only single tokens were compared.
  *
- * The child expression must evaluate to the search term string (typically a
- * Constant element).
+ * localTermWeights, verbatim from the spec, with freq the number of hits and
+ * X the indicator function:
+ *   termFrequency                    x = freq
+ *   binary                           x = X(freq)
+ *   logarithmic                      x = log(1 + freq)      -- base 10
+ *   augmentedNormalizedTermFrequency x = 0.5 * (X(freq) + freq / max_k(freq_k))
+ *
+ * Only maxLevenshteinDistance="0" is implemented; a document asking for
+ * approximate matching is rejected rather than silently scored as exact.
+ * countHits then has nothing to choose between, since allHits and bestHits
+ * differ only in how non-zero edit distances are counted.
  */
 class TextIndex : public Expression {
  public:
-  size_t field_index = std::numeric_limits<size_t>::max();
-  std::string local_weights = "termfrequency";
-  bool case_sensitive = false;
+  enum class LocalTermWeights { TERM_FREQUENCY, BINARY, LOGARITHMIC, AUGMENTED_NORMALIZED };
 
-  // The search term extracted from the child Constant at parse time
-  std::string term;
+  size_t field_index = std::numeric_limits<size_t>::max();
+  LocalTermWeights local_weights = LocalTermWeights::TERM_FREQUENCY;
+  bool case_sensitive = false;
+  bool tokenize = true;
+
+  // Non-default wordSeparatorCharacterRE only; the default `\s+` takes the
+  // allocation-free path below.
+  bool custom_separator = false;
+  std::regex separator;
+
+  // A Constant term is fixed at parse time; a FieldRef one has to be read from
+  // the sample on every call. The FieldRef case used to leave `term` empty and
+  // therefore counted zero, always.
+  std::vector<std::string> constant_term;
+  std::shared_ptr<FieldRef> term_field;
 
   TextIndex() = default;
 
   TextIndex(const XmlNode& node, const size_t& output_index, const DataType& output_type,
             const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer) {
-    std::string field_name = node.get_attribute("textField");
+    const std::string field_name = node.get_attribute("textField");
     field_index = indexer->get_or_set(field_name);
     inputs.insert(field_name);
 
-    if (node.exists_attribute("localTermWeights")) local_weights = to_lower(node.get_attribute("localTermWeights"));
+    if (node.exists_attribute("localTermWeights")) {
+      const std::string w = to_lower(node.get_attribute("localTermWeights"));
+      if (w == "termfrequency")
+        local_weights = LocalTermWeights::TERM_FREQUENCY;
+      else if (w == "binary")
+        local_weights = LocalTermWeights::BINARY;
+      else if (w == "logarithmic")
+        local_weights = LocalTermWeights::LOGARITHMIC;
+      else if (w == "augmentednormalizedtermfrequency")
+        local_weights = LocalTermWeights::AUGMENTED_NORMALIZED;
+      else
+        throw cpmml::ParsingException("TextIndex: unsupported localTermWeights: " +
+                                      node.get_attribute("localTermWeights"));
+    }
 
     case_sensitive =
         node.exists_attribute("isCaseSensitive") && to_lower(node.get_attribute("isCaseSensitive")) == "true";
 
-    // The child expression holds the search term. We support a Constant child;
-    // evaluate it at construction time to extract the term string.
-    if (node.exists_child("Constant")) {
-      term = node.get_child("Constant").value();
-    } else {
-      // Fallback: look for any child element and use its text content
-      for (const auto& child : node.get_childs("Constant"))
-        if (!child.value().empty()) {
-          term = child.value();
-          break;
+    if (node.exists_attribute("tokenize")) tokenize = to_lower(node.get_attribute("tokenize")) == "true";
+
+    if (node.exists_attribute("maxLevenshteinDistance") &&
+        to_double(node.get_attribute("maxLevenshteinDistance")) != 0.0)
+      throw cpmml::ParsingException("TextIndex: only maxLevenshteinDistance=\"0\" is supported, got " +
+                                    node.get_attribute("maxLevenshteinDistance"));
+
+    if (node.exists_attribute("wordSeparatorCharacterRE")) {
+      const std::string re = node.get_attribute("wordSeparatorCharacterRE");
+      if (re != "\\s+") {
+        custom_separator = true;
+        try {
+          separator = std::regex(re, std::regex::ECMAScript);
+        } catch (const std::regex_error& e) {
+          throw cpmml::ParsingException("TextIndex: invalid wordSeparatorCharacterRE: " + re);
         }
+      }
     }
 
-    if (!case_sensitive) term = to_lower(term);
+    parse_term(node, output_index, output_type, indexer);
   }
 
   inline Value eval(const Sample& sample) const override {
-    // Recover the original string for the text field via reverse lookup
     const Value& fv = sample[field_index].value;
     if (fv.missing) return Value();
 
-    std::string text = fv.svalue;
-    if (!case_sensitive) text = to_lower(text);
+    const std::vector<std::string> term = current_term(sample);
+    if (term.empty()) return Value(0.0);
 
-    // Tokenize on whitespace and count exact-match occurrences
-    int count = 0;
-    std::istringstream iss(text);
-    std::string token;
-    while (iss >> token) {
-      // Strip non-alpha punctuation (same as TextModel)
-      token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char c) { return !std::isalpha(c); }),
-                  token.end());
-      if (!token.empty() && token == term) ++count;
+    const std::vector<std::string> text = tokenized(fold(fv.svalue));
+
+    const size_t freq = count(text, term);
+
+    double result = 0.0;
+    switch (local_weights) {
+      case LocalTermWeights::TERM_FREQUENCY:
+        result = static_cast<double>(freq);
+        break;
+      case LocalTermWeights::BINARY:
+        result = freq > 0 ? 1.0 : 0.0;
+        break;
+      case LocalTermWeights::LOGARITHMIC:
+        // "take the logarithm (base 10) of 1 + the number of times the term
+        // occurs" -- this was a natural log, off by a factor of ln(10).
+        result = std::log10(1.0 + static_cast<double>(freq));
+        break;
+      case LocalTermWeights::AUGMENTED_NORMALIZED: {
+        const size_t max_freq = max_frequency(text, term.size());
+        const double normalized = max_freq > 0 ? static_cast<double>(freq) / static_cast<double>(max_freq) : 0.0;
+        result = 0.5 * ((freq > 0 ? 1.0 : 0.0) + normalized);
+        break;
+      }
     }
 
-    double result;
-    if (local_weights == "binary")
-      result = count > 0 ? 1.0 : 0.0;
-    else if (local_weights == "logarithmic")
-      result = count > 0 ? std::log(1.0 + static_cast<double>(count)) : 0.0;
-    else  // termFrequency
-      result = static_cast<double>(count);
-
     return Value(result);
+  }
+
+ private:
+  void parse_term(const XmlNode& node, const size_t& output_index, const DataType& output_type,
+                  const std::shared_ptr<Indexer>& indexer) {
+    // "a single EXPRESSION element nested within containing the term value to
+    // look for, which will usually be a simple Constant."
+    if (node.exists_child("Constant")) {
+      constant_term = tokenized(fold(node.get_child("Constant").value()));
+      return;
+    }
+    if (node.exists_child("FieldRef")) {
+      term_field = std::make_shared<FieldRef>(node.get_child("FieldRef"), output_index, output_type, indexer);
+      inputs.insert(term_field->field_name);
+      return;
+    }
+
+    for (const auto& child : node.get_childs())
+      if (child.name() != "Extension")
+        throw cpmml::ParsingException("TextIndex: unsupported term expression <" + child.name() +
+                                      ">, only Constant and FieldRef are implemented");
+
+    throw cpmml::ParsingException("TextIndex: no term expression");
+  }
+
+  inline std::vector<std::string> current_term(const Sample& sample) const {
+    if (!term_field) return constant_term;
+    const Value v = term_field->eval(sample);
+    return v.missing ? std::vector<std::string>() : tokenized(fold(v.svalue));
+  }
+
+  inline std::string fold(std::string s) const { return case_sensitive ? s : to_lower(s); }
+
+  std::vector<std::string> tokenized(const std::string& s) const {
+    // tokenize="false" makes the field a single token matched as a whole.
+    if (!tokenize) return s.empty() ? std::vector<std::string>() : std::vector<std::string>{s};
+
+    std::vector<std::string> tokens;
+    if (custom_separator) {
+      for (std::sregex_token_iterator it(s.cbegin(), s.cend(), separator, -1), end; it != end; ++it)
+        if (it->length() > 0) tokens.push_back(*it);
+      return tokens;
+    }
+
+    std::string token;
+    for (char c : s) {
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        if (!token.empty()) tokens.push_back(std::move(token));
+        token.clear();
+      } else {
+        token += c;
+      }
+    }
+    if (!token.empty()) tokens.push_back(std::move(token));
+    return tokens;
+  }
+
+  // Occurrences of the term's token sequence in the text's. A term of several
+  // words is ordinary -- "credit card" is one term -- so this is a subsequence
+  // count, not a token equality count.
+  static size_t count(const std::vector<std::string>& text, const std::vector<std::string>& term) {
+    if (term.empty() || text.size() < term.size()) return 0;
+
+    size_t hits = 0;
+    for (size_t i = 0; i + term.size() <= text.size(); i++)
+      if (std::equal(term.cbegin(), term.cend(), text.cbegin() + static_cast<std::ptrdiff_t>(i))) hits++;
+
+    return hits;
+  }
+
+  // max_k(freq_k): the highest frequency of any term in the document. Windows
+  // of the search term's own length, so a multi-word term is measured against
+  // multi-word candidates rather than against single words.
+  static size_t max_frequency(const std::vector<std::string>& text, size_t width) {
+    if (width == 0 || text.size() < width) return 0;
+
+    std::unordered_map<std::string, size_t> counts;
+    size_t best = 0;
+    for (size_t i = 0; i + width <= text.size(); i++) {
+      std::string key;
+      for (size_t j = 0; j < width; j++) {
+        key += text[i + j];
+        key += '\x1f';  // unit separator: keeps "ab c" and "a bc" distinct
+      }
+      best = std::max(best, ++counts[key]);
+    }
+
+    return best;
   }
 };
 

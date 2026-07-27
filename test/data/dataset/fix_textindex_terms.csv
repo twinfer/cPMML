@@ -1,0 +1,6 @@
+text,term,y_out,tf_digits_out,tf_multi_out,log_good_out,aug_good_out,ref_term_out
+covid19 cases rise covid19,covid19,2.0,2.0,0.0,0.0,0.0,2.0
+paid by credit card today,credit card,0.0,0.0,1.0,0.0,0.0,1.0
+good bad bad,good,0.0,0.0,0.0,0.3010299956639812,0.75,1.0
+good good service,good,0.0,0.0,0.0,0.47712125471966244,1.0,2.0
+nothing here at all,good,0.0,0.0,0.0,0.0,0.0,0.0
