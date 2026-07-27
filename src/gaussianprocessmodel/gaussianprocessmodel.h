@@ -25,15 +25,29 @@
  * Implementation of InternalModel representing a <a
  * href="http://dmg.org/pmml/v4-4/GaussianProcess.html">PMML GaussianProcessModel</a>.
  *
- * Supported kernels: RadialBasisKernel, ARDSquaredExponentialKernel,
- *                    AbsoluteExponentialKernel, GeneralizedExponentialKernel.
+ * All four kernels share the shape
+ *
+ *   k(x,z) = gamma * exp(-1/2 * sum_i g(|x_i - z_i| / lambda_i))
+ *
+ * and differ only in g:
+ *
+ *   RadialBasisKernel             g(u) = u^2, one scalar lambda for every
+ *                                 dimension (a `lambda` attribute, not a
+ *                                 Lambda child like the other three)
+ *   ARDSquaredExponentialKernel   g(u) = u^2, per-dimension lambda
+ *   AbsoluteExponentialKernel     g(u) = u
+ *   GeneralizedExponentialKernel  g(u) = u^degree
+ *
+ * so GeneralizedExponentialKernel with degree=2 is ARDSquaredExponentialKernel
+ * and with degree=1 is AbsoluteExponentialKernel. Attribute defaults are
+ * gamma=1, noiseVariance=1, lambda=1, degree=1.
  *
  * At load time K is computed and Cholesky-factored so that:
- *   alpha = K^{-1} y_train
+ *   alpha = (K + noiseVariance*I)^{-1} y_train
  *
  * At inference:
  *   mean = k(x*,X)^T alpha
- *   var  = K(x*,x*) - || L^{-1} k(x*,X) ||^2   (stored in num_outputs["variance"])
+ *   var  = k(x*,x*) - || L^{-1} k(x*,X) ||^2   (stored in num_outputs["variance"])
  */
 class GaussianProcessModel : public InternalModel {
  public:
@@ -42,10 +56,11 @@ class GaussianProcessModel : public InternalModel {
   // --- Members ---
 
   KernelType kernel_type = KernelType::RBF;
-  double gamma = 1.0;       // amplitude / bandwidth
-  double noise_var = 0.01;  // diagonal noise added to K
-  double degree = 2.0;      // exponent (GeneralizedExponentialKernel)
-  Eigen::VectorXd lambdas;  // per-dimension rates (ARD / AbsExp / GenExp)
+  double gamma = 1.0;          // amplitude
+  double noise_var = 1.0;      // diagonal noise added to K
+  double degree = 1.0;         // exponent (GeneralizedExponentialKernel)
+  double scalar_lambda = 1.0;  // length scale (RadialBasisKernel)
+  Eigen::VectorXd lambdas;     // per-dimension length scales, one per active field
 
   std::vector<std::string> feat_names;
   std::vector<size_t> feat_indices;
@@ -92,35 +107,30 @@ class GaussianProcessModel : public InternalModel {
   // -----------------------------------------------------------------------
 
   double kernel(const Eigen::VectorXd& a, const Eigen::VectorXd& b) const {
-    switch (kernel_type) {
-      case KernelType::RBF:
-        return std::exp(-gamma * (a - b).squaredNorm());
-      case KernelType::ARD: {
-        double sum = 0.0;
-        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i) {
-          double d = a[i] - b[i];
-          sum += lambdas[i] * d * d;
-        }
-        return gamma * std::exp(-sum);
-      }
-      case KernelType::ABS_EXP: {
-        // AbsoluteExponentialKernel: gamma * exp(-sum_i lambda_i * |x_i - z_i|)
-        double sum = 0.0;
-        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i) sum += lambdas[i] * std::abs(a[i] - b[i]);
-        return gamma * std::exp(-sum);
-      }
-      case KernelType::GEN_EXP: {
-        // GeneralizedExponentialKernel: gamma * exp(-sum_i lambda_i * |x_i - z_i|^degree)
-        double sum = 0.0;
-        for (Eigen::Index i = 0; i < (Eigen::Index)n_feat; ++i)
-          sum += lambdas[i] * std::pow(std::abs(a[i] - b[i]), degree);
-        return gamma * std::exp(-sum);
+    double sum = 0.0;
+
+    for (Eigen::Index i = 0; i < static_cast<Eigen::Index>(n_feat); ++i) {
+      const double scaled = std::abs(a[i] - b[i]) / lambdas[i];
+
+      switch (kernel_type) {
+        case KernelType::RBF:
+        case KernelType::ARD:
+          sum += scaled * scaled;
+          break;
+        case KernelType::ABS_EXP:
+          sum += scaled;
+          break;
+        case KernelType::GEN_EXP:
+          sum += std::pow(scaled, degree);
+          break;
       }
     }
-    return 0.0;
+
+    return gamma * std::exp(-0.5 * sum);
   }
 
-  double kernel_self() const { return (kernel_type == KernelType::RBF) ? 1.0 : gamma; }
+  // k(x,x) collapses to gamma for every kernel: the scaled distance is zero.
+  double kernel_self() const { return gamma; }
 
   Eigen::VectorXd compute_k_star(const Sample& sample) const {
     Eigen::VectorXd x = extract(sample);
@@ -145,33 +155,35 @@ class GaussianProcessModel : public InternalModel {
   // -----------------------------------------------------------------------
 
   void parse_kernel(const XmlNode& node) {
+    std::string element;
+
     if (node.exists_child("RadialBasisKernel")) {
       kernel_type = KernelType::RBF;
-      XmlNode k = node.get_child("RadialBasisKernel");
-      gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
+      element = "RadialBasisKernel";
     } else if (node.exists_child("ARDSquaredExponentialKernel")) {
       kernel_type = KernelType::ARD;
-      XmlNode k = node.get_child("ARDSquaredExponentialKernel");
-      gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
-      parse_lambdas(k);
+      element = "ARDSquaredExponentialKernel";
     } else if (node.exists_child("AbsoluteExponentialKernel")) {
       kernel_type = KernelType::ABS_EXP;
-      XmlNode k = node.get_child("AbsoluteExponentialKernel");
-      gamma = k.get_double_attribute("gamma");
-      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
-      parse_lambdas(k);
+      element = "AbsoluteExponentialKernel";
     } else if (node.exists_child("GeneralizedExponentialKernel")) {
       kernel_type = KernelType::GEN_EXP;
-      XmlNode k = node.get_child("GeneralizedExponentialKernel");
-      gamma = k.get_double_attribute("gamma");
-      degree = k.exists_attribute("degree") ? k.get_double_attribute("degree") : 2.0;
-      noise_var = k.exists_attribute("noiseVariance") ? k.get_double_attribute("noiseVariance") : 0.01;
-      parse_lambdas(k);
+      element = "GeneralizedExponentialKernel";
     } else {
       throw cpmml::ParsingException("GaussianProcessModel: unsupported or missing kernel");
     }
+
+    const XmlNode k = node.get_child(element);
+
+    // Defaults are the ones the PMML 4.4 schema declares; every kernel carries
+    // gamma and noiseVariance, lambda belongs to RadialBasisKernel alone and
+    // degree to GeneralizedExponentialKernel alone.
+    gamma = k.get_double_attribute("gamma", 1.0);
+    noise_var = k.get_double_attribute("noiseVariance", 1.0);
+    scalar_lambda = k.get_double_attribute("lambda", 1.0);
+    degree = k.get_double_attribute("degree", 1.0);
+
+    if (kernel_type != KernelType::RBF) parse_lambdas(k);
   }
 
   void parse_lambdas(const XmlNode& k) {
@@ -221,10 +233,32 @@ class GaussianProcessModel : public InternalModel {
       y_train[static_cast<Eigen::Index>(r)] = to_double(row.get_child(target_col).value());
     }
 
-    // For kernels with per-dimension lambdas: default to 1 if not yet parsed
-    if (kernel_type != KernelType::RBF && lambdas.size() == 0) {
-      lambdas = Eigen::VectorXd::Ones(static_cast<Eigen::Index>(n_feat));
+    resolve_lambdas();
+  }
+
+  /**
+   * Give every active field a length scale, now that n_feat is known.
+   *
+   * RadialBasisKernel states a single one for all of them; the other three
+   * carry a Lambda array, which the schema leaves optional and which defaults
+   * to 1 per dimension.
+   */
+  void resolve_lambdas() {
+    const auto n = static_cast<Eigen::Index>(n_feat);
+
+    if (kernel_type == KernelType::RBF) {
+      lambdas = Eigen::VectorXd::Constant(n, scalar_lambda);
+      return;
     }
+
+    if (lambdas.size() == 0) {
+      lambdas = Eigen::VectorXd::Ones(n);
+      return;
+    }
+
+    if (lambdas.size() != n)
+      throw cpmml::ParsingException("GaussianProcessModel: Lambda has " + std::to_string(lambdas.size()) +
+                                    " entries but the model has " + std::to_string(n_feat) + " active fields");
   }
 
   void compute_alpha() {

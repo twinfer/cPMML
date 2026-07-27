@@ -1,0 +1,10 @@
+# Oracle libraries for the fixture generators. Pinned exactly: --check compares
+# committed expectations against these versions, so an unpinned upgrade would
+# show up as a fixture mismatch rather than as a dependency change.
+#
+#   python -m venv .venv && .venv/bin/pip install -r tools/fixture-gen/requirements.txt
+#
+# Not needed to build or test cPMML -- only to regenerate or verify fixtures.
+
+numpy==2.5.1
+scikit-learn==1.9.0
