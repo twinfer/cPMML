@@ -265,17 +265,33 @@ def arima_psi_variance(
     sigma2: float,
     ar: list[float] | None = None,
     ma: list[float] | None = None,
+    d: int = 0,
+    seasonal_ar: list[float] | None = None,
+    seasonal_ma: list[float] | None = None,
+    seasonal_d: int = 0,
+    period: int = 1,
 ) -> np.ndarray:
     """ARIMA h-step forecast variance from derived MA(inf) weights.
 
         var(h) = sigma^2 * sum_{j=0}^{h-1} psi_j^2,  psi_0 = 1
-        psi_j  = sum_i phi_i psi_{j-i} - theta_j
+        psi_j  = sum_i PHI_i psi_{j-i} - theta_j
 
     theta is subtracted for the same reason the forecast subtracts its MA
     terms: PMML's MA polynomial is (1 - theta B).
+
+    PHI is the AR operator of the *undifferenced* series -- the same expanded
+    polynomial the forecast recursion uses -- so the differencing operators fold
+    in. Run the recursion on the stationary phi alone and the answer describes
+    the differenced series w, not y, which for d >= 1 understates the variance
+    by a growing margin.
     """
-    phi = list(ar or [])
-    theta = list(ma or [])
+    phi_poly = np.convolve(
+        np.convolve(_lag_polynomial(list(ar or [])), _difference_polynomial(d)),
+        np.convolve(_lag_polynomial(list(seasonal_ar or []), period), _difference_polynomial(seasonal_d, period)),
+    )
+    phi = [-c for c in phi_poly[1:]]
+    theta_poly = np.convolve(_lag_polynomial(list(ma or [])), _lag_polynomial(list(seasonal_ma or []), period))
+    theta = [-c for c in theta_poly[1:]]
 
     psi = [1.0]
     for j in range(1, horizon):

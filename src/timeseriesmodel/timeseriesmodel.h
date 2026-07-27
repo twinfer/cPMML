@@ -35,7 +35,8 @@
  * Extra PMML features supported:
  *   - transformation="logarithmic|squareroot" on ETS/SSM/ARIMA
  *   - StateSpaceModel/@intercept
- *   - MaximumLikelihoodStat/KalmanState/FinalStateVector shortcut (skip re-filter)
+ *   - MaximumLikelihoodStat/KalmanState/FinalStateVector shortcut — present but
+ *     currently unreachable; see M-S13 before relying on it
  *   - SeasonalComponent (P, D, Q, period) — polynomial convolution with nonseasonal
  *   - OutlierEffect (additive, levelShift, transientChange)
  *
@@ -105,7 +106,10 @@ class TimeSeriesModel {
     Eigen::MatrixXd F;           // companion transition (n×n)
     Eigen::RowVectorXd H;        // observation (1×n)
     Eigen::VectorXd x_T;         // terminal filtered state
-    Eigen::MatrixXd P_T;         // terminal filtered covariance (for variance)
+    // Expanded ARMA coefficients, kept for the forecast variance. That variance
+    // is a property of the model rather than of the filter, so both prediction
+    // methods compute it the same way — see arima_variance().
+    std::vector<double> phi, theta;
     Transform transform = Transform::NONE;
     double sigma2 = 1.0;
   } kalman;
@@ -215,10 +219,10 @@ class TimeSeriesModel {
         vars = variance_ssm(horizon);
         break;
       case Algorithm::ARIMA_CLS:
-        vars = variance_arima_cls(horizon);
+        vars = arima_variance(arima.phi, arima.theta, arima.d, arima.D, arima.m, arima.sigma2, horizon);
         break;
       case Algorithm::ARIMA_KALMAN:
-        vars = variance_arima_kalman(horizon);
+        vars = arima_variance(kalman.phi, kalman.theta, kalman.d, kalman.D, kalman.m, kalman.sigma2, horizon);
         break;
       case Algorithm::GARCH:
         vars = variance_garch(horizon);
@@ -398,20 +402,70 @@ class TimeSeriesModel {
     return invert_transform_vec(std::move(result), a.transform);
   }
 
-  std::vector<double> variance_arima_cls(int horizon) const {
-    // MA(∞) psi-weight variance: var(h) = σ² × Σ_{j=0}^{h-1} ψ_j²
-    const auto& a = arima;
-    int p_eff = static_cast<int>(a.phi.size());
-    int q_eff = static_cast<int>(a.theta.size());
+  /**
+   * Φ(B) = φ(B)·(1−B)^d·(1−B^m)^D, in PMML's sign convention.
+   *
+   * Input and output are both the coefficients c_i of (1 − c₁B − c₂B² − …),
+   * which is how AR/Array is written and how expand_arma_poly returns the
+   * seasonal × nonseasonal product.
+   */
+  static std::vector<double> integrate_ar_poly(const std::vector<double>& phi, int d, int D, int m) {
+    std::vector<double> poly{1.0};
+    for (double c : phi) poly.push_back(-c);
+
+    auto multiply = [](const std::vector<double>& a, const std::vector<double>& b) {
+      std::vector<double> out(a.size() + b.size() - 1, 0.0);
+      for (size_t i = 0; i < a.size(); ++i)
+        for (size_t j = 0; j < b.size(); ++j) out[i + j] += a[i] * b[j];
+      return out;
+    };
+
+    for (int i = 0; i < d; ++i) poly = multiply(poly, {1.0, -1.0});
+    if (D > 0 && m > 0) {
+      std::vector<double> seasonal(m + 1, 0.0);
+      seasonal[0] = 1.0;
+      seasonal[m] = -1.0;
+      for (int i = 0; i < D; ++i) poly = multiply(poly, seasonal);
+    }
+
+    std::vector<double> expanded;
+    expanded.reserve(poly.size() - 1);
+    for (size_t i = 1; i < poly.size(); ++i) expanded.push_back(-poly[i]);
+    return expanded;
+  }
+
+  /**
+   * ARIMA h-step forecast variance, shared by both prediction methods.
+   *
+   *   var(h) = σ² · Σ_{j=0}^{h-1} ψ_j²,   ψ₀ = 1
+   *   ψ_j    = Σ_i Φ_i ψ_{j-i} − θ_j
+   *
+   * `predictionMethod` selects how the point forecast is *computed* — filter
+   * recursion versus expanded-polynomial recursion — not a different stochastic
+   * process, so this is the variance for exactLeastSquares too. It depends only
+   * on (φ, θ, σ²), every one of which the document states; the terminal filter
+   * covariance is an artefact of the estimation path and does not enter.
+   *
+   * Φ is the AR operator of the *undifferenced* series, so the differencing
+   * operators fold in. Without them the result would describe the differenced
+   * series w rather than y.
+   *
+   * θ is subtracted for the same reason the forecast subtracts its MA terms:
+   * PMML writes the MA polynomial as (1 − θ₁B − θ₂B² − …).
+   */
+  static std::vector<double> arima_variance(const std::vector<double>& phi, const std::vector<double>& theta, int d,
+                                            int D, int m, double sigma2, int horizon) {
+    if (horizon <= 0) return {};
+    const std::vector<double> full = integrate_ar_poly(phi, d, D, m);
+    const int p_eff = static_cast<int>(full.size());
+    const int q_eff = static_cast<int>(theta.size());
 
     std::vector<double> psi(horizon, 0.0);
     psi[0] = 1.0;
     for (int j = 1; j < horizon; ++j) {
       double v = 0.0;
-      for (int i = 0; i < p_eff && i < j; ++i) v += a.phi[i] * psi[j - 1 - i];
-      // Subtracted for the same reason the forecast subtracts its MA terms:
-      // PMML's MA polynomial is (1 - theta_1 B - theta_2 B^2 - ...).
-      if (j <= q_eff) v -= a.theta[j - 1];
+      for (int i = 0; i < p_eff && i < j; ++i) v += full[i] * psi[j - 1 - i];
+      if (j <= q_eff) v -= theta[j - 1];
       psi[j] = v;
     }
 
@@ -420,7 +474,7 @@ class TimeSeriesModel {
     double cumsum = 0.0;
     for (int h = 0; h < horizon; ++h) {
       cumsum += psi[h] * psi[h];
-      vars.push_back(a.sigma2 * cumsum);
+      vars.push_back(sigma2 * cumsum);
     }
     return vars;
   }
@@ -443,23 +497,6 @@ class TimeSeriesModel {
     return invert_transform_vec(std::move(result), kalman.transform);
   }
 
-  std::vector<double> variance_arima_kalman(int horizon) const {
-    // Propagate P_T: var(h) = σ² × H · (Σ_{j=1}^{h} F^j · P_T · (F^j)^T) · H^T
-    if (kalman.P_T.rows() == 0) return std::vector<double>(horizon, kalman.sigma2);
-
-    std::vector<double> vars;
-    vars.reserve(horizon);
-    Eigen::MatrixXd Fh = Eigen::MatrixXd::Identity(kalman.F.rows(), kalman.F.cols());
-    double cumvar = 0.0;
-    for (int h = 1; h <= horizon; ++h) {
-      Fh = kalman.F * Fh;
-      double step_var = (kalman.H * Fh * kalman.P_T * Fh.transpose() * kalman.H.transpose())(0, 0);
-      cumvar += step_var * kalman.sigma2;
-      vars.push_back(cumvar);
-    }
-    return vars;
-  }
-
   // =========================================================================
   // Kalman filter — called once at load time
   //
@@ -472,6 +509,8 @@ class TimeSeriesModel {
     kalman.d = d;
     kalman.D = D;
     kalman.m = m;
+    kalman.phi = phi;
+    kalman.theta = theta;
 
     // --- Store y_tail for seasonal undifferencing ---
     int y_tail_need = std::max(m * D, 1);
@@ -516,6 +555,12 @@ class TimeSeriesModel {
     if (n < 1) n = 1;
 
     // Transition F [n×n]: top row = AR coefficients, sub-diagonal = shift
+    //
+    // NOTE: this is not the state space the specification defines for
+    // exactLeastSquares (see M-S13). It represents a pure AR correctly, which is
+    // what the fixtures here cover, but it has nowhere to carry a moving-average
+    // term. Replacing it means also fixing what FinalStateVector is understood
+    // to contain, so it is filed rather than half-done.
     kalman.F = Eigen::MatrixXd::Zero(n, n);
     for (int j = 0; j < p && j < n; ++j) kalman.F(0, j) = phi[j];
     for (int i = 1; i < n; ++i) kalman.F(i, i - 1) = 1.0;
@@ -543,7 +588,11 @@ class TimeSeriesModel {
       Eigen::VectorXd vecP = IFF.colPivHouseholderQr().solve(vecQ);
 
       Eigen::MatrixXd P0 = Eigen::Map<Eigen::MatrixXd>(vecP.data(), n, n);
-      P0 = (P0 + P0.transpose()) * 0.5;  // symmetrize
+      // Symmetrize. The .eval() is required, not defensive: `A = A + A.transpose()`
+      // is Eigen's canonical aliasing hazard — the assignment writes into A
+      // coefficient by coefficient, so reading A(j,i) after A(i,j) has already
+      // been overwritten yields a matrix that is neither the sum nor symmetric.
+      P0 = ((P0 + P0.transpose()) * 0.5).eval();
 
       // --- Kalman filter through training data ---
       kalman.x_T = Eigen::VectorXd::Zero(n);
@@ -563,13 +612,20 @@ class TimeSeriesModel {
         // Kalman gain [n×1]
         Eigen::VectorXd K = P_pred * kalman.H.transpose() / S;
 
-        // Joseph form update (maintains positive semi-definiteness)
+        // Joseph form update (maintains positive semi-definiteness):
+        //     P = (I − KH) P_pred (I − KH)ᵀ + K R Kᵀ
+        // R is the *observation* noise covariance, and here it is zero: the
+        // measurement y_t = H x_t is exact, with every disturbance entering
+        // through G_vec on the state side. Substituting the innovation variance
+        // S for R adds P_pred Hᵀ H P_pred / S back at every step, so P never
+        // decays and the gain keeps "correcting" a state that is already exact.
+        // For a pure AR the terminal state must be the last p observations; with
+        // the S term it drifts off them, and the point forecast drifts with it.
         Eigen::MatrixXd IKH = In - K * kalman.H;
         kalman.x_T = x_pred + K * v;
-        P = IKH * P_pred * IKH.transpose() + K * (S * K.transpose());
-        P = (P + P.transpose()) * 0.5;
+        P = IKH * P_pred * IKH.transpose();
+        P = ((P + P.transpose()) * 0.5).eval();  // aliasing — see P0 above
       }
-      kalman.P_T = P;
     }
   }
 
@@ -944,6 +1000,16 @@ class TimeSeriesModel {
 
       // Try FinalStateVector shortcut first (avoids re-filtering)
       bool have_state = false;
+      // This looks one level too high — MaximumLikelihoodStat is a child of
+      // ARIMA, not of TimeSeriesModel — so the shortcut never fires on a
+      // conforming document and every model re-runs the filter below.
+      //
+      // Left as-is on purpose (M-S13). The branch reads FinalStateVector in the
+      // basis of the companion form built further down, which is not the state
+      // space the spec defines for exactLeastSquares; simply correcting the
+      // element name would make a wrong-basis path reachable and turn a dormant
+      // bug into wrong answers on conforming input. The two have to be fixed
+      // together.
       if (ts_node.exists_child("MaximumLikelihoodStat")) {
         XmlNode mls = ts_node.get_child("MaximumLikelihoodStat");
         if (mls.exists_child("KalmanState")) {
@@ -974,7 +1040,8 @@ class TimeSeriesModel {
                 kalman.m = m;
                 kalman.transform = tr;
                 kalman.sigma2 = sigma2_val;
-                // P_T left empty — variance will fall back to constant sigma2
+                kalman.phi = phi;
+                kalman.theta = theta;
 
                 // Build y_tail and z_tail for undifferencing
                 setup_arima_tails(pts, d, D, m, kalman.y_tail, kalman.z_tail);

@@ -92,11 +92,12 @@ def _document(name: str, note: str, body: str, series: list[float] | None) -> st
 
 
 def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0, seasonal_ar=None,
-                   seasonal_d=0, period=1, constant=0.0, rmse=None) -> str:
+                   seasonal_d=0, period=1, constant=0.0, rmse=None,
+                   prediction_method="conditionalLeastSquares") -> str:
     p, q = len(ar or []), len(ma or [])
     rmse_attr = "" if rmse is None else f' RMSE="{format_number(rmse)}"'
     parts = [f'    <ARIMA{rmse_attr} constantTerm="{format_number(constant)}" '
-             f'predictionMethod="conditionalLeastSquares">']
+             f'predictionMethod="{prediction_method}">']
     parts.append(f'      <NonseasonalComponent p="{p}" d="{d}" q="{q}">')
     if ar:
         parts.append("        <AR>")
@@ -167,14 +168,14 @@ def garch_document(name, *, ar, ma, residuals, constant, omega, alpha, garch_res
     return _document(name, note, body, SERIES).replace('bestFit="ARIMA"', 'bestFit="GARCH"')
 
 
-def _matrix(element: str, rows: list[list[float]]) -> str:
-    arrays = "\n".join(_array(row, "          ") for row in rows)
+def _matrix(element: str, rows: list[list[float]], indent: str = "      ") -> str:
+    arrays = "\n".join(_array(row, indent + "    ") for row in rows)
     return (
-        f"      <{element}>\n"
-        f'        <Matrix nbRows="{len(rows)}" nbCols="{len(rows[0])}">\n'
+        f"{indent}<{element}>\n"
+        f'{indent}  <Matrix nbRows="{len(rows)}" nbCols="{len(rows[0])}">\n'
         f"{arrays}\n"
-        "        </Matrix>\n"
-        f"      </{element}>"
+        f"{indent}  </Matrix>\n"
+        f"{indent}</{element}>"
     )
 
 
@@ -217,6 +218,33 @@ def forecast_fixture(name: str, pmml: str, values, variance=None) -> Fixture:
         rows.append(row)
 
     return Fixture(name=name, columns=columns, rows=rows, pmml=pmml)
+
+
+# RMSE for the pure-AR fixtures. sigma^2 scales the variance linearly, so any
+# value works; a non-unit one keeps a dropped or doubled sigma^2 visible.
+AR_RMSE = 1.2
+
+
+def cross_checked_variance(name: str, horizon: int, rmse: float, kw: dict) -> np.ndarray:
+    """Forecast variance from statsmodels, cross-checked against the transcription.
+
+    Both oracles have to fold the differencing operators into the AR polynomial
+    to get this right, and they arrive there by different routes: SARIMAX
+    carries (1-B)^d inside its state space, while oracle_spec convolves the
+    polynomials explicitly. Agreement is therefore real evidence and not two
+    copies of one reading.
+
+    constantTerm shifts the mean, not the spread, so it is dropped here.
+    """
+    var_kw = {k: v for k, v in kw.items() if k != "constant"}
+    by_statsmodels = oracle_statsmodels.arima_forecast_variance(SERIES, horizon, rmse**2, **var_kw)
+    by_spec = oracle_spec.arima_psi_variance(horizon, rmse**2, **var_kw)
+    if not np.allclose(by_statsmodels, by_spec, rtol=1e-9):
+        raise AssertionError(
+            f"{name}: statsmodels and the spec transcription disagree on forecast variance\n"
+            f"  statsmodels {by_statsmodels}\n  transcription {by_spec}"
+        )
+    return by_statsmodels
 
 
 def build() -> list[Fixture]:
@@ -268,6 +296,7 @@ def build() -> list[Fixture]:
                 f"{name}: statsmodels and the spec transcription disagree\n"
                 f"  statsmodels {by_statsmodels}\n  transcription {by_spec}"
             )
+        variance = cross_checked_variance(name, horizon, AR_RMSE, kw)
         fixtures.append(
             forecast_fixture(
                 name,
@@ -276,11 +305,45 @@ def build() -> list[Fixture]:
                     f"{oracle_statsmodels.VERSION} SARIMAX, cross-checked against the spec "
                     f"transcription; {description}",
                     SERIES,
+                    rmse=AR_RMSE,
                     **kw,
                 ),
                 by_statsmodels,
+                variance,
             )
         )
+
+    # --- 2b. exactLeastSquares ----------------------------------------------
+    # The first fixture to reach the Kalman path at all, and it is deliberately
+    # a pure AR: statsmodels then pins the whole path, because a pure AR's
+    # terminal state is an exact function of the observed data whichever
+    # state-space basis the filter uses.
+    #
+    # No MaximumLikelihoodStat. The supplied-state branch reads FinalStateVector
+    # in a basis the spec does not define it in (M-S13), so a fixture for it
+    # would be a fixture for the bug; it is unreachable today in any case.
+    #
+    # Both the forecast and the variance have to match the conditionalLeastSquares
+    # answer on the same coefficients, and that is the point of the fixture:
+    # predictionMethod selects how the forecast is computed, not a different
+    # process, so the terminal filter covariance has no business in the variance.
+    kalman_kw = dict(ar=[0.5, -0.2], d=1)
+    fixtures.append(
+        forecast_fixture(
+            "fix_arima_kalman_state",
+            arima_document(
+                "fix_arima_kalman_state",
+                f"{oracle_statsmodels.VERSION} SARIMAX, cross-checked against the spec transcription; "
+                "exactLeastSquares must score as conditionalLeastSquares does on the same coefficients",
+                SERIES,
+                rmse=AR_RMSE,
+                prediction_method="exactLeastSquares",
+                **kalman_kw,
+            ),
+            oracle_statsmodels.arima_forecast(SERIES, horizon, **kalman_kw),
+            cross_checked_variance("fix_arima_kalman_state", horizon, AR_RMSE, kalman_kw),
+        )
+    )
 
     # --- 3. MA with supplied residuals: transcription only -------------------
     # statsmodels re-derives residuals by filtering; PMML applies the ones the
@@ -300,7 +363,11 @@ def build() -> list[Fixture]:
             oracle_spec.arima_cls_forecast(SERIES, horizon, **ma_kw),
             # The psi recursion subtracts theta for the same reason the forecast
             # does, so this column is a second, independent check on that sign.
-            oracle_spec.arima_psi_variance(horizon, 1.5**2, ar=ma_kw["ar"], ma=ma_kw["ma"]),
+            # d=1 matters here: the differencing operator folds into the AR
+            # polynomial, so this is not the variance of the differenced series.
+            oracle_spec.arima_psi_variance(
+                horizon, 1.5**2, ar=ma_kw["ar"], ma=ma_kw["ma"], d=ma_kw["d"]
+            ),
         )
     )
 

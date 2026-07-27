@@ -103,8 +103,7 @@ spec says the weights are "not needed for scoring". `fix_ets_weights` asserts
 exactly that. `trend="polynomial_exponential"` (Brown's method) is uncovered:
 statsmodels does not implement it either, and cPMML now rejects it at load.
 
-GARCH is covered for the **conditional mean only**. The variance recursion is
-not implemented in cPMML, and forecast mode has no channel for it — see m-S7.
+GARCH is covered for both the conditional mean and the conditional variance.
 The mean fixture exists mainly to pin the MA sign, which the GARCH section of
 the spec deliberately writes the opposite way round from the ARIMA section
 (`+θ·ε` rather than `(1 − θB)`). The two forecast paths must not be unified.
@@ -122,13 +121,40 @@ ARIMA, `oracle_spec.garch_variance` for GARCH. `ExponentialSmoothing` has no
 spec-defined variance (Gardner again) and cPMML returns a documented
 approximation, so ETS fixtures deliberately omit the column.
 
-Two traps worth knowing, both of which cost a debugging round here:
+ARIMA variance is the one case with a genuine third-party oracle:
+`oracle_statsmodels.arima_forecast_variance` reads `get_forecast().var_pred_mean`,
+and because SARIMAX carries differencing inside its state space that is the
+variance of the *original* series. `cross_checked_variance` runs it against the
+transcription on every pure-AR fixture and fails the build if they disagree —
+the two reach the same answer by different routes, SARIMAX through the state
+space and `oracle_spec` by convolving the polynomials, so agreement is evidence
+rather than two copies of one reading.
+
+Three traps worth knowing, each of which cost a debugging round here:
 
 - GARCH's `<Residuals>` under `ResidualSquareCoefficients` holds ε, not ε².
   The element name suggests otherwise, but `Residuals` means the same thing it
   does in ARIMA's `MA` — the formula does the squaring.
 - `gq` is the order of *residual squares* (the α terms) and `gp` the order of
   *variance* (the β terms). Transposing them is invisible unless gp ≠ gq.
+- The differencing operators belong in the ψ recursion. `(1−B)^d (1−B^m)^D`
+  multiplies into Φ before the weights are derived; run it on the stationary φ
+  alone and the answer describes the differenced series. Every ARIMA fixture
+  here has d ≥ 1, so the two are never accidentally equal.
+
+### The exactLeastSquares path
+
+`fix_arima_kalman_state` is a **pure AR on purpose**. A pure AR's terminal state
+is an exact function of the observed data whichever basis the filter works in,
+so statsmodels pins the whole path — forecast and variance — without the fixture
+having to commit to a state-space convention.
+
+It carries no `MaximumLikelihoodStat`. cPMML's supplied-state branch reads
+`FinalStateVector` in a basis the spec does not define it in (M-S13), so a
+fixture for it would be a fixture for the bug. ARMA models on this path are
+wrong for a related reason — the MA polynomial never reaches the forecast — and
+`ARIMA_Kalman.zip` still holds self-derived expectations that record that
+behaviour rather than contradict it. Do not treat it as evidence.
 
 ## Invariants the generators assert
 

@@ -44,17 +44,16 @@ class Unsupported(Exception):
     """The oracle cannot express this model; use the transcription oracle."""
 
 
-def arima_forecast(
+def _filtered(
     series: list[float],
-    horizon: int,
-    ar: list[float] | None = None,
-    d: int = 0,
-    seasonal_ar: list[float] | None = None,
-    seasonal_d: int = 0,
-    period: int = 1,
-    constant: float = 0.0,
-) -> np.ndarray:
-    """Forecast a pure AR/ARI/SARI model with the coefficients PMML supplies."""
+    ar: list[float] | None,
+    d: int,
+    seasonal_ar: list[float] | None,
+    seasonal_d: int,
+    period: int,
+    constant: float,
+    sigma2: float,
+):
     ar = list(ar or [])
     seasonal_ar = list(seasonal_ar or [])
 
@@ -72,14 +71,57 @@ def arima_forecast(
     )
 
     # PMML's AR array is phi_1..phi_p, the same order SARIMAX names them in;
-    # the intercept leads when present and sigma2 is last, and sigma2 does not
-    # affect the point forecast.
+    # the intercept leads when present and sigma2 is last.
     expected = list(model.param_names)
-    params = ([constant] if constant else []) + ar + seasonal_ar + [1.0]
+    params = ([constant] if constant else []) + ar + seasonal_ar + [sigma2]
     if len(params) != len(expected):
         raise Unsupported(f"parameter mismatch: SARIMAX wants {expected}, built {len(params)} values")
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        result = model.filter(params)
-        return np.asarray(result.forecast(horizon), dtype=float)
+        return model.filter(params)
+
+
+def arima_forecast(
+    series: list[float],
+    horizon: int,
+    ar: list[float] | None = None,
+    d: int = 0,
+    seasonal_ar: list[float] | None = None,
+    seasonal_d: int = 0,
+    period: int = 1,
+    constant: float = 0.0,
+) -> np.ndarray:
+    """Forecast a pure AR/ARI/SARI model with the coefficients PMML supplies.
+
+    sigma2 does not affect the point forecast, so it is left at 1.
+    """
+    result = _filtered(series, ar, d, seasonal_ar, seasonal_d, period, constant, 1.0)
+    return np.asarray(result.forecast(horizon), dtype=float)
+
+
+def arima_forecast_variance(
+    series: list[float],
+    horizon: int,
+    sigma2: float,
+    ar: list[float] | None = None,
+    d: int = 0,
+    seasonal_ar: list[float] | None = None,
+    seasonal_d: int = 0,
+    period: int = 1,
+) -> np.ndarray:
+    """h-step forecast variance, from statsmodels rather than from a formula.
+
+    This is the independent check on the psi-weight recursion, and specifically
+    on whether the differencing operators are folded into the AR polynomial:
+    SARIMAX carries differencing inside the state space, so var_pred_mean is the
+    variance of the *original* series, not of the differenced one. A scorer that
+    forgets the (1-B)^d factor disagrees from h=2 onward.
+
+    Restricted to q = Q = 0 for the same reason as arima_forecast, plus one
+    more: for a pure AR the terminal state is an exact function of the observed
+    data, so var_pred_mean is the model variance with no residual filtering
+    uncertainty mixed in.
+    """
+    result = _filtered(series, ar, d, seasonal_ar, seasonal_d, period, 0.0, sigma2)
+    return np.asarray(result.get_forecast(horizon).var_pred_mean, dtype=float)
