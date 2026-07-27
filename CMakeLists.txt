@@ -81,6 +81,17 @@ if(SANITIZE)
     add_link_options(-fsanitize=${SANITIZE})
 endif()
 
+# Emscripten compiles catch handlers away unless exception support is asked
+# for, and cPMML relies on catching in places -- InternalScore catches the
+# ParsingException from to_double to mean "this score is not a number". Without
+# this the wasm build succeeds and then misbehaves at runtime, with an exception
+# the library would normally swallow escaping to the caller instead. Not a
+# tuning knob.
+if(EMSCRIPTEN)
+    add_compile_options(-fexceptions)
+    add_link_options(-fexceptions)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -130,8 +141,25 @@ endif ()
 include(GNUInstallDirs)
 
 add_definitions(-DCPMML_VERSION=\"${PROJECT_VERSION}\")
+# SHARED was hardcoded. A static archive is the normal thing to want for a
+# WebAssembly target -- Emscripten turns a SHARED library into a side module
+# needing -fPIC throughout, which the vendored miniz is not built with -- and it
+# is what anyone embedding the scorer in a single binary wants too.
+#
+# Deliberately not CMake's BUILD_SHARED_LIBS: that variable is read by pugixml,
+# miniz and Eigen as well, so setting it would also flip *them* to shared, which
+# turns three vendored build-tree targets into runtime dependencies a consumer
+# has to find. The dependencies stay static and get absorbed either way; this
+# switch is about cPMML alone.
+option(CPMML_SHARED "Build cPMML as a shared library rather than a static archive" ON)
+if(CPMML_SHARED)
+    set(CPMML_LIBRARY_TYPE SHARED)
+else()
+    set(CPMML_LIBRARY_TYPE STATIC)
+endif()
+
 add_library(
-        ${PROJECT_NAME} SHARED
+        ${PROJECT_NAME} ${CPMML_LIBRARY_TYPE}
         src/core/header.h
         src/api/exceptions.cc
         src/api/model.cc
@@ -255,7 +283,30 @@ target_include_directories(${PROJECT_NAME} PRIVATE third_party)
 # miniz's and Eigen's include directories and link requirements onto every
 # consumer, and made an Eigen version mismatch in the consumer's own build a
 # cPMML problem.
-target_link_libraries(${PROJECT_NAME} PRIVATE pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+# PRIVATE either way: cPMML.h includes nothing but standard headers, so none of
+# these three is part of the interface. Linking them PUBLIC put their include
+# directories and link requirements onto every consumer, and made an Eigen
+# version mismatch in the consumer's own build a cPMML problem.
+#
+# The two cases differ in what install(EXPORT) will accept. A shared library
+# embeds its private dependencies and CMake drops them from the exported
+# interface. A static archive does not embed anything, so CMake keeps them and
+# then refuses to export a target that needs three vendored targets which exist
+# only in this build tree. Wrapping in BUILD_INTERFACE says exactly that: they
+# are needed to build, and are not part of what gets installed. A static
+# consumer links the sibling archives from the same build, which is what an
+# Emscripten or single-binary build does anyway.
+if(CPMML_SHARED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+else()
+    target_link_libraries(
+            ${PROJECT_NAME} PRIVATE
+            $<BUILD_INTERFACE:pugixml::pugixml>
+            $<BUILD_INTERFACE:miniz>
+            $<BUILD_INTERFACE:Eigen3::Eigen>
+            ${ADDITIONAL_LINK_LIBRARIES}
+    )
+endif()
 
 include(CMakePackageConfigHelpers)
 
