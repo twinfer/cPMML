@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cPMML.h"
 #include "miniz.h"
 
 /**
@@ -295,13 +296,13 @@ inline constexpr double double_min() { return std::numeric_limits<double>::min()
 
 inline bool is_double_min(double v) { return v == std::numeric_limits<double>::min(); }
 
-template <typename T>
-T enum_from_string(const std::unordered_map<std::string, T>& converter, const std::string& value,
-                   const std::string& type_name) {
-  auto it = converter.find(value);
-  if (it != converter.end()) return it->second;
-  throw cpmml::ParsingException("unsupported " + type_name + ": " + value);
-}
+// Heterogeneous hash for string-keyed maps: lets find() take a string_view
+// without materialising a std::string. Value and Indexer each carried their own
+// copy of this.
+struct TransparentStringHash {
+  using is_transparent = void;
+  size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
+};
 
 static inline std::string& ltrim(std::string& s) {
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isspace(c); }));

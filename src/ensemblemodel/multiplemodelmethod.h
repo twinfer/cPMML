@@ -15,6 +15,7 @@
 #include <omp.h>
 #endif
 
+#include "core/enum_parser.h"
 #include "core/internal_score.h"
 #include "segment.h"
 #include "utils/utils.h"
@@ -46,7 +47,7 @@ class MultipleModelMethod {
     MODEL_CHAIN
   };
 
-  MultipleModelMethodType value;
+  MultipleModelMethodType value = MultipleModelMethodType::MAJORITY_VOTE;
   std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)> function;
 
   MultipleModelMethod() = default;
@@ -54,25 +55,25 @@ class MultipleModelMethod {
   explicit MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function)
       : value(from_string(multiplemodelmethod)), function(to_function(multiplemodelmethod, mining_function)) {}
 
-  static MultipleModelMethodType from_string(const std::string& multiplemodelmethod) {
-    static const std::unordered_map<std::string, MultipleModelMethodType> multiplemodelmethod_converter = {
-        {"majorityvote", MultipleModelMethodType::MAJORITY_VOTE},
-        {"weightedmajorityvote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE},
-        {"average", MultipleModelMethodType::AVERAGE},
-        {"weightedaverage", MultipleModelMethodType::WEIGHTED_AVERAGE},
-        {"median", MultipleModelMethodType::MEDIAN},
-        {"max", MultipleModelMethodType::MAX},
-        {"sum", MultipleModelMethodType::SUM},
-        {"selectfirst", MultipleModelMethodType::SELECT_FIRST},
-        {"selectall", MultipleModelMethodType::SELECT_ALL},
-        {"modelchain", MultipleModelMethodType::MODEL_CHAIN}};
+  static constexpr EnumEntry<MultipleModelMethodType> TABLE[] = {
+      {"majorityvote", MultipleModelMethodType::MAJORITY_VOTE, "majorityVote"},
+      {"weightedmajorityvote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE, "weightedMajorityVote"},
+      {"average", MultipleModelMethodType::AVERAGE, "average"},
+      {"weightedaverage", MultipleModelMethodType::WEIGHTED_AVERAGE, "weightedAverage"},
+      {"median", MultipleModelMethodType::MEDIAN, "median"},
+      {"max", MultipleModelMethodType::MAX, "max"},
+      {"sum", MultipleModelMethodType::SUM, "sum"},
+      {"selectfirst", MultipleModelMethodType::SELECT_FIRST, "selectFirst"},
+      {"selectall", MultipleModelMethodType::SELECT_ALL, "selectAll"},
+      {"modelchain", MultipleModelMethodType::MODEL_CHAIN, "modelChain"},
+  };
 
-    try {
-      return multiplemodelmethod_converter.at(::to_lower(multiplemodelmethod));
-    } catch (const std::out_of_range& e) {
-      throw cpmml::ParsingException(multiplemodelmethod + " not supported");
-    }
+  // Segmentation/@multipleModelMethod is required.
+  static MultipleModelMethodType from_string(const std::string& multiplemodelmethod) {
+    return enum_value(multiplemodelmethod, TABLE, "multipleModelMethod");
   }
+
+  std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 
   static std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)> to_function(
       const std::string& multiplemodelmethod, const MiningFunction& mining_function) {

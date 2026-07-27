@@ -30,12 +30,8 @@ class Indexer {
   std::unordered_map<size_t, DataType> index_datatype;
 
   // Per-model string↔double mapping (moved from Value static for thread safety)
-  struct StringHash {
-    using is_transparent = void;
-    size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
-  };
   double string_value_index = 0;
-  std::unordered_map<std::string, double, StringHash, std::equal_to<>> string_value_map;
+  std::unordered_map<std::string, double, TransparentStringHash, std::equal_to<>> string_value_map;
   bool frozen = false;
 
  public:
@@ -54,13 +50,6 @@ class Indexer {
   DataType get_type(const size_t& index) const { return index_datatype.at(index); }
 
   bool contains(const std::string& name) const { return name_index.find(name) != name_index.cend(); }
-
-  std::string random_name() {
-    std::string random = std::to_string(rand());
-    while (name_index.find(random) != name_index.end()) random = std::to_string(rand());
-
-    return random;
-  }
 
   size_t get_or_set(const std::string& name) {
     if (name_index.find(name) == name_index.end()) {

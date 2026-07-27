@@ -16,7 +16,6 @@
 #include "core/miningfield.h"
 #include "core/miningfunction.h"
 #include "core/miningschema.h"
-#include "core/string_view.h"
 #include "core/xmlnode.h"
 #include "node.h"
 

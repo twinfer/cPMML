@@ -40,11 +40,6 @@ class Value {
   bool missing = true;
   std::string svalue;
 
-  struct StringHash {
-    using is_transparent = void;
-    size_t operator()(std::string_view sv) const noexcept { return std::hash<std::string_view>{}(sv); }
-  };
-
   // Thread-local pointer to the active model's Indexer for per-model string mapping.
   // Set via ScopedIndexer RAII at model parse/score entry points.
   inline static thread_local class Indexer* active_indexer = nullptr;
@@ -100,8 +95,6 @@ class Value {
   inline bool is_not_in(const std::unordered_set<Value, ValueHash>& other) const {
     return other.find(*this) == other.end();
   }
-
-  inline Value operator+=(const Value& other) const { return Value(svalue + other.svalue); }
 
   inline void lowercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::tolower); }
   inline void uppercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::toupper); }
@@ -162,18 +155,19 @@ class Value {
         return ::to_double(value);
       case DataType::DataTypeValue::DOUBLE:
         return ::to_double(value);
-      case DataType::DataTypeValue::STRING: {
+      case DataType::DataTypeValue::STRING:
         if (active_indexer) return active_indexer->get_string_value(value);
-        // Fallback for contexts without an active indexer (should not happen in normal use)
-        static std::unordered_map<std::string, double, StringHash, std::equal_to<>> fallback_converter;
-        static double fallback_index = 0;
-        auto it = fallback_converter.find(std::string_view(value));
-        if (it == fallback_converter.end()) {
-          auto [inserted, _] = fallback_converter.emplace(value, fallback_index++);
-          return inserted->second;
-        }
-        return it->second;
-      }
+
+        // String codes are only meaningful within one model's Indexer: two
+        // strings compare equal iff they were interned by the same map. There
+        // used to be a process-global fallback map here for "contexts without
+        // an active indexer", which is not a degraded answer -- a code drawn
+        // from a different numbering silently fails to match the model's own,
+        // and the map is shared mutable state across scoring threads. Every
+        // entry point establishes a ScopedIndexer, so this is unreachable;
+        // saying so beats interning into the wrong map.
+        throw cpmml::InvalidValueException("no active Indexer: cannot map the string \"" + value +
+                                           "\" to a value comparable with this model's");
     }
 
     return std::numeric_limits<double>::min();

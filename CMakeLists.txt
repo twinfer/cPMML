@@ -129,7 +129,6 @@ add_library(
         src/core/datafield.h
         src/core/closure.h
         src/core/value.h
-        src/core/string_view.h
         src/core/internal_score.h
         src/core/fieldusagetype.h
         src/core/indexer.h
