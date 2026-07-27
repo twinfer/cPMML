@@ -40,6 +40,10 @@ bool Model::validate(const Input& arguments) const {
 
 std::string Model::output_name() const { return require(evaluator, "read output_name").output_name(); }
 
+std::vector<std::string> Model::output_names() const {
+  return require(evaluator, "read output_names").output_names();
+}
+
 std::string Model::mining_function() const {
   return require(evaluator, "read mining_function").mining_function_name();
 }

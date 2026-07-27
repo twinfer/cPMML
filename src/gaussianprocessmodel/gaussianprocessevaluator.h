@@ -34,6 +34,8 @@ class GaussianProcessEvaluator : public InternalEvaluator {
 
   inline std::string get_target_name() const override { return gp.target_field.name; }
   inline std::string output_name() const override { return gp.output_name(); }
+
+  inline std::vector<std::string> output_names() const override { return gp.output_names(); }
   inline std::string mining_function_name() const override { return gp.mining_function.to_string(); }
 };
 

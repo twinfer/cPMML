@@ -52,25 +52,31 @@ class SingleNormalizationMethodBuilder {
  */
 class MultiNormalizationMethodBuilder {
  public:
+  // is_ordinal comes from the target's optype. It only changes the answer for
+  // "none", which the spec allows for both kinds and defines differently for
+  // each: categorical fills the last category with 1 - sum of the others, while
+  // ordinal treats the values as cumulative and differences them. The link
+  // methods are prohibited for multinomial categorical targets, so they are
+  // unconditionally the cumulative form.
   static std::function<std::vector<double>(const std::vector<double>&)> build(
-      const NormalizationMethodType& normalizationMethodType) {
+      const NormalizationMethodType& normalizationMethodType, bool is_ordinal = false) {
     switch (normalizationMethodType.value) {
       case NormalizationMethodType::NormalizationMethodTypeValue::NONE:
-        return categorical_none;
+        return is_ordinal ? ordinal_none : categorical_none;
       case NormalizationMethodType::NormalizationMethodTypeValue::SIMPLEMAX:
         return categorical_simplemax;
       case NormalizationMethodType::NormalizationMethodTypeValue::SOFTMAX:
         return categorical_softmax;
       case NormalizationMethodType::NormalizationMethodTypeValue::LOGIT:
-        return categorical_logit;
+        return ordinal_logit;
       case NormalizationMethodType::NormalizationMethodTypeValue::PROBIT:
-        return categorical_probit;
+        return ordinal_probit;
       case NormalizationMethodType::NormalizationMethodTypeValue::CLOGLOG:
-        return categorical_cloglog;
+        return ordinal_cloglog;
       case NormalizationMethodType::NormalizationMethodTypeValue::LOGLOG:
-        return categorical_loglog;
+        return ordinal_loglog;
       case NormalizationMethodType::NormalizationMethodTypeValue::CAUCHIT:
-        return categorical_cauchit;
+        return ordinal_cauchit;
       default:
         throw cpmml::ParsingException("Incorrect normalization method");
     }

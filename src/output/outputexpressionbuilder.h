@@ -12,12 +12,14 @@
 #include <memory>
 
 #include "associationoutput.h"
+#include "confidence.h"
 #include "entityid.h"
 #include "expression/expression.h"
 #include "expression/fieldref.h"
 #include "outputexpressiontype.h"
 #include "predictedValue.h"
 #include "probability.h"
+#include "reasoncode.h"
 #include "residual.h"
 #include "transformedvalue.h"
 
@@ -67,11 +69,18 @@ class OutputExpressionBuilder {
         return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
                                                     AssociationOutput::RuleFeature::SUPPORT);
       case OutputExpressionType::OutputExpressionTypeValue::CONFIDENCE:
-        return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
-                                                    AssociationOutput::RuleFeature::CONFIDENCE);
+        // Same split as entityId above: with an algorithm attribute this names a
+        // ranked association rule, without one it is the confidence of whatever
+        // the model matched.
+        if (node.exists_attribute("algorithm"))
+          return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
+                                                      AssociationOutput::RuleFeature::CONFIDENCE);
+        return std::make_shared<Confidence>(indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::LIFT:
         return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type,
                                                     AssociationOutput::RuleFeature::LIFT);
+      case OutputExpressionType::OutputExpressionTypeValue::REASON_CODE:
+        return std::make_shared<ReasonCode>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PASS_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       default:

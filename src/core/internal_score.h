@@ -42,6 +42,13 @@ class InternalScore {
   std::unordered_map<std::string, std::string> str_outputs;
   std::string entity_id;
   std::vector<std::string> ranked_entity_ids;  // KNN clustering: neighbor IDs in distance order
+  // OutputField feature="confidence" outside association models, where the
+  // confidence belongs to the matched rule or node rather than to a rule set.
+  // Populated by RuleSetModel; double_min means the model states none.
+  double confidence = double_min();
+  // Scorecard: reason codes ranked by accumulated points missed, largest first.
+  // OutputField feature="reasonCode" rank="N" names a position in this list.
+  std::vector<std::string> ranked_reason_codes;
 
   // Association model: matched rules per algorithm
   std::unordered_map<std::string, std::vector<MatchedRule>> matched_rules_by_algorithm;

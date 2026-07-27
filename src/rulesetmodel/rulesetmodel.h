@@ -80,10 +80,22 @@ class RuleSetModel : public InternalModel {
   // --- Scoring ---
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    return std::make_unique<InternalScore>(evaluate(sample));
+    const SimpleRule* winner = select(sample);
+
+    // id and confidence come off the *same* rule that produced the score, so
+    // entityId and confidence describe the prediction rather than some other
+    // rule that also happened to fire. With no match, the spec's defaultScore
+    // pairs with defaultConfidence and there is no entity to name.
+    auto score = std::make_unique<InternalScore>(winner != nullptr ? winner->score : default_score);
+    score->entity_id = winner != nullptr ? winner->id : "";
+    score->confidence = winner != nullptr ? winner->confidence : default_confidence;
+    return score;
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return evaluate(sample); }
+  inline std::string predict_raw(const Sample& sample) const override {
+    const SimpleRule* winner = select(sample);
+    return winner != nullptr ? winner->score : default_score;
+  }
 
  private:
   void parse_rules(const XmlNode& ruleset_node, const std::shared_ptr<Indexer>& indexer) {
@@ -124,7 +136,10 @@ class RuleSetModel : public InternalModel {
     }
   }
 
-  std::string evaluate(const Sample& sample) const {
+  // Returns the rule the criterion selects, or nullptr when nothing matched.
+  // Returning the rule rather than just its score is what lets id and
+  // confidence reach the result at all.
+  const SimpleRule* select(const Sample& sample) const {
     switch (criterion) {
       case SelectionCriterion::FIRST_HIT:
         return first_hit(sample);
@@ -133,34 +148,42 @@ class RuleSetModel : public InternalModel {
       case SelectionCriterion::WEIGHTED_SUM:
         return weighted_sum(sample);
     }
-    return default_score;
+    return nullptr;
   }
 
-  std::string first_hit(const Sample& sample) const {
+  const SimpleRule* first_hit(const Sample& sample) const {
     for (const auto& rule : rules)
-      if (!rule.predicate.is_empty && rule.predicate(sample)) return rule.score;
-    return default_score;
+      if (!rule.predicate.is_empty && rule.predicate(sample)) return &rule;
+    return nullptr;
   }
 
-  std::string weighted_max(const Sample& sample) const {
-    double best = -1.0;
-    std::string result = default_score;
-    for (const auto& rule : rules) {
-      if (!rule.predicate.is_empty && rule.predicate(sample) && rule.weight > best) {
-        best = rule.weight;
-        result = rule.score;
-      }
-    }
-    return result;
+  const SimpleRule* weighted_max(const Sample& sample) const {
+    const SimpleRule* best = nullptr;
+    for (const auto& rule : rules)
+      if (!rule.predicate.is_empty && rule.predicate(sample) && (best == nullptr || rule.weight > best->weight))
+        best = &rule;
+    return best;
   }
 
-  std::string weighted_sum(const Sample& sample) const {
+  // The winning *score* is the one with the highest total weight; the rule
+  // reported alongside it is the heaviest matching rule carrying that score,
+  // since a sum over several rules has no single id or confidence of its own.
+  const SimpleRule* weighted_sum(const Sample& sample) const {
     std::map<std::string, double> sums;
     for (const auto& rule : rules)
       if (!rule.predicate.is_empty && rule.predicate(sample)) sums[rule.score] += rule.weight;
-    if (sums.empty()) return default_score;
-    return std::max_element(sums.begin(), sums.end(), [](const auto& a, const auto& b) { return a.second < b.second; })
-        ->first;
+    if (sums.empty()) return nullptr;
+
+    const std::string& winner =
+        std::max_element(sums.begin(), sums.end(), [](const auto& a, const auto& b) { return a.second < b.second; })
+            ->first;
+
+    const SimpleRule* best = nullptr;
+    for (const auto& rule : rules)
+      if (rule.score == winner && !rule.predicate.is_empty && rule.predicate(sample) &&
+          (best == nullptr || rule.weight > best->weight))
+        best = &rule;
+    return best;
   }
 };
 

@@ -39,6 +39,8 @@ class TreeEvaluator : public InternalEvaluator {
 
   inline std::string get_target_name() const override { return tree.target_field.name; }
   inline std::string output_name() const override { return tree.output_name(); }
+
+  inline std::vector<std::string> output_names() const override { return tree.output_names(); }
   inline std::string mining_function_name() const override { return tree.mining_function.to_string(); }
 };
 

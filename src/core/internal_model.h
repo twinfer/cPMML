@@ -87,6 +87,19 @@ class InternalModel {
     return target_field.name;
   }
 
+  // Every OutputField the document declares, in document order. Callers need
+  // this to tell "the model produced no value for that field" apart from "that
+  // field is not one of this model's outputs" -- num_outputs/str_outputs only
+  // carry what was actually produced, so a silently missing output is otherwise
+  // indistinguishable from a correct one.
+  inline std::vector<std::string> output_names() const {
+    std::vector<std::string> names;
+    if (output.empty) return names;
+    names.reserve(output.raw_outputfields.size());
+    for (const auto& of : output.raw_outputfields) names.push_back(of.name);
+    return names;
+  }
+
   inline bool validate(const std::unordered_map<std::string, std::string>& sample) const {
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
@@ -162,7 +175,10 @@ class InternalModel {
     // target field, so we have to do this separately.
     if (!mining_schema.target.empty) {
       auto it = sample.find(mining_schema.target.name);
-      if (it != sample.end())
+      // A blank cell is an absent actual value, not a value of "". Converting it
+      // threw for any numeric target, so a dataset carrying an empty target
+      // column -- an ordinary thing to score against -- failed outright.
+      if (it != sample.end() && !it->second.empty())
         internal_sample.change_value(mining_schema.target_index,
                                      Value(it->second, mining_schema.target.datatype));
     }

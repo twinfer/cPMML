@@ -34,6 +34,8 @@ class RegressionEvaluator : public InternalEvaluator {
 
   inline std::string get_target_name() const override { return regression.target_field.name; }
   inline std::string output_name() const override { return regression.output_name(); }
+
+  inline std::vector<std::string> output_names() const override { return regression.output_names(); }
   inline std::string mining_function_name() const override { return regression.mining_function.to_string(); }
 };
 

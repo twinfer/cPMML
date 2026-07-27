@@ -72,6 +72,8 @@ class InternalEvaluator {
 
   virtual inline std::string output_name() const { return get_target_name(); }
 
+  virtual inline std::vector<std::string> output_names() const { return {}; }
+
   virtual inline std::string mining_function_name() const { return ""; }
 
   InternalEvaluator(const InternalEvaluator&) = default;

@@ -37,13 +37,16 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
  public:
   std::unique_ptr<InternalModel> inner;
   const ClusteringModel* clustering = nullptr;  // set for clusterMeanDist (non-owning view of inner)
-  double mean_threshold = 0.5;
   double sample_data_size = 256.0;
   bool is_iforest = true;
 
   explicit AnomalyDetectionEvaluator(const XmlNode& pmml_root) : InternalEvaluator(pmml_root) {
     XmlNode ad = pmml_root.get_child("AnomalyDetectionModel");
-    mean_threshold = ad.get_double_attribute("meanThreshold", 0.5);
+    // There was a `meanThreshold` member here, read from an attribute of the
+    // same name and used by nothing. AnomalyDetectionModel has no such
+    // attribute — the schema allows only modelName, algorithmName,
+    // functionName, algorithmType, sampleDataSize and isScorable — so it was
+    // not a dropped feature but an invented one. Removed rather than wired up.
     sample_data_size = ad.get_double_attribute("sampleDataSize", 256.0);
     std::string algo = to_lower(ad.get_attribute("algorithmType"));
     is_iforest = (algo == "iforest");

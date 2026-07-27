@@ -42,7 +42,9 @@ class OutputExpressionType {
     RULE_ID,          // feature="ruleId"
     SUPPORT,          // feature="support"
     CONFIDENCE,       // feature="confidence"
-    LIFT              // feature="lift"
+    LIFT,             // feature="lift"
+    // Scorecard
+    REASON_CODE       // feature="reasonCode", selected by the rank attribute
   };
 
   OutputExpressionTypeValue value;
@@ -75,7 +77,8 @@ class OutputExpressionType {
         {"ruleid", OutputExpressionTypeValue::RULE_ID},
         {"support", OutputExpressionTypeValue::SUPPORT},
         {"confidence", OutputExpressionTypeValue::CONFIDENCE},
-        {"lift", OutputExpressionTypeValue::LIFT}};
+        {"lift", OutputExpressionTypeValue::LIFT},
+        {"reasoncode", OutputExpressionTypeValue::REASON_CODE}};
 
     try {
       return expressiontype_converter.at(to_lower(expressiontype));

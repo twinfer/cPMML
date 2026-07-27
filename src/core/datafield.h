@@ -36,7 +36,12 @@ class DataField {
   DataType datatype;
   size_t index = std::numeric_limits<size_t>::max();
   OpType optype;
-  Value missing_replacement;
+  // <Value property="missing"> declares which raw input tokens *stand for* a
+  // missing value — "?", "NA", "-999". They are markers, not a replacement, so
+  // they are kept as the literal strings the document wrote and matched before
+  // any conversion: "-999" parses perfectly well as a double and would sail
+  // through as data otherwise. This used to be a single Value that nothing read.
+  std::set<std::string> missing_markers;
   Predicate constraints;
 
   DataField() = default;
@@ -60,7 +65,7 @@ class DataField {
           allowed_values.emplace(Value(value.get_attribute("value"), datatype));
           break;
         case Property::PropertyValue::MISSING:
-          missing_replacement = Value(value.get_attribute("value"), datatype);
+          missing_markers.insert(value.get_attribute("value"));
           break;
         case Property::PropertyValue::INVALID:
           forbidden_values.emplace(Value(value.get_attribute("value"), datatype));

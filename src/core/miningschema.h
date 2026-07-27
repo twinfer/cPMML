@@ -70,7 +70,9 @@ class MiningSchema {
           miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::GROUP) {
         try {
           const std::string& raw = input.at(miningfield.name);
-          if (raw.empty()) {
+          // A token the DataDictionary declared as a missing marker is missing
+          // input, not data: it takes the same path as an absent field.
+          if (raw.empty() || miningfield.is_missing_marker(raw)) {
             sample.change_value(miningfield.index, miningfield.handle_missing());
           } else {
             sample.change_value(miningfield.index, miningfield.createValue(raw));

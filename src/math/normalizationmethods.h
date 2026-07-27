@@ -72,49 +72,34 @@ inline std::vector<double> categorical_none(const std::vector<double>& values) {
   return result;
 }
 
-inline std::vector<double> categorical_base(const std::vector<double>& values, std::function<double(double)> function,
-                                            const std::string& function_name) {
-  if (values.size() != 2) throw cpmml::MathException(function_name + " must have exactly 2 inputs");
+// The binary categorical_logit/probit/cloglog/loglog/cauchit functions lived
+// here. Each was the two-category case of the cumulative link below -- F(y),
+// 1-F(y) -- and each threw on anything else, which is what made an ordinal
+// target with three or more categories unscoreable. ordinal_base covers both.
 
-  std::vector<double> result;
-  result.push_back(function(values[0]));
-  result.push_back(1 - result[0]);
-
-  return result;
-}
-
-inline std::vector<double> categorical_logit(const std::vector<double>& values) {
-  return categorical_base(values, logit, "logit");
-}
-
-inline std::vector<double> categorical_probit(const std::vector<double>& values) {
-  return categorical_base(values, probit, "probit");
-}
-
-inline std::vector<double> categorical_cloglog(const std::vector<double>& values) {
-  return categorical_base(values, cloglog, "cloglog");
-}
-
-inline std::vector<double> categorical_loglog(const std::vector<double>& values) {
-  return categorical_base(values, loglog, "loglog");
-}
-
-inline std::vector<double> categorical_cauchit(const std::vector<double>& values) {
-  if (values.size() != 2) throw cpmml::MathException("Cauchit must have exactly 2 inputs");
-
-  std::vector<double> result;
-  result.push_back(cauchit(values[0]));
-  result.push_back(1 - result[0]);
-
-  return result;
-}
-
+/**
+ * Cumulative-link normalization for an ordinal target, per the spec:
+ *
+ *   "Apply the inverse link function to obtain the cumulative probability"
+ *   p_1 = F(y_1),  p_j = F(y_j) - F(y_(j-1)),  p_n = 1 - F(y_(n-1))
+ *
+ * There is one RegressionTable per target category, and the last one takes no
+ * part -- its category is whatever probability is left over. So n values in,
+ * n probabilities out, with only the first n-1 read.
+ *
+ */
 inline std::vector<double> ordinal_base(const std::vector<double>& values, std::function<double(double)> function) {
-  std::vector<double> result;
+  if (values.size() < 2) throw cpmml::MathException("cumulative link normalization needs at least 2 categories");
 
-  result.push_back(function(values[0]));
-  for (auto i = 1u; i < values.size(); i++) result.push_back(function(values[i]) - result[i - 1]);
-  result.push_back(1 - function(values[values.size() - 2]));
+  std::vector<double> cumulative;
+  cumulative.reserve(values.size() - 1);
+  for (size_t i = 0; i + 1 < values.size(); i++) cumulative.push_back(function(values[i]));
+
+  std::vector<double> result;
+  result.reserve(values.size());
+  result.push_back(cumulative[0]);
+  for (size_t i = 1; i < cumulative.size(); i++) result.push_back(cumulative[i] - cumulative[i - 1]);
+  result.push_back(1 - cumulative.back());
 
   return result;
 }
@@ -122,8 +107,6 @@ inline std::vector<double> ordinal_base(const std::vector<double>& values, std::
 inline std::vector<double> ordinal_logit(const std::vector<double>& values) { return ordinal_base(values, logit); }
 
 inline std::vector<double> ordinal_probit(const std::vector<double>& values) { return ordinal_base(values, probit); }
-
-inline std::vector<double> ordinal_exp(const std::vector<double>& values) { return ordinal_base(values, _exp); }
 
 inline std::vector<double> ordinal_cloglog(const std::vector<double>& values) { return ordinal_base(values, cloglog); }
 

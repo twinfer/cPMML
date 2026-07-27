@@ -77,13 +77,24 @@ class ScorecardModel : public InternalModel {
   // --- Scoring ---
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    auto [val, reason_codes] = compute(sample);
-    auto score = std::make_unique<InternalScore>(val);
-    for (const auto& [code, diff] : reason_codes) score->num_outputs[code] = diff;
+    const Scored scored = compute(sample);
+    if (!scored.valid) return std::make_unique<InternalScore>();
+
+    auto score = std::make_unique<InternalScore>(scored.total);
+    // Ranked, so an OutputField feature="reasonCode" rank="N" can name the Nth.
+    // The codes also stay in num_outputs keyed by name, which is how they were
+    // reachable before this and is what any existing consumer reads.
+    for (const auto& [code, diff] : scored.reason_codes) {
+      score->ranked_reason_codes.push_back(code);
+      score->num_outputs[code] = diff;
+    }
     return score;
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return double_to_string(compute(sample).first); }
+  inline std::string predict_raw(const Sample& sample) const override {
+    const Scored scored = compute(sample);
+    return scored.valid ? double_to_string(scored.total) : "";
+  }
 
  private:
   void parse_characteristics(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
@@ -120,38 +131,70 @@ class ScorecardModel : public InternalModel {
     }
   }
 
-  std::pair<double, std::vector<std::pair<std::string, double>>> compute(const Sample& sample) const {
-    double total = initial_score;
-    std::vector<std::pair<std::string, double>> reason_codes;
+  struct Scored {
+    bool valid = false;  // false when some Characteristic matched no Attribute
+    double total = 0.0;
+    std::vector<std::pair<std::string, double>> reason_codes;  // highest points-missed first
+  };
+
+  /**
+   * The spec's reason-code procedure, in its own order:
+   *
+   *   "Initialize points missed for each unique reason code to zero... For each
+   *    characteristic, compute the point differential... Add the differential to
+   *    the running total for that reason code... Rank the total points, P1...Pn
+   *    from largest to smallest, and return the corresponding reason codes."
+   *
+   * Accumulation comes *before* ranking, so a code used by two characteristics
+   * is one entry holding the sum. This used to emit one entry per characteristic
+   * and then write them into an unordered_map keyed by code, which lost the rank
+   * the sort had just established and let the second use of a code overwrite the
+   * first instead of adding to it.
+   */
+  Scored compute(const Sample& sample) const {
+    Scored result;
+    result.valid = true;
+    result.total = initial_score;
+
+    std::vector<std::pair<std::string, double>> points_missed;  // insertion-ordered, so ties stay stable
 
     for (const auto& ch : characteristics) {
+      bool matched = false;
       for (const auto& attr : ch.attributes) {
         if (attr.predicate.is_empty || attr.predicate(sample)) {
-          double ps;
-          if (attr.complex_score)
-            ps = attr.complex_score->eval(sample).value;
-          else
-            ps = attr.partial_score;
-
-          total += ps;
+          matched = true;
+          const double ps = attr.complex_score ? attr.complex_score->eval(sample).value : attr.partial_score;
+          result.total += ps;
 
           if (use_reason_codes) {
             const std::string code = attr.reason_code.empty() ? ch.reason_code : attr.reason_code;
             if (!code.empty() && code != "null") {
               const double diff = points_below ? (ch.baseline_score - ps) : (ps - ch.baseline_score);
-              reason_codes.emplace_back(code, diff);
+              auto it = std::find_if(points_missed.begin(), points_missed.end(),
+                                     [&code](const auto& entry) { return entry.first == code; });
+              if (it != points_missed.end())
+                it->second += diff;
+              else
+                points_missed.emplace_back(code, diff);
             }
           }
           break;  // first matching attribute wins
         }
       }
+
+      // "If not even a single Attribute/PREDICATE evaluates to TRUE for a given
+      // Characteristic, the scorecard as a whole returns an invalid value." It
+      // used to contribute 0 and carry on, which is a different scorecard.
+      if (!matched) {
+        result.valid = false;
+        return result;
+      }
     }
 
-    // Sort reason codes: highest differential first
-    std::sort(reason_codes.begin(), reason_codes.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
-
-    return {total, reason_codes};
+    std::stable_sort(points_missed.begin(), points_missed.end(),
+                     [](const auto& a, const auto& b) { return a.second > b.second; });
+    result.reason_codes = std::move(points_missed);
+    return result;
   }
 };
 

@@ -283,6 +283,15 @@ class Model {
   std::string output_name() const;
 
   /**
+   * @brief Names of every OutputField the model declares, in document order.
+   *
+   * Empty when the model has no Output element. Use it to tell a field the
+   * model failed to produce apart from one it was never asked to produce:
+   * Result::num_outputs() and str_outputs() carry only what was computed.
+   */
+  std::vector<std::string> output_names() const;
+
+  /**
    * @brief Returns the PMML mining function type as a string.
    *
    * Possible values: "CLASSIFICATION", "REGRESSION", "CLUSTERING",

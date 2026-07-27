@@ -33,7 +33,12 @@ class MiningField : public DataField {
  public:
   bool empty = true;
   FieldUsageType field_usage_type;
-  OpType optype;
+  // No optype member here: it used to shadow DataField::optype and was set
+  // unconditionally from the MiningField node, so a MiningField without the
+  // optional attribute reported UNDEFINED and hid the DataDictionary's answer.
+  // The spec has MiningField/@optype *override* the DataField's, not replace
+  // it, so the ctor overwrites the inherited one only when the attribute is
+  // there.
   double importance = double_min();
   bool hasOutlierTreatment = false;
   OutlierTreatmentMethod outliertreatmentmethod;
@@ -55,7 +60,6 @@ class MiningField : public DataField {
       : DataField(data_field),
         empty(false),
         field_usage_type(node.get_attribute("usageType")),
-        optype((node.get_attribute("optype"))),
         importance(node.get_double_attribute("importance")),
         hasOutlierTreatment(node.exists_attribute("outliers")),
         outliertreatmentmethod(OutlierTreatmentMethod(node.get_attribute("outliers"))),
@@ -72,7 +76,9 @@ class MiningField : public DataField {
         hasInvalidTreatment(node.exists_attribute("invalidValueTreatmentMethod")),
         invalidvalue_treatmentmethod(
             hasInvalidTreatment ? InvalidValueTreatmentMethod(node.get_attribute("invalidValueTreatmentMethod"))
-                                : InvalidValueTreatmentMethod()) {};
+                                : InvalidValueTreatmentMethod()) {
+    if (node.exists_attribute("optype")) optype = OpType(node.get_attribute("optype"));
+  };
 
   static std::unordered_map<std::string, MiningField> to_miningfields(std::vector<XmlNode> nodes,
                                                                       const DataDictionary& data_dictionary) {
@@ -89,6 +95,12 @@ class MiningField : public DataField {
   }
 
   inline Value handle_missing() const { return hasMissingReplacement ? missingvalue_replacement : Value(); }
+
+  // True when the raw input token is one the DataDictionary declared as
+  // standing for a missing value (<Value property="missing">).
+  inline bool is_missing_marker(const std::string& raw) const {
+    return !missing_markers.empty() && missing_markers.find(raw) != missing_markers.cend();
+  }
 
   inline bool is_outlier(const Value& value) const {
     // if it doesn't have low or high value it must be treated "asIs"

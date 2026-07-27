@@ -49,6 +49,8 @@ static cpmml::Input to_input(const std::unordered_map<std::string, std::string>&
 
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
   const std::string out_col = model.output_name();
+  const auto names = model.output_names();
+  const std::unordered_set<std::string> declared_outputs(names.cbegin(), names.cend());
 
   if (!row.count(out_col)) {
     std::cerr << "output column '" << out_col << "' not found in fixture CSV" << std::endl;
@@ -111,6 +113,15 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
       const auto sout = result.str_outputs();
       for (const auto& [col, expected_val] : row) {
         if (col == out_col || expected_val.empty()) continue;
+
+        // A declared OutputField that produced nothing is a failure, not a
+        // column to skip. Without this an evaluator that silently stopped
+        // emitting an output passed every fixture that asserted it.
+        if (declared_outputs.count(col) && !nout.count(col) && !sout.count(col)) {
+          std::cerr << "output '" << col << "': model declares it but produced no value"
+                    << "  expected: " << expected_val << "  sample: " << to_string(row) << std::endl;
+          return -1;
+        }
 
         auto nit = nout.find(col);
         if (nit != nout.end()) {

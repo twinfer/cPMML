@@ -52,6 +52,8 @@ class AssociationEvaluator : public InternalEvaluator {
 
   inline std::string get_target_name() const override { return model.target_field.name; }
   inline std::string output_name() const override { return model.output_name(); }
+
+  inline std::vector<std::string> output_names() const override { return model.output_names(); }
   inline std::string mining_function_name() const override { return model.mining_function.to_string(); }
 };
 

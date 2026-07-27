@@ -57,7 +57,8 @@ class OutputField {
                  feat == OutputExpressionType::OutputExpressionTypeValue::ANTECEDENT ||
                  feat == OutputExpressionType::OutputExpressionTypeValue::CONSEQUENT ||
                  feat == OutputExpressionType::OutputExpressionTypeValue::RULE ||
-                 feat == OutputExpressionType::OutputExpressionTypeValue::RULE_ID) {
+                 feat == OutputExpressionType::OutputExpressionTypeValue::RULE_ID ||
+                 feat == OutputExpressionType::OutputExpressionTypeValue::REASON_CODE) {
         datatype = DataType::DataTypeValue::STRING;
       } else if (indexer->contains(model_target)) {
         datatype = indexer->get_type(model_target);
