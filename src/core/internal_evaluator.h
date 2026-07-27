@@ -30,6 +30,7 @@
  *  - TransformationDictionary
  *  - MODEL-ELEMENT
  */
+namespace cpmml {
 class InternalEvaluator {
  public:
   using FieldValue = std::variant<std::string, int, std::vector<std::string>, std::vector<double>>;
@@ -99,5 +100,11 @@ class InternalEvaluator {
     return flat;
   }
 };
+}  // namespace cpmml
+
+// See internal_score.h: declared as cpmml::InternalEvaluator in the public
+// header, spelled unqualified everywhere inside.
+using cpmml::InternalEvaluator;
+
 
 #endif

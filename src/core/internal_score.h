@@ -21,6 +21,7 @@
  * It contains both double and literal representations of the score, as well as
  * the associated probabilities and all values produced by Output.
  */
+namespace cpmml {
 class InternalScore {
  public:
   // Per-rule data stored for association model output features
@@ -91,5 +92,11 @@ class InternalScore {
 
   virtual ~InternalScore() = default;
 };
+}  // namespace cpmml
+
+// The public header declares this as cpmml::InternalScore, so that including
+// cPMML.h no longer introduces the name into the consumer's global namespace.
+// Internal code keeps spelling it unqualified.
+using cpmml::InternalScore;
 
 #endif

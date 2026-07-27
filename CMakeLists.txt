@@ -11,6 +11,16 @@ set(PROJECT_VERSION_MINOR 1)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
+# Only the CPMML_API surface in include/cPMML.h is exported. Without this the
+# library exported some six hundred internal symbols from the global namespace
+# -- is_missing, single_exp, greater_than, _or, to_double -- each one able to
+# collide with, or be interposed by, anything the consumer links. Set before
+# the dependencies are declared so pugixml and miniz, which are compiled into
+# libcPMML and not re-exported by it, are covered too.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 include(cmake/CPM.cmake)
 
 # DEPENDENCIES
