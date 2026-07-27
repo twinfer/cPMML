@@ -123,8 +123,11 @@ class TimeSeriesModel {
     // GARCHPart — conditional variance
     int gp = 0, gq = 0;
     double omega = 0.0;               // intercept ω in variance equation
-    std::vector<double> alpha;        // ARCH coefficients α₁,..,α_{gp}
-    std::vector<double> beta_garch;   // GARCH coefficients β₁,..,β_{gq}
+    // Per the spec, gq is the "order of residual squares" and gp the "order of
+    // variance": h_t = a_0 + sum_{i=1..gq} alpha_i eps^2_{t-i}
+    //                      + sum_{j=1..gp} beta_j h_{t-j}
+    std::vector<double> alpha;        // ARCH coefficients α₁,..,α_{gq}
+    std::vector<double> beta_garch;   // GARCH coefficients β₁,..,β_{gp}
     std::vector<double> eps_sq;       // past ε² (most-recent first)
     std::vector<double> sigma2_hist;  // past σ² (most-recent first)
   } garch;
@@ -312,6 +315,15 @@ class TimeSeriesModel {
     return out;
   }
 
+  /**
+   * Deliberate approximation, not a spec formula.
+   *
+   * PMML defines no predictive variance for ExponentialSmoothing — as with the
+   * point forecasts, it defers to Gardner (2005), where the variance depends on
+   * the error/trend/seasonality combination. This returns sigma^2 * h, which is
+   * exact only for the local-level model and conservative elsewhere. Callers
+   * relying on ExponentialSmoothing variance should treat it as indicative.
+   */
   std::vector<double> variance_ets(int horizon) const {
     // Approximate h-step variance: σ² × h (linear growth, conservative)
     double s2 = ets.rmse * ets.rmse;
@@ -338,16 +350,19 @@ class TimeSeriesModel {
   }
 
   std::vector<double> variance_ssm(int horizon) const {
-    // If PsiVector was present in the PMML, use it: var(h) = σ² × Σ_{j=0}^{h-1} ψ_j²
-    // Weights beyond the stored horizon are treated as 0 (stationary decay assumption).
-    // Otherwise fall back to constant σ² per step.
+    // Spec: sigma^2(t+h) = sigma^2 (1 + psi_1^2 + ... + psi_{h-1}^2).
+    //
+    // The leading 1 is psi_0 and is implicit: the PsiVector array holds psi_1
+    // onward, as the spec's own example shows (three weights for a model whose
+    // psi_0 is never written). Weights beyond the stored horizon are treated as
+    // 0. With no PsiVector, fall back to a constant sigma^2 per step.
     if (!ssm.psi.empty()) {
       std::vector<double> vars;
       vars.reserve(horizon);
-      double cumsum = 0.0;
-      for (int h = 0; h < horizon; ++h) {
-        if (h < static_cast<int>(ssm.psi.size())) cumsum += ssm.psi[h] * ssm.psi[h];
+      double cumsum = 1.0;  // psi_0 = 1
+      for (int h = 1; h <= horizon; ++h) {
         vars.push_back(ssm.sigma2 * cumsum);
+        if (h - 1 < static_cast<int>(ssm.psi.size())) cumsum += ssm.psi[h - 1] * ssm.psi[h - 1];
       }
       return vars;
     }
@@ -394,7 +409,9 @@ class TimeSeriesModel {
     for (int j = 1; j < horizon; ++j) {
       double v = 0.0;
       for (int i = 0; i < p_eff && i < j; ++i) v += a.phi[i] * psi[j - 1 - i];
-      if (j <= q_eff) v += a.theta[j - 1];
+      // Subtracted for the same reason the forecast subtracts its MA terms:
+      // PMML's MA polynomial is (1 - theta_1 B - theta_2 B^2 - ...).
+      if (j <= q_eff) v -= a.theta[j - 1];
       psi[j] = v;
     }
 
@@ -1111,8 +1128,8 @@ class TimeSeriesModel {
     vars.reserve(horizon);
     for (int h = 1; h <= horizon; ++h) {
       double s2 = g.omega;
-      // ARCH terms αᵢ × E[ε²(T+h-i)], i=1..gp
-      for (int i = 1; i <= g.gp; ++i) {
+      // ARCH terms αᵢ × E[ε²(T+h-i)], i=1..gq
+      for (int i = 1; i <= g.gq; ++i) {
         double val;
         if (i >= h) {
           // Past known: eps_sq[i-h] (0-indexed, most-recent first)
@@ -1123,8 +1140,8 @@ class TimeSeriesModel {
         }
         if (i - 1 < static_cast<int>(g.alpha.size())) s2 += g.alpha[i - 1] * val;
       }
-      // GARCH terms βⱼ × σ²(T+h-j), j=1..gq
-      for (int j = 1; j <= g.gq; ++j) {
+      // GARCH terms βⱼ × σ²(T+h-j), j=1..gp
+      for (int j = 1; j <= g.gp; ++j) {
         double val;
         if (j >= h) {
           int idx = j - h;
@@ -1268,10 +1285,10 @@ class TimeSeriesModel {
       }
     }
 
-    if (garch.alpha.empty()) garch.alpha.assign(garch.gp, 0.0);
-    if (garch.beta_garch.empty()) garch.beta_garch.assign(garch.gq, 0.0);
-    if (garch.eps_sq.empty()) garch.eps_sq.assign(garch.gp, 0.0);
-    if (garch.sigma2_hist.empty()) garch.sigma2_hist.assign(garch.gq, 0.0);
+    if (garch.alpha.empty()) garch.alpha.assign(garch.gq, 0.0);
+    if (garch.beta_garch.empty()) garch.beta_garch.assign(garch.gp, 0.0);
+    if (garch.eps_sq.empty()) garch.eps_sq.assign(garch.gq, 0.0);
+    if (garch.sigma2_hist.empty()) garch.sigma2_hist.assign(garch.gp, 0.0);
   }
 
   // =========================================================================

@@ -109,10 +109,26 @@ The mean fixture exists mainly to pin the MA sign, which the GARCH section of
 the spec deliberately writes the opposite way round from the ARIMA section
 (`+θ·ε` rather than `(1 − θB)`). The two forecast paths must not be unified.
 
-PsiVector is parsed and its variance formula is transcribed in
-`oracle_spec.psi_variance`, but no fixture asserts it: forecast mode compares
-only the point forecasts (`result.series()`), so there is no channel for a
-predictive variance. Asserting it would need a tester change.
+### Asserting predictive variance
+
+A forecast fixture with an optional `variance` column turns on predictive
+variance checking: the harness passes `_variance` and compares
+`series_with_variance()` alongside the point forecasts. Same convention as the
+GP fixtures' `variance` column, so it reads the same across model types.
+
+Use it wherever the spec defines a variance — `oracle_spec.psi_variance` for
+`StateSpaceModel` with a `PsiVector`, `oracle_spec.arima_psi_variance` for
+ARIMA, `oracle_spec.garch_variance` for GARCH. `ExponentialSmoothing` has no
+spec-defined variance (Gardner again) and cPMML returns a documented
+approximation, so ETS fixtures deliberately omit the column.
+
+Two traps worth knowing, both of which cost a debugging round here:
+
+- GARCH's `<Residuals>` under `ResidualSquareCoefficients` holds ε, not ε².
+  The element name suggests otherwise, but `Residuals` means the same thing it
+  does in ARIMA's `MA` — the formula does the squaring.
+- `gq` is the order of *residual squares* (the α terms) and `gp` the order of
+  *variance* (the β terms). Transposing them is invisible unless gp ≠ gq.
 
 ## Invariants the generators assert
 

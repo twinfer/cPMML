@@ -245,16 +245,19 @@ static int run_transactional(cpmml::Model& model, CSVReader& reader,
 // ---- forecast mode ----------------------------------------------------------
 
 static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
-  std::vector<double> expected;
+  std::vector<double> expected, expected_variance;
   std::unordered_map<std::string, std::vector<double>> regressors;
 
-  // Any column other than "forecast" is treated as a regressor
+  // An optional "variance" column turns on predictive-variance checking; any
+  // other column beside "forecast" is a regressor.
+  const bool with_variance = row.count("variance") > 0;
   std::vector<std::string> reg_cols;
   for (const auto& kv : row)
-    if (kv.first != "forecast") reg_cols.push_back(kv.first);
+    if (kv.first != "forecast" && kv.first != "variance") reg_cols.push_back(kv.first);
 
   while (!row.empty()) {
     expected.push_back(to_double(row.at("forecast")));
+    if (with_variance) expected_variance.push_back(to_double(row.at("variance")));
     for (const auto& col : reg_cols) regressors[col].push_back(to_double(row.at(col)));
     row = reader.read();
   }
@@ -269,11 +272,28 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
   // Build evaluate() input
   cpmml::Input args;
   args["horizon"] = horizon;
+  if (with_variance) args["_variance"] = std::string("true");
   for (const auto& [col, values] : regressors)
     args[col] = values;
 
   cpmml::Result result = model.evaluate(args);
   auto actual = result.series();
+
+  if (with_variance) {
+    const auto pairs = result.series_with_variance();
+    if (pairs.size() != expected_variance.size()) {
+      std::cerr << "variance size mismatch: got " << pairs.size() << "  expected " << expected_variance.size()
+                << std::endl;
+      return -1;
+    }
+    for (size_t i = 0; i < pairs.size(); i++) {
+      if (!within_tolerance(pairs[i].second, expected_variance[i])) {
+        std::cerr << "variance h=" << (i + 1) << "  predicted=" << pairs[i].second
+                  << "  expected=" << expected_variance[i] << std::endl;
+        return -1;
+      }
+    }
+  }
 
   if (actual.size() != expected.size()) {
     std::cerr << "size mismatch: got " << actual.size() << "  expected " << expected.size() << std::endl;

@@ -212,6 +212,82 @@ def garch_mean_forecast(
     return np.asarray(out, dtype=float)
 
 
+def garch_variance(
+    horizon: int,
+    omega: float,
+    alpha: list[float] | None = None,
+    residuals: list[float] | None = None,
+    beta: list[float] | None = None,
+    past_variances: list[float] | None = None,
+) -> np.ndarray:
+    """Conditional variance of a PMML GARCH model.
+
+    The spec writes this one out in full, unlike the ETS forecasts:
+
+        h_t = a_0 + sum_{i=1..gq} alpha_i eps^2_{t-i} + sum_{j=1..gp} beta_j h_{t-j}
+
+    Note which order goes with which coefficient: "gp and gq are order of
+    variance and order of residual squares, respectively", so the alpha terms
+    run to gq and the beta terms to gp. The two are easy to transpose and a
+    model with gp == gq will never notice.
+
+    Beyond the known history, E[eps^2] is the forecast variance itself, so both
+    sums fall back to values already computed.
+
+    `residuals` is the <Residuals> array verbatim: it holds the residual errors
+    eps, which the formula squares. The element sits inside
+    ResidualSquareCoefficients, which makes it easy to read as already-squared,
+    but Residuals carries the same meaning here as in ARIMA's MA -- "the past
+    differences between the actual time series values and the model
+    predictions".
+    """
+    alpha = list(alpha or [])
+    beta = list(beta or [])
+    eps_sq = [e * e for e in (residuals or [])]  # most recent first
+    past = list(past_variances or [])  # most recent first
+
+    out: list[float] = []
+    for h in range(1, horizon + 1):
+        value = omega
+        for i, a in enumerate(alpha, start=1):
+            known = eps_sq[i - h] if i >= h and (i - h) < len(eps_sq) else None
+            value += a * (known if known is not None else (out[h - i - 1] if i < h else 0.0))
+        for j, b in enumerate(beta, start=1):
+            known = past[j - h] if j >= h and (j - h) < len(past) else None
+            value += b * (known if known is not None else (out[h - j - 1] if j < h else omega))
+        out.append(value)
+
+    return np.asarray(out, dtype=float)
+
+
+def arima_psi_variance(
+    horizon: int,
+    sigma2: float,
+    ar: list[float] | None = None,
+    ma: list[float] | None = None,
+) -> np.ndarray:
+    """ARIMA h-step forecast variance from derived MA(inf) weights.
+
+        var(h) = sigma^2 * sum_{j=0}^{h-1} psi_j^2,  psi_0 = 1
+        psi_j  = sum_i phi_i psi_{j-i} - theta_j
+
+    theta is subtracted for the same reason the forecast subtracts its MA
+    terms: PMML's MA polynomial is (1 - theta B).
+    """
+    phi = list(ar or [])
+    theta = list(ma or [])
+
+    psi = [1.0]
+    for j in range(1, horizon):
+        value = sum(phi[i] * psi[j - 1 - i] for i in range(len(phi)) if i < j)
+        if j <= len(theta):
+            value -= theta[j - 1]
+        psi.append(value)
+
+    weights = np.asarray(psi, dtype=float)
+    return np.asarray([sigma2 * np.sum(weights[:h] ** 2) for h in range(1, horizon + 1)], dtype=float)
+
+
 def psi_variance(sigma2: float, psi: list[float], horizon: int) -> np.ndarray:
     """sigma^2_{t+h} = sigma^2 (1 + psi_1^2 + ... + psi_{h-1}^2), h = 1..horizon.
 

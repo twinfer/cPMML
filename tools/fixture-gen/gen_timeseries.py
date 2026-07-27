@@ -92,9 +92,11 @@ def _document(name: str, note: str, body: str, series: list[float] | None) -> st
 
 
 def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0, seasonal_ar=None,
-                   seasonal_d=0, period=1, constant=0.0) -> str:
+                   seasonal_d=0, period=1, constant=0.0, rmse=None) -> str:
     p, q = len(ar or []), len(ma or [])
-    parts = [f'    <ARIMA constantTerm="{format_number(constant)}" predictionMethod="conditionalLeastSquares">']
+    rmse_attr = "" if rmse is None else f' RMSE="{format_number(rmse)}"'
+    parts = [f'    <ARIMA{rmse_attr} constantTerm="{format_number(constant)}" '
+             f'predictionMethod="conditionalLeastSquares">']
     parts.append(f'      <NonseasonalComponent p="{p}" d="{d}" q="{q}">')
     if ar:
         parts.append("        <AR>")
@@ -124,32 +126,44 @@ def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0,
     return _document(name, note, "\n".join(parts) + "\n", series)
 
 
-def garch_document(name, *, ar, ma, residuals, constant) -> str:
-    """A GARCH model. Only the ARMAPart drives the forecast cPMML produces, but
-    GARCHPart is required by the schema, so it carries plausible values."""
+def garch_document(name, *, ar, ma, residuals, constant, omega, alpha, garch_residuals, beta,
+                   past_variances) -> str:
+    """A GARCH model: ARMAPart drives the conditional mean, GARCHPart the
+    conditional variance. gq is the order of residual squares (the alphas) and
+    gp the order of variance (the betas), per the spec's own wording.
+
+    There are two distinct <Residuals> arrays: `residuals` under ARMAPart/MA
+    feeds the mean, `garch_residuals` under ResidualSquareCoefficients feeds
+    the variance and is squared by the formula."""
+    ma_block = ""
+    if ma:
+        ma_block = (
+            f"        <MA>\n"
+            f"          <MACoefficients>\n{_array(ma, '            ')}\n          </MACoefficients>\n"
+            f"          <Residuals>\n{_array(residuals, '            ')}\n          </Residuals>\n"
+            f"        </MA>\n"
+        )
+
     body = (
-        f'    <GARCH>\n'
+        f"    <GARCH>\n"
         f'      <ARMAPart p="{len(ar)}" q="{len(ma)}" constant="{format_number(constant)}">\n'
         f"        <AR>\n{_array(ar, '          ')}\n        </AR>\n"
-        f"        <MA>\n"
-        f"          <MACoefficients>\n{_array(ma, '            ')}\n          </MACoefficients>\n"
-        f"          <Residuals>\n{_array(residuals, '            ')}\n          </Residuals>\n"
-        f"        </MA>\n"
+        f"{ma_block}"
         f"      </ARMAPart>\n"
-        f'      <GARCHPart gp="1" gq="1" constant="0.2">\n'
+        f'      <GARCHPart gp="{len(beta)}" gq="{len(alpha)}" constant="{format_number(omega)}">\n'
         f"        <ResidualSquareCoefficients>\n"
-        f"          <MACoefficients>\n{_array([0.3], '            ')}\n          </MACoefficients>\n"
-        f"          <Residuals>\n{_array([1.0], '            ')}\n          </Residuals>\n"
+        f"          <MACoefficients>\n{_array(alpha, '            ')}\n          </MACoefficients>\n"
+        f"          <Residuals>\n{_array(garch_residuals, '            ')}\n          </Residuals>\n"
         f"        </ResidualSquareCoefficients>\n"
         f"        <VarianceCoefficients>\n"
-        f"          <MACoefficients>\n{_array([0.5], '            ')}\n          </MACoefficients>\n"
-        f"          <PastVariances>\n{_array([2.0], '            ')}\n          </PastVariances>\n"
+        f"          <MACoefficients>\n{_array(beta, '            ')}\n          </MACoefficients>\n"
+        f"          <PastVariances>\n{_array(past_variances, '            ')}\n          </PastVariances>\n"
         f"        </VarianceCoefficients>\n"
         f"      </GARCHPart>\n"
         f"    </GARCH>\n"
     )
-    note = ("PMML 4.4 spec transcription; GARCH ARMAPart conditional mean. The spec writes the MA term "
-            "as +theta*eps here, the opposite sign to the ARIMA section")
+    note = ("PMML 4.4 spec transcription; GARCH conditional mean and variance. The mean's MA term is "
+            "+theta*eps here, the opposite sign to the ARIMA section")
     return _document(name, note, body, SERIES).replace('bestFit="ARIMA"', 'bestFit="GARCH"')
 
 
@@ -191,13 +205,18 @@ def ssm_document(name, note, state, transition, measurement, *, intercept=0.0, v
 # ---------------------------------------------------------------------------
 
 
-def forecast_fixture(name: str, pmml: str, values) -> Fixture:
-    return Fixture(
-        name=name,
-        columns=["forecast"],
-        rows=[{"forecast": format_number(v)} for v in values],
-        pmml=pmml,
-    )
+def forecast_fixture(name: str, pmml: str, values, variance=None) -> Fixture:
+    """A forecast fixture. An optional variance column turns on predictive
+    variance checking in the harness (see run_forecast in pmml_tester.cc)."""
+    columns = ["forecast"] if variance is None else ["forecast", "variance"]
+    rows = []
+    for i, v in enumerate(values):
+        row = {"forecast": format_number(v)}
+        if variance is not None:
+            row["variance"] = format_number(variance[i])
+        rows.append(row)
+
+    return Fixture(name=name, columns=columns, rows=rows, pmml=pmml)
 
 
 def build() -> list[Fixture]:
@@ -273,11 +292,15 @@ def build() -> list[Fixture]:
             arima_document(
                 "fix_arima_ma2",
                 "PMML 4.4 spec transcription; q=2 with supplied Residuals, most recent first, "
-                "zero after time t",
+                "zero after time t; RMSE drives the psi-weight forecast variance",
                 SERIES,
+                rmse=1.5,
                 **ma_kw,
             ),
             oracle_spec.arima_cls_forecast(SERIES, horizon, **ma_kw),
+            # The psi recursion subtracts theta for the same reason the forecast
+            # does, so this column is a second, independent check on that sign.
+            oracle_spec.arima_psi_variance(horizon, 1.5**2, ar=ma_kw["ar"], ma=ma_kw["ma"]),
         )
     )
 
@@ -287,11 +310,39 @@ def build() -> list[Fixture]:
     # MA handling was never exercised. This uses q=2 to pin the sign, which the
     # spec deliberately writes the opposite way round from ARIMA.
     garch_kw = dict(ar=[0.5, -0.2], ma=[0.3, 0.15], residuals=[1.5, -2.0], constant=1.25)
+    # The oracle takes `residuals`; the document builder calls the same array
+    # `garch_residuals`, to keep it apart from ARMAPart's own <Residuals>.
+    def variance_of(spec):
+        return oracle_spec.garch_variance(horizon, **{
+            ("residuals" if k == "garch_residuals" else k): v for k, v in spec.items()
+        })
+
+    garch_var = dict(omega=0.2, alpha=[0.3], garch_residuals=[1.0], beta=[0.5], past_variances=[2.0])
     fixtures.append(
         forecast_fixture(
             "fix_garch_mean_ma2",
-            garch_document("fix_garch_mean_ma2", **garch_kw),
+            garch_document("fix_garch_mean_ma2", **garch_kw, **garch_var),
             oracle_spec.garch_mean_forecast(SERIES, horizon, **garch_kw),
+            variance_of(garch_var),
+        )
+    )
+
+    # gq (residual squares) and gp (variance) differ here on purpose. With
+    # gp == gq -- every other GARCH fixture -- transposing the two orders is
+    # invisible, because both loops happen to run the same number of times.
+    asym_var = dict(
+        omega=0.15,
+        alpha=[0.25, 0.1, 0.05],  # gq = 3
+        garch_residuals=[1.2, 0.8, 1.6],
+        beta=[0.4],  # gp = 1
+        past_variances=[2.5],
+    )
+    fixtures.append(
+        forecast_fixture(
+            "fix_garch_variance_asym",
+            garch_document("fix_garch_variance_asym", ar=[0.5], ma=[], residuals=[], constant=0.0, **asym_var),
+            oracle_spec.garch_mean_forecast(SERIES, horizon, ar=[0.5]),
+            variance_of(asym_var),
         )
     )
 
@@ -343,6 +394,12 @@ def build() -> list[Fixture]:
         values = oracle_spec.ssm_forecast(
             kw["state"], kw["transition"], kw["measurement"], horizon, kw.get("intercept", 0.0)
         )
+        # PsiVector gives an exact forecast variance; without one there is
+        # nothing spec-defined to assert, so the column is omitted.
+        variance = None
+        if kw.get("psi") is not None:
+            variance = oracle_spec.psi_variance(kw["variance"], kw["psi"], horizon)
+
         fixtures.append(
             forecast_fixture(
                 name,
@@ -352,6 +409,7 @@ def build() -> list[Fixture]:
                     **kw,
                 ),
                 values,
+                variance,
             )
         )
 
