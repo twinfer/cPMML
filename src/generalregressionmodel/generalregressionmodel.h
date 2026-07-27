@@ -113,7 +113,7 @@ class GeneralRegressionModel : public InternalModel {
     parse_factors(node);
     parse_parameters(node);
     parse_pp_matrix(node, data_dictionary, indexer);
-    parse_param_matrix(node);
+    parse_param_matrix(node, data_dictionary);
   }
 
   // --- Scoring ---
@@ -182,7 +182,7 @@ class GeneralRegressionModel : public InternalModel {
     }
   }
 
-  void parse_param_matrix(const XmlNode& node) {
+  void parse_param_matrix(const XmlNode& node, const DataDictionary& data_dictionary) {
     bool has_shared_cells = false;
     std::string first_category;
     for (const auto& cell : node.get_child("ParamMatrix").get_childs("PCell")) {
@@ -214,7 +214,40 @@ class GeneralRegressionModel : public InternalModel {
     if (!reference_category.empty() && reference_category != "null") {
       if (std::find(classes.begin(), classes.end(), reference_category) == classes.end())
         classes.push_back(reference_category);
+      return;
     }
+
+    recover_reference_category(data_dictionary);
+  }
+
+  /**
+   * The reference category is the one whose betas are all zero, so a
+   * well-formed document writes no PCell for it. When targetReferenceCategory
+   * names it that is enough; when the attribute is absent -- and it is optional
+   * -- the category exists only in the target DataField's Value list, and this
+   * built `classes` from ParamMatrix alone.
+   *
+   * The result was a softmax over K-1 classes with no baseline at zero: every
+   * probability inflated, the missing category unable to win however strong the
+   * evidence, and the distribution one entry short of the target's own domain.
+   *
+   * Recovering it needs the DataDictionary, which is the only place that says
+   * what the target's categories are.
+   */
+  void recover_reference_category(const DataDictionary& data_dictionary) {
+    if (model_type != "multinomiallogistic" && model_type != "ordinalmultinomial") return;
+
+    const auto target = data_dictionary.datafields.find(mining_schema.target.name);
+    if (target == data_dictionary.datafields.cend()) return;
+
+    // Appended, not merged in document order: an explicit
+    // targetReferenceCategory goes on the end too, so both paths agree on where
+    // the baseline sits in the distribution.
+    for (const auto& declared : target->second.valid_values)
+      if (std::find(classes.begin(), classes.end(), declared) == classes.end()) {
+        classes.push_back(declared);
+        if (reference_category.empty() || reference_category == "null") reference_category = declared;
+      }
   }
 
   // --- Design value computation ---

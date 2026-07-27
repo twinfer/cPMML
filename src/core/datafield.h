@@ -42,6 +42,13 @@ class DataField {
   // any conversion: "-999" parses perfectly well as a double and would sail
   // through as data otherwise. This used to be a single Value that nothing read.
   std::set<std::string> missing_markers;
+  // The <Value property="valid"> categories in document order. The constraint
+  // predicate below holds the same set, but as a set and behind a Predicate, so
+  // it answers "is this allowed" and not "which categories are there" -- and
+  // the second question has an answer only the DataDictionary knows. It is what
+  // GeneralRegression needs to recover a target category that has no PCells of
+  // its own.
+  std::vector<std::string> valid_values;
   Predicate constraints;
 
   DataField() = default;
@@ -63,6 +70,7 @@ class DataField {
       switch (property.value) {
         case Property::PropertyValue::VALID:
           allowed_values.emplace(Value(value.get_attribute("value"), datatype));
+          valid_values.push_back(value.get_attribute("value"));
           break;
         case Property::PropertyValue::MISSING:
           missing_markers.insert(value.get_attribute("value"));
