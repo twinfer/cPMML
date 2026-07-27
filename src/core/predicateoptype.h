@@ -7,6 +7,10 @@
 #ifndef CPMML_PREDICATEOPTYPE_H
 #define CPMML_PREDICATEOPTYPE_H
 
+#include <string>
+
+#include "enum_parser.h"
+
 /**
  * @class PredicateOpType
  *
@@ -40,76 +44,40 @@ class PredicateOpType {
     FALSE
   };
 
-  PredicateOpTypeValue value;
+  static constexpr EnumEntry<PredicateOpTypeValue> TABLE[] = {
+      {"equal", PredicateOpTypeValue::EQUAL, "=="},
+      {"notequal", PredicateOpTypeValue::NOT_EQUAL, "!="},
+      {"greaterthan", PredicateOpTypeValue::GREATER_THAN, ">"},
+      {"greaterorequal", PredicateOpTypeValue::GREATER_OR_EQUAL, ">="},
+      {"lessthan", PredicateOpTypeValue::LESS_THAN, "<"},
+      {"lessorequal", PredicateOpTypeValue::LESS_OR_EQUAL, "<="},
+      {"isin", PredicateOpTypeValue::IS_IN, "isIn"},
+      {"isnotin", PredicateOpTypeValue::IS_NOT_IN, "isNotIn"},
+      {"ismissing", PredicateOpTypeValue::IS_MISSING, "isMissing"},
+      {"isnotmissing", PredicateOpTypeValue::IS_NOT_MISSING, "isNotMissing"},
+      {"and", PredicateOpTypeValue::AND, "AND"},
+      {"or", PredicateOpTypeValue::OR, "OR"},
+      {"xor", PredicateOpTypeValue::XOR, "XOR"},
+      {"surrogate", PredicateOpTypeValue::SURROGATE, "SURROGATE"},
+      {"true", PredicateOpTypeValue::TRUE, "TRUE"},
+      {"false", PredicateOpTypeValue::FALSE, "FALSE"},
+  };
+
+  // See PredicateType: default-constructed instances used to hold an
+  // indeterminate value.
+  PredicateOpTypeValue value = PredicateOpTypeValue::TRUE;
 
   PredicateOpType() = default;
 
   explicit PredicateOpType(const std::string& predicatetype) : value(from_string(predicatetype)) {}
 
+  // SimplePredicate/@operator and CompoundPredicate/@booleanOperator are both
+  // required.
   static PredicateOpTypeValue from_string(const std::string& predicate_type) {
-    const static std::unordered_map<std::string, PredicateOpTypeValue> datatype_converter = {
-        {"equal", PredicateOpTypeValue::EQUAL},
-        {"notequal", PredicateOpTypeValue::NOT_EQUAL},
-        {"greaterthan", PredicateOpTypeValue::GREATER_THAN},
-        {"greaterorequal", PredicateOpTypeValue::GREATER_OR_EQUAL},
-        {"lessthan", PredicateOpTypeValue::LESS_THAN},
-        {"lessorequal", PredicateOpTypeValue::LESS_OR_EQUAL},
-        {"isin", PredicateOpTypeValue::IS_IN},
-        {"isnotin", PredicateOpTypeValue::IS_NOT_IN},
-        {"ismissing", PredicateOpTypeValue::IS_MISSING},
-        {"isnotmissing", PredicateOpTypeValue::IS_NOT_MISSING},
-        {"and", PredicateOpTypeValue::AND},
-        {"or", PredicateOpTypeValue::OR},
-        {"xor", PredicateOpTypeValue::XOR},
-        {"true", PredicateOpTypeValue::TRUE},
-        {"false", PredicateOpTypeValue::FALSE},
-        {"surrogate", PredicateOpTypeValue::SURROGATE}};
-
-    try {
-      return datatype_converter.at(to_lower(predicate_type));
-    } catch (const std::out_of_range& exception) {
-      throw cpmml::ParsingException("unsupported predicate op type: " + predicate_type);
-    }
+    return enum_value(predicate_type, TABLE, "predicate operator");
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case PredicateOpTypeValue::EQUAL:
-        return "==";
-      case PredicateOpTypeValue::NOT_EQUAL:
-        return "!=";
-      case PredicateOpTypeValue::GREATER_THAN:
-        return ">";
-      case PredicateOpTypeValue::GREATER_OR_EQUAL:
-        return ">=";
-      case PredicateOpTypeValue::LESS_THAN:
-        return "<";
-      case PredicateOpTypeValue::LESS_OR_EQUAL:
-        return "<=";
-      case PredicateOpTypeValue::IS_IN:
-        return "isIn";
-      case PredicateOpTypeValue::IS_NOT_IN:
-        return "isNotIn";
-      case PredicateOpTypeValue::IS_MISSING:
-        return "isMissing";
-      case PredicateOpTypeValue::IS_NOT_MISSING:
-        return "isNotMissing";
-      case PredicateOpTypeValue::AND:
-        return "AND";
-      case PredicateOpTypeValue::OR:
-        return "OR";
-      case PredicateOpTypeValue::XOR:
-        return "XOR";
-      case PredicateOpTypeValue::SURROGATE:
-        return "SURROGATE";
-      case PredicateOpTypeValue::TRUE:
-        return "TRUE";
-      case PredicateOpTypeValue::FALSE:
-        return "FALSE";
-      default:
-        return "UNDEFINED";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 };
 
 #endif

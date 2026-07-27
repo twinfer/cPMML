@@ -314,6 +314,81 @@ static void mean_cluster_distances_is_validated() {
   CHECK(!anomaly_loads("ocsvm", two));  // MeanClusterDistances belongs to clusterMeanDist alone
 }
 
+// Every PMML enumeration used to answer an unrecognised token by guessing:
+// normalizationMethod became "none", usageType became "active",
+// invalidValueTreatment became "returnInvalid". Guessing here is not a degraded
+// answer but a different model -- an unnormalized score read as a probability
+// -- and it is invisible, because the document loads and scores. An absent
+// attribute still takes its documented default; only a value that is present
+// and unrecognised is a fault.
+static const char* ENUM_PMML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4">
+  <DataDictionary numberOfFields="2">
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="categorical" dataType="string">
+      <Value value="a"/>
+      <Value value="b"/>
+    </DataField>
+  </DataDictionary>
+  <RegressionModel functionName="classification" @NORM@>
+    <MiningSchema>
+      <MiningField name="x" @USAGE@ @INVALID@/>
+      <MiningField name="y" usageType="target"/>
+    </MiningSchema>
+    <RegressionTable intercept="0.0" targetCategory="a">
+      <NumericPredictor name="x" coefficient="1.0"/>
+    </RegressionTable>
+    <RegressionTable intercept="0.0" targetCategory="b"/>
+  </RegressionModel>
+</PMML>
+)";
+
+static bool regression_loads(const std::string& norm, const std::string& usage, const std::string& invalid) {
+  std::string pmml = ENUM_PMML_TEMPLATE;
+  pmml.replace(pmml.find("@NORM@"), 6, norm);
+  pmml.replace(pmml.find("@USAGE@"), 7, usage);
+  pmml.replace(pmml.find("@INVALID@"), 9, invalid);
+
+  const std::string path = "enum_guard.pmml";
+  FILE* out = std::fopen(path.c_str(), "w");
+  if (out == nullptr) {
+    std::cerr << "FAIL could not write " << path << "\n";
+    ++failures;
+    return false;
+  }
+  std::fputs(pmml.c_str(), out);
+  std::fclose(out);
+
+  bool loaded = false;
+  try {
+    cpmml::Model model(path, false);
+    loaded = true;
+  } catch (const cpmml::Exception&) {
+  }
+
+  std::remove(path.c_str());
+  return loaded;
+}
+
+static void unrecognised_enum_tokens_are_rejected() {
+  const std::string active = R"(usageType="active")";
+
+  // Absent takes the PMML default.
+  CHECK(regression_loads("", "", ""));
+  CHECK(regression_loads(R"(normalizationMethod="softmax")", active, R"(invalidValueTreatment="asMissing")"));
+
+  // Present and unrecognised is a fault, not a default.
+  CHECK(!regression_loads(R"(normalizationMethod="softmaxx")", active, ""));
+  CHECK(!regression_loads("", R"(usageType="activ")", ""));
+  CHECK(!regression_loads("", active, R"(invalidValueTreatment="asMissed")"));
+
+  // The spec spells these two without an underscore; only the underscored form
+  // used to be in the table, so a conforming document reached the fallback.
+  CHECK(regression_loads("", R"(usageType="frequencyWeight")", ""));
+  CHECK(regression_loads("", R"(usageType="analysisWeight")", ""));
+  CHECK(regression_loads("", R"(usageType="predicted")", ""));  // pre-4.1 spelling for target
+}
+
 int main() {
   default_result_is_answerable();
   default_model_throws();
@@ -322,6 +397,7 @@ int main() {
   unsupported_baseline_statistics_are_rejected();
   mean_cluster_distances_is_validated();
   csvreader_reads_past_a_long_row();
+  unrecognised_enum_tokens_are_rejected();
 
   if (failures > 0) {
     std::cerr << failures << " assertion(s) failed\n";

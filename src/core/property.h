@@ -9,6 +9,8 @@
 
 #include <string>
 
+#include "enum_parser.h"
+
 /**
  * @class Property
  * Class representing <a
@@ -21,33 +23,22 @@ class Property {
  public:
   enum class PropertyValue { VALID, INVALID, MISSING };
 
+  static constexpr EnumEntry<PropertyValue> TABLE[] = {
+      {"valid", PropertyValue::VALID, "VALID"},
+      {"invalid", PropertyValue::INVALID, "INVALID"},
+      {"missing", PropertyValue::MISSING, "MISSING"},
+  };
+
   const PropertyValue value;
 
   explicit Property(const std::string& property) : value(from_string(property)) {}
 
+  // Value/@property defaults to "valid".
   static PropertyValue from_string(const std::string& property) {
-    const static std::unordered_map<std::string, PropertyValue> property_converter = {
-        {"valid", PropertyValue::VALID}, {"invalid", PropertyValue::INVALID}, {"missing", PropertyValue::MISSING}};
-
-    try {
-      return property_converter.at(to_lower(property));
-    } catch (const std::out_of_range& exception) {
-      return PropertyValue::VALID;
-    }
+    return enum_value(property, TABLE, "Value/@property", PropertyValue::VALID);
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case PropertyValue::VALID:
-        return "VALID";
-      case PropertyValue::INVALID:
-        return "INVALID";
-      case PropertyValue::MISSING:
-        return "MISSING";
-      default:
-        return "VALID";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "VALID"); }
 };
 
 #endif

@@ -7,22 +7,15 @@
 #ifndef CPMML_DATATYPE_H
 #define CPMML_DATATYPE_H
 
-#include <map>
 #include <string>
 
-#include "utils/utils.h"
+#include "enum_parser.h"
 
 /**
  * @class DataType
  * Class representing <a
  * href="http://dmg.org/pmml/v4-4/DataDictionary.html#xsdType_DATATYPE">PMML
- * dataTypes</a>.
- *
- * For instance:
- *      - STRING
- *      - INTEGER
- *      - BOOLEAN
- *      - etc.
+ * DATATYPE</a>.
  */
 class DataType {
  public:
@@ -34,60 +27,52 @@ class DataType {
     BOOLEAN,
   };
 
-  DataTypeValue value;
+  // Every numeric type is carried as a double, except float, which keeps its
+  // float32 quantization. The PMML 4.4 date/time types are epoch-based
+  // numerics, so they are doubles too.
+  static constexpr EnumEntry<DataTypeValue> TABLE[] = {
+      {"string", DataTypeValue::STRING, "STRING"},
+      {"integer", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"float", DataTypeValue::FLOAT, "FLOAT"},
+      {"double", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"boolean", DataTypeValue::BOOLEAN, "BOOLEAN"},
+      {"date", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"time", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datetime", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datedayssince[0]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datedayssince[1960]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datedayssince[1970]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datedayssince[1980]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"timeseconds", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datetimesecondssince[0]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datetimesecondssince[1960]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datetimesecondssince[1970]", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"datetimesecondssince[1980]", DataTypeValue::DOUBLE, "DOUBLE"},
+  };
+
+  DataTypeValue value = DataTypeValue::STRING;
 
   DataType() = default;
 
   DataType(const DataTypeValue& value) : value(value) {}
 
-  DataType(const std::string& value) : value(from_string(to_lower(value))) {}
+  DataType(const std::string& value) : value(from_string(value)) {}
 
   bool operator==(const DataType& other) const { return value == other.value; };
 
   bool operator!=(const DataType& other) const { return value != other.value; };
 
+  // dataType is required wherever it appears.
   static DataTypeValue from_string(const std::string& data_type) {
-    const static std::unordered_map<std::string, DataTypeValue> datatype_converter = {
-        {"string", DataTypeValue::STRING},
-        {"integer", DataTypeValue::DOUBLE},  // every numeric type is treated as
-                                             // a double, except float which
-                                             // preserves float32 quantization
-        {"float", DataTypeValue::FLOAT},
-        {"double", DataTypeValue::DOUBLE},
-        {"boolean", DataTypeValue::BOOLEAN},
-        // PMML 4.4.1 date/time types — mapped to DOUBLE (epoch-based numeric)
-        {"date", DataTypeValue::DOUBLE},
-        {"time", DataTypeValue::DOUBLE},
-        {"datetime", DataTypeValue::DOUBLE},
-        {"datedayssince[0]", DataTypeValue::DOUBLE},
-        {"datedayssince[1960]", DataTypeValue::DOUBLE},
-        {"datedayssince[1970]", DataTypeValue::DOUBLE},
-        {"datedayssince[1980]", DataTypeValue::DOUBLE},
-        {"timeseconds", DataTypeValue::DOUBLE},
-        {"datetimesecondssince[0]", DataTypeValue::DOUBLE},
-        {"datetimesecondssince[1960]", DataTypeValue::DOUBLE},
-        {"datetimesecondssince[1970]", DataTypeValue::DOUBLE},
-        {"datetimesecondssince[1980]", DataTypeValue::DOUBLE},
-    };
-
-    return enum_from_string(datatype_converter, to_lower(data_type), "datatype");
+    return enum_value(data_type, TABLE, "datatype");
   }
 
+  // INTEGER is unreachable through from_string (integer maps to DOUBLE) but is
+  // still a constructible enumerator, so it keeps its own spelling.
   std::string to_string() const {
-    switch (value) {
-      case DataTypeValue::STRING:
-        return "STRING";
-      case DataTypeValue::INTEGER:
-        return "INTEGER";
-      case DataTypeValue::FLOAT:
-        return "FLOAT";
-      case DataTypeValue::DOUBLE:
-        return "DOUBLE";
-      case DataTypeValue::BOOLEAN:
-        return "BOOLEAN";
-      default:
-        return "MISSING";
-    }
+    if (value == DataTypeValue::INTEGER) return "INTEGER";
+
+    return enum_display(value, TABLE, "MISSING");
   }
 };
 

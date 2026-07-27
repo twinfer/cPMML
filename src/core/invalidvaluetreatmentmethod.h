@@ -7,10 +7,9 @@
 #ifndef CPMML_INVALIDVALUETREATMENTMETHOD_H
 #define CPMML_INVALIDVALUETREATMENTMETHOD_H
 
-#include <map>
 #include <string>
 
-#include "utils/utils.h"
+#include "enum_parser.h"
 
 /**
  * @class InvalidValueTreatmentMethod
@@ -26,6 +25,12 @@ class InvalidValueTreatmentMethod {
  public:
   enum class InvalidValueTreatmentMethodValue { RETURN_INVALID, AS_IS, AS_MISSING };
 
+  static constexpr EnumEntry<InvalidValueTreatmentMethodValue> TABLE[] = {
+      {"returninvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID, "returnInvalid"},
+      {"asis", InvalidValueTreatmentMethodValue::AS_IS, "asIs"},
+      {"asmissing", InvalidValueTreatmentMethodValue::AS_MISSING, "asMissing"},
+  };
+
   InvalidValueTreatmentMethodValue value = InvalidValueTreatmentMethodValue::RETURN_INVALID;
 
   InvalidValueTreatmentMethod() = default;
@@ -36,31 +41,13 @@ class InvalidValueTreatmentMethod {
 
   inline bool operator!=(const InvalidValueTreatmentMethod& other) const { return value != other.value; };
 
+  // MiningField/@invalidValueTreatment defaults to returnInvalid.
   static InvalidValueTreatmentMethodValue from_string(const std::string& invalidvaluetreatmentmethod) {
-    const static std::unordered_map<std::string, InvalidValueTreatmentMethodValue>
-        invalidvaluetreatmentmethod_converter = {{"asis", InvalidValueTreatmentMethodValue::AS_IS},
-                                                 {"returninvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID},
-                                                 {"asmissing", InvalidValueTreatmentMethodValue::AS_MISSING}};
-
-    try {
-      return invalidvaluetreatmentmethod_converter.at(to_lower(invalidvaluetreatmentmethod));
-    } catch (const std::out_of_range& exception) {
-      return InvalidValueTreatmentMethodValue::RETURN_INVALID;
-    }
+    return enum_value(invalidvaluetreatmentmethod, TABLE, "invalidValueTreatment",
+                      InvalidValueTreatmentMethodValue::RETURN_INVALID);
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case InvalidValueTreatmentMethodValue::AS_IS:
-        return "asIs";
-      case InvalidValueTreatmentMethodValue::RETURN_INVALID:
-        return "returnInvalid";
-      case InvalidValueTreatmentMethodValue::AS_MISSING:
-        return "asMissing";
-      default:
-        return "returnInvalid";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "returnInvalid"); }
 };
 
 #endif

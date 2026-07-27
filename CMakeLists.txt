@@ -144,6 +144,7 @@ add_library(
         src/core/optype.h
         src/core/internal_evaluator.h
         src/core/model_evaluator.h
+        src/core/enum_parser.h
         src/core/miningfield.h
         src/core/target.h
         src/treemodel/treescore.h

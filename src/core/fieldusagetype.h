@@ -7,8 +7,9 @@
 #ifndef CPMML_FIELDUSAGETYPE_H
 #define CPMML_FIELDUSAGETYPE_H
 
-#include <map>
 #include <string>
+
+#include "enum_parser.h"
 
 /**
  * @class FieldUsageType
@@ -23,53 +24,39 @@ class FieldUsageType {
  public:
   enum class FieldUsageTypeValue { ACTIVE, TARGET, SUPPLEMENTARY, GROUP, ORDER, FREQUENCY_WEIGHT, ANALYSIS_WEIGHT };
 
+  static constexpr EnumEntry<FieldUsageTypeValue> TABLE[] = {
+      {"active", FieldUsageTypeValue::ACTIVE, "ACTIVE"},
+      {"target", FieldUsageTypeValue::TARGET, "TARGET"},
+      {"predicted", FieldUsageTypeValue::TARGET, "TARGET"},  // before 4.1
+      {"supplementary", FieldUsageTypeValue::SUPPLEMENTARY, "SUPPLEMENTARY"},
+      {"group", FieldUsageTypeValue::GROUP, "GROUP"},
+      {"order", FieldUsageTypeValue::ORDER, "ORDER"},
+      {"frequency_weight", FieldUsageTypeValue::FREQUENCY_WEIGHT, "FREQUENCY_WEIGHT"},
+      {"frequencyweight", FieldUsageTypeValue::FREQUENCY_WEIGHT, "FREQUENCY_WEIGHT"},
+      {"analysis_weight", FieldUsageTypeValue::ANALYSIS_WEIGHT, "ANALYSIS_WEIGHT"},
+      {"analysisweight", FieldUsageTypeValue::ANALYSIS_WEIGHT, "ANALYSIS_WEIGHT"},
+  };
+
   FieldUsageTypeValue value = FieldUsageTypeValue::ACTIVE;
 
   FieldUsageType() = default;
 
   explicit FieldUsageType(const std::string& field_usage_type) : value(from_string(field_usage_type)) {}
 
+  // MiningField/@usageType defaults to active. The spec spells the weight
+  // usages "frequencyWeight" and "analysisWeight"; the underscored forms were
+  // the only ones in the table, so a conforming document fell through to ACTIVE
+  // -- harmless while nothing distinguishes the two, but now that an
+  // unrecognised usageType is a load error the conforming spelling has to be
+  // here. Both are accepted.
   static FieldUsageTypeValue from_string(const std::string& field_usage_type) {
-    const static std::unordered_map<std::string, FieldUsageTypeValue> field_usage_type_converter = {
-        {"active", FieldUsageTypeValue::ACTIVE},
-        {"target", FieldUsageTypeValue::TARGET},
-        {"predicted", FieldUsageTypeValue::TARGET},  // before 4.1
-        {"supplementary", FieldUsageTypeValue::SUPPLEMENTARY},
-        {"group", FieldUsageTypeValue::GROUP},
-        {"order", FieldUsageTypeValue::ORDER},
-        {"frequency_weight", FieldUsageTypeValue::FREQUENCY_WEIGHT},
-        {"analysis_weight", FieldUsageTypeValue::ANALYSIS_WEIGHT}};
-
-    try {
-      return field_usage_type_converter.at(to_lower(field_usage_type));
-    } catch (const std::out_of_range& exception) {
-      return FieldUsageTypeValue::ACTIVE;
-    }
+    return enum_value(field_usage_type, TABLE, "usageType", FieldUsageTypeValue::ACTIVE);
   }
 
   inline bool operator==(FieldUsageType other) const { return value == other.value; }
   inline bool operator==(FieldUsageTypeValue other) const { return value == other; }
 
-  std::string to_string() const {
-    switch (value) {
-      case FieldUsageTypeValue::ACTIVE:
-        return "ACTIVE";
-      case FieldUsageTypeValue::TARGET:
-        return "TARGET";
-      case FieldUsageTypeValue::SUPPLEMENTARY:
-        return "SUPPLEMENTARY";
-      case FieldUsageTypeValue::GROUP:
-        return "GROUP";
-      case FieldUsageTypeValue::ORDER:
-        return "ORDER";
-      case FieldUsageTypeValue::FREQUENCY_WEIGHT:
-        return "FREQUENCY_WEIGHT";
-      case FieldUsageTypeValue::ANALYSIS_WEIGHT:
-        return "ANALYSIS_WEIGHT";
-      default:
-        return "ACTIVE";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "ACTIVE"); }
 };
 
 #endif

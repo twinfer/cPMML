@@ -7,10 +7,9 @@
 #ifndef CPMML_MISSINGVALUETREATMENTMETHOD_H
 #define CPMML_MISSINGVALUETREATMENTMETHOD_H
 
-#include <map>
 #include <string>
 
-#include "utils/utils.h"
+#include "enum_parser.h"
 
 /**
  * @class MissingValueTreatmentMethod
@@ -26,47 +25,31 @@ class MissingValueTreatmentMethod {
  public:
   enum class MissingValueTreatmentMethodValue { AS_IS, AS_MEAN, AS_MODE, AS_MEDIAN, AS_VALUE };
 
+  static constexpr EnumEntry<MissingValueTreatmentMethodValue> TABLE[] = {
+      {"asis", MissingValueTreatmentMethodValue::AS_IS, "asIs"},
+      {"asmean", MissingValueTreatmentMethodValue::AS_MEAN, "asMean"},
+      {"asmode", MissingValueTreatmentMethodValue::AS_MODE, "asMode"},
+      {"asmedian", MissingValueTreatmentMethodValue::AS_MEDIAN, "asMedian"},
+      {"asvalue", MissingValueTreatmentMethodValue::AS_VALUE, "asValue"},
+  };
+
   MissingValueTreatmentMethodValue value = MissingValueTreatmentMethodValue::AS_IS;
 
   MissingValueTreatmentMethod() = default;
 
-  explicit MissingValueTreatmentMethod(const std::string& value) : value(from_string(to_lower(value))) {}
+  explicit MissingValueTreatmentMethod(const std::string& value) : value(from_string(value)) {}
 
   inline bool operator==(const MissingValueTreatmentMethod& other) const { return value == other.value; };
 
   inline bool operator!=(const MissingValueTreatmentMethod& other) const { return value != other.value; };
 
+  // MiningField/@missingValueTreatment is optional; absent means asIs.
   static MissingValueTreatmentMethodValue from_string(const std::string& missingvaluetreatmentmethod) {
-    const static std::unordered_map<std::string, MissingValueTreatmentMethodValue>
-        missingvaluetreatmentmethod_converter = {{"asis", MissingValueTreatmentMethodValue::AS_IS},
-                                                 {"asmean", MissingValueTreatmentMethodValue::AS_MEAN},
-                                                 {"asmode", MissingValueTreatmentMethodValue::AS_MODE},
-                                                 {"asmedian", MissingValueTreatmentMethodValue::AS_MEDIAN},
-                                                 {"asvalue", MissingValueTreatmentMethodValue::AS_VALUE}};
-
-    try {
-      return missingvaluetreatmentmethod_converter.at(to_lower(missingvaluetreatmentmethod));
-    } catch (const std::out_of_range& exception) {
-      return MissingValueTreatmentMethodValue::AS_IS;
-    }
+    return enum_value(missingvaluetreatmentmethod, TABLE, "missingValueTreatment",
+                      MissingValueTreatmentMethodValue::AS_IS);
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case MissingValueTreatmentMethodValue::AS_IS:
-        return "asIs";
-      case MissingValueTreatmentMethodValue::AS_MEAN:
-        return "asMean";
-      case MissingValueTreatmentMethodValue::AS_MODE:
-        return "asMode";
-      case MissingValueTreatmentMethodValue::AS_MEDIAN:
-        return "asMedian";
-      case MissingValueTreatmentMethodValue::AS_VALUE:
-        return "asValue";
-      default:
-        return "asIs";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "asIs"); }
 };
 
 #endif

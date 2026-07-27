@@ -7,23 +7,16 @@
 #ifndef CPMML_MININGFUNCTION_H
 #define CPMML_MININGFUNCTION_H
 
-#include <map>
 #include <string>
+
+#include "enum_parser.h"
 
 /**
  * @class MiningFunction
  *
- * Class representing  <a
+ * Class representing the <a
  * href="http://dmg.org/pmml/v4-4/GeneralStructure.html#xsdType_MINING-FUNCTION">PMML
- * MiningFunction</a>.
- *
- * It defines which is the function pursued by the model.
- *
- * For instance:
- * - Classification
- * - Regression
- * - Clustering
- * - etc.
+ * MINING-FUNCTION</a> a model performs.
  */
 class MiningFunction {
  public:
@@ -35,54 +28,29 @@ class MiningFunction {
     CLUSTERING,
     TIMESERIES,
     MIXED,
-    //    UNDEFINED
   };
 
-  MiningFunctionType value;
+  static constexpr EnumEntry<MiningFunctionType> TABLE[] = {
+      {"associationrules", MiningFunctionType::ASSOCIATION_RULES, "ASSOCIATION_RULES"},
+      {"classification", MiningFunctionType::CLASSIFICATION, "CLASSIFICATION"},
+      {"regression", MiningFunctionType::REGRESSION, "REGRESSION"},
+      {"clustering", MiningFunctionType::CLUSTERING, "CLUSTERING"},
+      {"timeseries", MiningFunctionType::TIMESERIES, "TIMESERIES"},
+      {"mixed", MiningFunctionType::MIXED, "MIXED"},
+  };
+
+  MiningFunctionType value = MiningFunctionType::CLASSIFICATION;
 
   MiningFunction() = default;
 
   explicit MiningFunction(const std::string& mining_function) : value(from_string(mining_function)) {}
 
+  // functionName is required on every MODEL-ELEMENT.
   static MiningFunctionType from_string(const std::string& mining_function) {
-    const static std::map<std::string, MiningFunctionType> mining_function_converter = {
-        {"associationrules", MiningFunctionType::ASSOCIATION_RULES},
-        //        {"sequences", MiningFunctionType::SEQUENCES},
-        {"classification", MiningFunctionType::CLASSIFICATION},
-        {"regression", MiningFunctionType::REGRESSION},
-        {"clustering", MiningFunctionType::CLUSTERING},
-        {"timeseries", MiningFunctionType::TIMESERIES},
-        {"mixed", MiningFunctionType::MIXED}};
-
-    try {
-      return mining_function_converter.at(to_lower(mining_function));
-    } catch (const std::out_of_range& exception) {
-      throw cpmml::ParsingException("unsupported mining function: " + mining_function);
-    }
+    return enum_value(mining_function, TABLE, "mining function");
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case MiningFunctionType::ASSOCIATION_RULES:
-        return "ASSOCIATION_RULES";
-        //      case MiningFunctionType::SEQUENCES:
-        //        return "SEQUENCES";
-      case MiningFunctionType::CLASSIFICATION:
-        return "CLASSIFICATION";
-      case MiningFunctionType::REGRESSION:
-        return "REGRESSION";
-      case MiningFunctionType::CLUSTERING:
-        return "CLUSTERING";
-      case MiningFunctionType::TIMESERIES:
-        return "TIMESERIES";
-      case MiningFunctionType::MIXED:
-        return "MIXED";
-        //      case MiningFunctionType::UNDEFINED:
-        //        return "UNDEFINED";
-      default:
-        return "UNDEFINED";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 };
 
 #endif

@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "cPMML.h"
+#include "enum_parser.h"
 #include "value.h"
 
 /**
@@ -81,51 +82,50 @@ class BuiltInFunction {  // inputs are mapped by position
         min_nargs(get_min_nargs(function_type)),
         function(get_function(function_type)) {}
 
-  static BuiltInFunctionType from_string(const std::string& builtinfunction) {
-    const static std::unordered_map<std::string, BuiltInFunctionType> builtinfunction_converter = {
-        {"+", BuiltInFunctionType::PLUS},
-        {"-", BuiltInFunctionType::MINUS},
-        {"*", BuiltInFunctionType::MUL},
-        {"/", BuiltInFunctionType::DIV},
-        {"max", BuiltInFunctionType::MAX},
-        {"min", BuiltInFunctionType::MIN},
-        {"sum", BuiltInFunctionType::SUM},
-        {"avg", BuiltInFunctionType::AVG},
-        {"exp", BuiltInFunctionType::EXP},
-        {"log", BuiltInFunctionType::LOG},
-        {"log10", BuiltInFunctionType::LOG10},
-        {"sqrt", BuiltInFunctionType::SQRT},
-        {"abs", BuiltInFunctionType::ABS},
-        {"round", BuiltInFunctionType::ROUND},
-        {"floor", BuiltInFunctionType::FLOOR},
-        {"ceiling", BuiltInFunctionType::CEIL},
-        {"pow", BuiltInFunctionType::POW},
-        {"if", BuiltInFunctionType::IF},
-        {"ismissing", BuiltInFunctionType::IS_MISSING},
-        {"isnotmissing", BuiltInFunctionType::IS_NOT_MISSING},
-        {"equal", BuiltInFunctionType::EQUAL},
-        {"notequal", BuiltInFunctionType::NOT_EQUAL},
-        {"lessthan", BuiltInFunctionType::LESS_THAN},
-        {"lessorequal", BuiltInFunctionType::LESS_THAN_EQUAL},
-        {"greaterthan", BuiltInFunctionType::GREATER_THAN},
-        {"greaterorequal", BuiltInFunctionType::GREATER_THAN_EQUAL},
-        {"isin", BuiltInFunctionType::IS_IN},
-        {"isnotin", BuiltInFunctionType::IS_NOT_IN},
-        {"replace", BuiltInFunctionType::REPLACE},
-        {"matches", BuiltInFunctionType::MATCHES},
-        {"uppercase", BuiltInFunctionType::UPPERCASE},
-        {"lowercase", BuiltInFunctionType::LOWERCASE},
-        {"substring", BuiltInFunctionType::SUBSTRING},
-        {"trimblanks", BuiltInFunctionType::TRIM_BLANKS},
-        {"concat", BuiltInFunctionType::CONCAT},
-        {"stringlength", BuiltInFunctionType::STRING_LENGTH}
-    };
+  static constexpr EnumEntry<BuiltInFunctionType> TABLE[] = {
+      {"+", BuiltInFunctionType::PLUS, "+"},
+      {"-", BuiltInFunctionType::MINUS, "-"},
+      {"*", BuiltInFunctionType::MUL, "*"},
+      {"/", BuiltInFunctionType::DIV, "/"},
+      {"max", BuiltInFunctionType::MAX, "max"},
+      {"min", BuiltInFunctionType::MIN, "min"},
+      {"sum", BuiltInFunctionType::SUM, "sum"},
+      {"avg", BuiltInFunctionType::AVG, "avg"},
+      {"exp", BuiltInFunctionType::EXP, "exp"},
+      {"log", BuiltInFunctionType::LOG, "log"},
+      {"log10", BuiltInFunctionType::LOG10, "log10"},
+      {"sqrt", BuiltInFunctionType::SQRT, "sqrt"},
+      {"abs", BuiltInFunctionType::ABS, "abs"},
+      {"round", BuiltInFunctionType::ROUND, "round"},
+      {"floor", BuiltInFunctionType::FLOOR, "floor"},
+      {"ceiling", BuiltInFunctionType::CEIL, "ceiling"},
+      {"pow", BuiltInFunctionType::POW, "pow"},
+      {"if", BuiltInFunctionType::IF, "if"},
+      {"ismissing", BuiltInFunctionType::IS_MISSING, "isMissing"},
+      {"isnotmissing", BuiltInFunctionType::IS_NOT_MISSING, "isNotMissing"},
+      {"equal", BuiltInFunctionType::EQUAL, "equal"},
+      {"notequal", BuiltInFunctionType::NOT_EQUAL, "notEqual"},
+      {"lessthan", BuiltInFunctionType::LESS_THAN, "lessThan"},
+      {"lessorequal", BuiltInFunctionType::LESS_THAN_EQUAL, "lessOrEqual"},
+      {"greaterthan", BuiltInFunctionType::GREATER_THAN, "greaterThan"},
+      {"greaterorequal", BuiltInFunctionType::GREATER_THAN_EQUAL, "greaterOrEqual"},
+      {"isin", BuiltInFunctionType::IS_IN, "isIn"},
+      {"isnotin", BuiltInFunctionType::IS_NOT_IN, "isNotIn"},
+      {"replace", BuiltInFunctionType::REPLACE, "replace"},
+      {"matches", BuiltInFunctionType::MATCHES, "matches"},
+      {"uppercase", BuiltInFunctionType::UPPERCASE, "uppercase"},
+      {"lowercase", BuiltInFunctionType::LOWERCASE, "lowercase"},
+      {"substring", BuiltInFunctionType::SUBSTRING, "substring"},
+      {"trimblanks", BuiltInFunctionType::TRIM_BLANKS, "trimBlanks"},
+      {"concat", BuiltInFunctionType::CONCAT, "concat"},
+      {"stringlength", BuiltInFunctionType::STRING_LENGTH, "stringLength"},
+  };
 
-    try {
-      return builtinfunction_converter.at(to_lower(builtinfunction));
-    } catch (const std::out_of_range& exception) {
-      throw cpmml::ParsingException(builtinfunction + " not supported");
-    }
+  // Apply/@function is required, and a name that is not a PMML built-in is
+  // either a DefineFunction cPMML does not support or a typo. Either way there
+  // is no function to apply.
+  static BuiltInFunctionType from_string(const std::string& builtinfunction) {
+    return enum_value(builtinfunction, TABLE, "function");
   }
 
   // Exact arity, or -1 for variadic functions (see get_min_nargs for those).

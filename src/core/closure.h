@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "utils/utils.h"
+#include "enum_parser.h"
 
 /**
  * @class Closure
@@ -27,38 +27,23 @@ class Closure {
  public:
   enum class ClosureValue { CLOSED_CLOSED, OPEN_OPEN, CLOSED_OPEN, OPEN_CLOSED };
 
+  static constexpr EnumEntry<ClosureValue> TABLE[] = {
+      {"closedclosed", ClosureValue::CLOSED_CLOSED, "CLOSED_CLOSED"},
+      {"openopen", ClosureValue::OPEN_OPEN, "OPEN_OPEN"},
+      {"closedopen", ClosureValue::CLOSED_OPEN, "CLOSED_OPEN"},
+      {"openclosed", ClosureValue::OPEN_CLOSED, "OPEN_CLOSED"},
+  };
+
   const ClosureValue value;
 
   explicit Closure(const std::string& closure) : value(from_string(closure)) {}
 
+  // Interval/@closure is required, so there is no default to fall back to.
   static ClosureValue from_string(const std::string& closure) {
-    const static std::unordered_map<std::string, ClosureValue> closure_converter = {
-        {"closedclosed", ClosureValue::CLOSED_CLOSED},
-        {"openopen", ClosureValue::OPEN_OPEN},
-        {"closedopen", ClosureValue::CLOSED_OPEN},
-        {"openclosed", ClosureValue::OPEN_CLOSED}};
-
-    try {
-      return closure_converter.at(to_lower(to_lower(closure)));
-    } catch (const std::out_of_range& exception) {
-      throw cpmml::ParsingException(closure + " not supported");
-    }
+    return enum_value(closure, TABLE, "Interval/@closure");
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case ClosureValue::CLOSED_CLOSED:
-        return "CLOSED_CLOSED";
-      case ClosureValue::OPEN_OPEN:
-        return "OPEN_OPEN";
-      case ClosureValue::CLOSED_OPEN:
-        return "CLOSED_OPEN";
-      case ClosureValue::OPEN_CLOSED:
-        return "OPEN_CLOSED";
-      default:
-        return "OPEN_OPEN";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "OPEN_OPEN"); }
 };
 
 #endif

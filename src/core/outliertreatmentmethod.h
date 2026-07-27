@@ -7,10 +7,9 @@
 #ifndef CPMML_OUTLIERTREATMENTMETHOD_H
 #define CPMML_OUTLIERTREATMENTMETHOD_H
 
-#include <map>
 #include <string>
 
-#include "utils/utils.h"
+#include "enum_parser.h"
 
 /**
  * @class OutlierTreatmentMethod
@@ -30,41 +29,31 @@ class OutlierTreatmentMethod {
     AS_EXTREME_VALUES,
   };
 
+  static constexpr EnumEntry<OutlierTreatmentMethodValue> TABLE[] = {
+      {"asis", OutlierTreatmentMethodValue::AS_IS, "asIs"},
+      {"asmissingvalues", OutlierTreatmentMethodValue::AS_MISSING_VALUES, "asMissingValues"},
+      {"asextremevalues", OutlierTreatmentMethodValue::AS_EXTREME_VALUES, "asExtremeValues"},
+  };
+
   OutlierTreatmentMethodValue value = OutlierTreatmentMethodValue::AS_IS;
 
   OutlierTreatmentMethod() = default;
 
-  explicit OutlierTreatmentMethod(const std::string& value) : value(from_string(to_lower(value))) {}
+  explicit OutlierTreatmentMethod(const std::string& value) : value(from_string(value)) {}
 
   inline bool operator==(const OutlierTreatmentMethod& other) const { return value == other.value; };
 
   inline bool operator!=(const OutlierTreatmentMethod& other) const { return value != other.value; };
 
+  // MiningField/@outliers defaults to asIs. This one used to look the token up
+  // without lower-casing it, so it only worked because its own constructor
+  // lower-cased first; a direct from_string("asMissingValues") silently
+  // returned asIs.
   static OutlierTreatmentMethodValue from_string(const std::string& outliertreatmentmethod) {
-    const static std::unordered_map<std::string, OutlierTreatmentMethodValue> outliertreatmentmethod_converter = {
-        {"asis", OutlierTreatmentMethodValue::AS_IS},
-        {"asmissingvalues", OutlierTreatmentMethodValue::AS_MISSING_VALUES},
-        {"asextremevalues", OutlierTreatmentMethodValue::AS_EXTREME_VALUES}};
-
-    try {
-      return outliertreatmentmethod_converter.at(outliertreatmentmethod);
-    } catch (const std::out_of_range& exception) {
-      return OutlierTreatmentMethodValue::AS_IS;
-    }
+    return enum_value(outliertreatmentmethod, TABLE, "outliers", OutlierTreatmentMethodValue::AS_IS);
   }
 
-  std::string to_string() const {
-    switch (value) {
-      case OutlierTreatmentMethodValue::AS_IS:
-        return "asIs";
-      case OutlierTreatmentMethodValue::AS_MISSING_VALUES:
-        return "asMissingValues";
-      case OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-        return "asExtremeValues";
-      default:
-        return "asIs";
-    }
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "asIs"); }
 };
 
 #endif

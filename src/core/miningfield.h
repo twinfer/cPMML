@@ -70,13 +70,17 @@ class MiningField : public DataField {
         hasMissingReplacement(node.exists_attribute("missingValueReplacement")),
         missingvalue_replacement(hasMissingReplacement ? Value(node.get_attribute("missingValueReplacement"), datatype)
                                                        : Value()),  //, data_dictionary.datafields[name].datatype)),
-        missingvalue_treatmentmethod(node.get_attribute("missingValueTreatmentMethod")),  // useless for scoring (just
-                                                                                          // for info where the value
-                                                                                          // comes from)
-        hasInvalidTreatment(node.exists_attribute("invalidValueTreatmentMethod")),
-        invalidvalue_treatmentmethod(
-            hasInvalidTreatment ? InvalidValueTreatmentMethod(node.get_attribute("invalidValueTreatmentMethod"))
-                                : InvalidValueTreatmentMethod()) {
+        // The attributes are spelled missingValueTreatment and
+        // invalidValueTreatment; these read "...Method", a name no MiningField
+        // carries, so both always saw an absent attribute and took the default.
+        // Neither member is consulted while scoring, so the only thing that
+        // changes is that a document spelling one of them wrongly is now
+        // refused instead of silently ignored.
+        missingvalue_treatmentmethod(node.get_attribute("missingValueTreatment")),
+        hasInvalidTreatment(node.exists_attribute("invalidValueTreatment")),
+        invalidvalue_treatmentmethod(hasInvalidTreatment
+                                         ? InvalidValueTreatmentMethod(node.get_attribute("invalidValueTreatment"))
+                                         : InvalidValueTreatmentMethod()) {
     if (node.exists_attribute("optype")) optype = OpType(node.get_attribute("optype"));
   };
 
