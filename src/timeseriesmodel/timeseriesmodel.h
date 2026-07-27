@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <string>
 #include <unsupported/Eigen/KroneckerProduct>
@@ -406,7 +407,10 @@ class TimeSeriesModel {
 
   std::vector<double> forecast_arima_cls(int horizon) const {
     const auto& a = arima;
-    std::vector<double> y(a.y_diff), eps(a.eps);
+    // Most-recent-first, and each step prepends. A vector makes that a shift of
+    // everything behind it, so the recursion cost grew with the square of the
+    // horizon; a deque prepends in constant time and indexes the same way.
+    std::deque<double> y(a.y_diff.cbegin(), a.y_diff.cend()), eps(a.eps.cbegin(), a.eps.cend());
     std::vector<double> w_out;
     w_out.reserve(horizon);
 
@@ -421,8 +425,8 @@ class TimeSeriesModel {
       // spells this out: "- theta_1 a_t" with theta_1 = -0.4 contributes +0.8.
       for (int j = 0; j < q_eff && j < static_cast<int>(eps.size()); ++j) yh -= a.theta[j] * eps[j];
       w_out.push_back(yh);
-      y.insert(y.begin(), yh);
-      eps.insert(eps.begin(), 0.0);
+      y.push_front(yh);
+      eps.push_front(0.0);
     }
 
     auto result = undifference_sarima(w_out, a.d, a.D, a.m, a.z_tail, a.y_tail);
@@ -1286,7 +1290,7 @@ class TimeSeriesModel {
 
   std::vector<double> forecast_garch_mean(int horizon) const {
     const auto& g = garch;
-    std::vector<double> y(g.y_diff), eps(g.eps_mean);
+    std::deque<double> y(g.y_diff.cbegin(), g.y_diff.cend()), eps(g.eps_mean.cbegin(), g.eps_mean.cend());
     std::vector<double> out;
     out.reserve(horizon);
     int p_eff = static_cast<int>(g.phi.size());
@@ -1296,8 +1300,8 @@ class TimeSeriesModel {
       for (int i = 0; i < p_eff && i < static_cast<int>(y.size()); ++i) yh += g.phi[i] * y[i];
       for (int j = 0; j < q_eff && j < static_cast<int>(eps.size()); ++j) yh += g.theta[j] * eps[j];
       out.push_back(yh);
-      y.insert(y.begin(), yh);
-      eps.insert(eps.begin(), 0.0);
+      y.push_front(yh);
+      eps.push_front(0.0);
     }
     return out;
   }

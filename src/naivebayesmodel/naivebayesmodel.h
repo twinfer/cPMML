@@ -36,6 +36,10 @@ class NaiveBayesModel : public InternalModel {
     size_t field_index;
     // input_value (as double via Value encoding) → class → count
     std::unordered_map<double, std::unordered_map<std::string, double>> counts;
+    // Σ counts over every input value, per class, aligned to `classes`. It is a
+    // property of the model, but scoring recomputed it by walking the whole
+    // counts map once per class per record.
+    std::vector<double> class_totals;
   };
 
   // One continuous input (Gaussian per class)
@@ -112,6 +116,13 @@ class NaiveBayesModel : public InternalModel {
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
             di.counts[input_val.value][tvc.get_attribute("value")] = to_double(tvc.get_attribute("count"));
         }
+        di.class_totals.assign(classes.size(), 0.0);
+        for (const auto& [v, cls_map] : di.counts)
+          for (size_t i = 0; i < classes.size(); i++) {
+            const auto jt = cls_map.find(classes[i]);
+            if (jt != cls_map.end()) di.class_totals[i] += jt->second;
+          }
+
         discrete_inputs.push_back(std::move(di));
       }
 
@@ -146,11 +157,7 @@ class NaiveBayesModel : public InternalModel {
       const auto it = di.counts.find(x);
       for (size_t i = 0; i < classes.size(); i++) {
         double cnt = 0.0;
-        double class_total = 0.0;
-        for (const auto& [v, cls_map] : di.counts) {
-          const auto jt = cls_map.find(classes[i]);
-          if (jt != cls_map.end()) class_total += jt->second;
-        }
+        const double class_total = di.class_totals[i];
         if (it != di.counts.end()) {
           const auto jt = it->second.find(classes[i]);
           if (jt != it->second.end()) cnt = jt->second;

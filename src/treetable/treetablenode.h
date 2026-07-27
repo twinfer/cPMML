@@ -28,21 +28,18 @@ class TreeTableNode {
 
   explicit TreeTableNode(const V& value) : value(value) {}
 
-  void add(const std::vector<K>& keys, const V& value) {
-    if (keys.size() == 0) {
+  // Both descents used to copy the remaining keys into a fresh vector at every
+  // level -- one allocation per column, per lookup, on the scoring path.
+  void add(const std::vector<K>& keys, const V& value, const size_t level = 0) {
+    if (level == keys.size()) {
       this->value = value;
       return;
     }
-    if (children.find(keys.front()) == children.cend()) children[keys.front()] = std::make_shared<TreeTableNode>();
-    children[keys.front()]->add(std::vector<K>(keys.begin() + 1, keys.end()), value);
+    if (children.find(keys[level]) == children.cend()) children[keys[level]] = std::make_shared<TreeTableNode>();
+    children[keys[level]]->add(keys, value, level + 1);
   }
 
-  inline V get(const std::vector<K>& keys) const {
-    if (children.size() == 0) return value;
-    return children.at(keys.front())->get(std::vector<K>(keys.begin() + 1, keys.end()));
-  }
-
-  inline V get(const std::vector<K>& keys, const size_t& level) const {
+  inline V get(const std::vector<K>& keys, const size_t level = 0) const {
     if (children.size() == 0) return value;
     return children.at(keys[level])->get(keys, level + 1);
   }

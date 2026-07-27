@@ -100,10 +100,23 @@ class Value {
   inline void uppercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::toupper); }
   inline void substr(const size_t& start, const size_t& size) { svalue = svalue.substr(start, size); }
   inline void trim_blanks() { svalue = ::trim(svalue); }
-  inline Value replace(const std::string& regex, const std::string& replacement) const {
-    return Value(std::regex_replace(svalue, std::regex(regex), replacement), DataType::DataTypeValue::STRING);
+  // std::regex's constructor parses and compiles the pattern. Both of these
+  // rebuilt it per record, though the pattern comes from a Constant the
+  // document fixes at parse time. The cache is thread_local: building a regex
+  // into shared state from several scoring threads is a race, and one model
+  // uses a handful of distinct patterns, so per-thread duplication is cheap.
+  inline static const std::regex& cached_regex(const std::string& pattern) {
+    static thread_local std::unordered_map<std::string, std::regex> cache;
+    auto it = cache.find(pattern);
+    if (it == cache.end()) it = cache.emplace(pattern, std::regex(pattern)).first;
+
+    return it->second;
   }
-  inline bool matches(const std::string& pattern) const { return std::regex_match(svalue, std::regex(pattern)); }
+
+  inline Value replace(const std::string& regex, const std::string& replacement) const {
+    return Value(std::regex_replace(svalue, cached_regex(regex), replacement), DataType::DataTypeValue::STRING);
+  }
+  inline bool matches(const std::string& pattern) const { return std::regex_match(svalue, cached_regex(pattern)); }
 
   // Static members
   template <class CollectionT>

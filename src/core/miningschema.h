@@ -59,7 +59,7 @@ class MiningSchema {
     return raw_miningfields.find(feature_name) != raw_miningfields.cend();
   }
 
-  inline MiningField at(const std::string& feature_name) const { return raw_miningfields.at(feature_name); }
+  inline const MiningField& at(const std::string& feature_name) const { return raw_miningfields.at(feature_name); }
 
   void prepare(Sample& sample, const std::unordered_map<std::string, std::string>& input) const {
 #ifdef DEBUG
