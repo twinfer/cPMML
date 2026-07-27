@@ -1,0 +1,51 @@
+# Replaces .travis.yml, which had not been able to build this project for years:
+# it pinned Ubuntu bionic and gcc-7, which do not have C++20, and its script ran
+# `cmake . && make` without ever invoking ctest -- so even when it was green it
+# was not running the fixture suite.
+name: build-and-test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # CPM fetches pugixml, miniz and Eigen; caching them keeps a run from
+      # re-cloning three repositories every time.
+      - name: Cache CPM sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/CPM
+          key: cpm-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure
+        env:
+          CPM_SOURCE_CACHE: ~/.cache/CPM
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # The point of the job: .travis.yml never got here.
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # A consumer must be able to find_package(cPMML) and catch its exceptions
+      # across the shared-library boundary, which the hidden-visibility build
+      # only guarantees if the public API is exported.
+      - name: Install and consume
+        run: |
+          cmake --install build --prefix "$PWD/_prefix"
+          cmake -S examples/find_package -B _consumer -DCMAKE_PREFIX_PATH="$PWD/_prefix"
+          cmake --build _consumer

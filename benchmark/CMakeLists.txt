@@ -7,7 +7,7 @@ add_executable(model_benchmark.exe model_benchmark.cc)
 target_include_directories(model_benchmark.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(model_benchmark.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(model_benchmark.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
-target_link_libraries(model_benchmark.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+target_link_libraries(model_benchmark.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
 macro(add_model_benchmark TARGET DATASET)
     add_custom_target(${TARGET}_benchmark_run
             COMMAND model_benchmark.exe data/model/${TARGET}.xml data/dataset/${DATASET}.csv

@@ -26,12 +26,16 @@ include(cmake/CPM.cmake)
 # DEPENDENCIES
 
 # XML PARSING
-CPMAddPackage("gh:zeux/pugixml@1.14")
+# EXCLUDE_FROM_ALL on all three: their install() rules would otherwise run
+# during `make install` for cPMML, so installing this library dropped 600 files
+# -- the whole of Eigen's header tree -- into the consumer's prefix.
+CPMAddPackage(NAME pugixml GITHUB_REPOSITORY zeux/pugixml GIT_TAG v1.14 EXCLUDE_FROM_ALL YES)
 
 # COMPRESSION
 CPMAddPackage(NAME miniz
 GIT_REPOSITORY https://github.com/richgel999/miniz.git
 GIT_TAG 3.1.1
+EXCLUDE_FROM_ALL YES
 )
 
 # LINEAR ALGEBRA (neural networks)
@@ -44,6 +48,7 @@ CPMAddPackage(
         "BUILD_TESTING OFF"
         "EIGEN_BUILD_PKGCONFIG OFF"
         "EIGEN_BUILD_BTL OFF"
+    EXCLUDE_FROM_ALL YES
 )
 
 # BUILD OPTIONS
@@ -218,20 +223,68 @@ add_library(
 set_target_properties(
         ${PROJECT_NAME} PROPERTIES
         VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION}
+        # SONAME carries the major version alone. It was the full 2.1, which
+        # defeats the point: every minor release minted a new SONAME and forced
+        # a relink even when nothing in the ABI had changed.
+        SOVERSION ${PROJECT_VERSION_MAJOR}
         LINKER_LANGUAGE CXX
         PUBLIC_HEADER include/cPMML.h
 )
 
-target_include_directories(${PROJECT_NAME} PUBLIC include)
+target_include_directories(
+        ${PROJECT_NAME} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_include_directories(${PROJECT_NAME} PRIVATE third_party)
-target_link_libraries(${PROJECT_NAME} PUBLIC pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+
+# PRIVATE, not PUBLIC. cPMML.h includes nothing but standard headers, so none
+# of these three is part of the interface -- linking them PUBLIC put pugixml's,
+# miniz's and Eigen's include directories and link requirements onto every
+# consumer, and made an Eigen version mismatch in the consumer's own build a
+# cPMML problem.
+target_link_libraries(${PROJECT_NAME} PRIVATE pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+
+include(CMakePackageConfigHelpers)
 
 install(
         TARGETS ${PROJECT_NAME}
+        EXPORT ${PROJECT_NAME}Targets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Consumers had no way to say find_package(cPMML) -- the install dropped a
+# library and a header and nothing that describes them. The dependencies are
+# linked PRIVATE and built into the shared object, so the config needs no
+# find_dependency calls.
+install(
+        EXPORT ${PROJECT_NAME}Targets
+        FILE ${PROJECT_NAME}Targets.cmake
+        NAMESPACE ${PROJECT_NAME}::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+)
+
+configure_package_config_file(
+        cmake/${PROJECT_NAME}Config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+)
+
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+)
+
+install(
+        FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}ConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
 # BENCHMARK

@@ -8,7 +8,7 @@ add_executable(pmml_tester.exe pmml_tester.cc)
 target_include_directories(pmml_tester.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(pmml_tester.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(pmml_tester.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
-target_link_libraries(pmml_tester.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+target_link_libraries(pmml_tester.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
 add_dependencies(unit_tests pmml_tester.exe)
 
 # Guards the fixture suite cannot express: default-constructed API objects,
@@ -17,7 +17,7 @@ add_executable(api_guards.exe api_guards.cc)
 target_include_directories(api_guards.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(api_guards.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(api_guards.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
-target_link_libraries(api_guards.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+target_link_libraries(api_guards.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
 add_dependencies(unit_tests api_guards.exe)
 add_test(api_guards api_guards.exe)
 
@@ -28,14 +28,24 @@ add_test(api_guards api_guards.exe)
 file(GLOB _model_zips CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/data/model/*.zip")
 
+set(_orphan_models "")
 foreach(_zip ${_model_zips})
     get_filename_component(_stem "${_zip}" NAME_WE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/dataset/${_stem}.csv")
         add_test(${_stem} pmml_tester.exe
             "data/model/${_stem}.zip"
             "data/dataset/${_stem}.csv")
+    else()
+        list(APPEND _orphan_models ${_stem})
     endif()
 endforeach()
+
+# A model with no dataset used to drop out of the suite without a word, so a
+# fixture could stop running the moment its CSV was renamed and the count would
+# still look healthy.
+if(_orphan_models)
+    message(WARNING "fixture models with no matching dataset, not registered: ${_orphan_models}")
+endif()
 
 # Locale-independence guard: numeric parsing and formatting must not go through
 # LC_NUMERIC, so these fixtures must produce identical results under a
