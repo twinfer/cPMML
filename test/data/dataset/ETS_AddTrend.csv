@@ -1,7 +1,7 @@
-forecast
-105.0
-110.0
-115.0
-120.0
-125.0
-130.0
+forecast,variance
+105.0,nan
+110.0,nan
+115.0,nan
+120.0,nan
+125.0,nan
+130.0,nan
