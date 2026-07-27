@@ -8,8 +8,10 @@
 #define CPMML_ANOMALYDETECTIONEVALUATOR_H
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "clusteringmodel/clusteringmodel.h"
 #include "core/internal_evaluator.h"
@@ -28,17 +30,21 @@
  * Supported inner model types (algorithmType):
  * - iforest (MiningModel):       score = 2^(-E[h]/c(n))
  * - ocsvm (SupportVectorMachineModel): score = raw SVM decision value
- * - clusterMeanDist (ClusteringModel): score = raw mean cluster distance
+ * - clusterMeanDist (ClusteringModel): score = d(case, nearest centre) divided
+ *   by that cluster's entry in MeanClusterDistances
  *
  * For iForest, c(n) = 2*(ln(n-1)+Euler) - 2*(n-1)/n  (Liu et al., 2008).
  * Higher scores indicate greater anomalousness.
  */
 class AnomalyDetectionEvaluator : public InternalEvaluator {
  public:
+  enum class Algorithm { IFOREST, OCSVM, CLUSTER_MEAN_DIST };
+
   std::unique_ptr<InternalModel> inner;
   const ClusteringModel* clustering = nullptr;  // set for clusterMeanDist (non-owning view of inner)
   double sample_data_size = 256.0;
-  bool is_iforest = true;
+  Algorithm algorithm = Algorithm::IFOREST;
+  std::vector<double> mean_cluster_distances;
 
   explicit AnomalyDetectionEvaluator(const XmlNode& pmml_root) : InternalEvaluator(pmml_root) {
     XmlNode ad = pmml_root.get_child("AnomalyDetectionModel");
@@ -48,8 +54,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     // functionName, algorithmType, sampleDataSize and isScorable — so it was
     // not a dropped feature but an invented one. Removed rather than wired up.
     sample_data_size = ad.get_double_attribute("sampleDataSize", 256.0);
-    std::string algo = to_lower(ad.get_attribute("algorithmType"));
-    is_iforest = (algo == "iforest");
+    algorithm = parse_algorithm(ad.get_attribute("algorithmType"));
 
     if (ad.exists_child("MiningModel")) {
       inner = std::make_unique<EnsembleModel>(ad.get_child("MiningModel"), data_dictionary, transformation_dictionary,
@@ -65,15 +70,27 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     } else {
       throw cpmml::ParsingException("AnomalyDetectionModel: unsupported or missing inner model");
     }
+
+    parse_mean_cluster_distances(ad);
   }
 
   inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
     auto flat = flatten_input(arguments);
-    // clusterMeanDist scores with the distance to the nearest cluster —
-    // inner->predict would return the cluster *id*, which is not a score.
-    double raw = clustering ? clustering->min_distance(flat) : to_double(inner->predict(flat));
-    double s = is_iforest ? iforest_score(raw) : raw;
-    return std::make_unique<InternalScore>(s);
+
+    switch (algorithm) {
+      case Algorithm::CLUSTER_MEAN_DIST: {
+        // clusterMeanDist scores with the distance to the nearest cluster —
+        // inner->predict would return the cluster *id*, which is not a score.
+        const ClusteringModel::Nearest n = clustering->nearest(flat);
+        return std::make_unique<InternalScore>(cluster_mean_dist_score(n));
+      }
+      case Algorithm::IFOREST:
+        return std::make_unique<InternalScore>(iforest_score(to_double(inner->predict(flat))));
+      case Algorithm::OCSVM:
+        return std::make_unique<InternalScore>(to_double(inner->predict(flat)));
+    }
+
+    throw cpmml::ParsingException("AnomalyDetectionModel: unreachable algorithmType");
   }
 
   inline bool validate(const Input& arguments) const override {
@@ -85,6 +102,80 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   inline std::string mining_function_name() const override { return "CLASSIFICATION"; }
 
  private:
+  // The enumeration is iforest | ocsvm | clusterMeanDist | other. Everything
+  // that was not "iforest" used to be scored as a raw inner prediction, so
+  // clusterMeanDist and an unrecognised or absent algorithmType were all the
+  // same branch.
+  static Algorithm parse_algorithm(const std::string& raw) {
+    const std::string a = to_lower(raw);
+    if (a == "iforest") return Algorithm::IFOREST;
+    if (a == "ocsvm") return Algorithm::OCSVM;
+    if (a == "clustermeandist") return Algorithm::CLUSTER_MEAN_DIST;
+    if (a == "other")
+      throw cpmml::ParsingException(
+          "AnomalyDetectionModel: algorithmType=\"other\" names an algorithm the document does not define, "
+          "so there is no scoring procedure to apply");
+
+    throw cpmml::ParsingException("AnomalyDetectionModel: unsupported algorithmType: " + raw);
+  }
+
+  /**
+   * "The MeanClusterDistances element contains an array of non-negative real
+   *  values, it is required when the algorithm type is clusterMeanDist." One
+   *  entry per cluster, in cluster order.
+   */
+  void parse_mean_cluster_distances(const XmlNode& ad) {
+    const bool present = ad.exists_child("MeanClusterDistances");
+
+    if (algorithm != Algorithm::CLUSTER_MEAN_DIST) {
+      if (present)
+        throw cpmml::ParsingException("AnomalyDetectionModel: MeanClusterDistances is only for clusterMeanDist");
+      return;
+    }
+
+    if (clustering == nullptr)
+      throw cpmml::ParsingException("AnomalyDetectionModel: clusterMeanDist requires a ClusteringModel");
+    if (!present)
+      throw cpmml::ParsingException("AnomalyDetectionModel: clusterMeanDist requires MeanClusterDistances");
+
+    for (const auto& raw : parse_array(ad.get_child("MeanClusterDistances").get_child("Array").value()))
+      mean_cluster_distances.push_back(to_double(raw));
+
+    if (mean_cluster_distances.size() != clustering->clusters.size())
+      throw cpmml::ParsingException("AnomalyDetectionModel: MeanClusterDistances has " +
+                                    std::to_string(mean_cluster_distances.size()) + " entries for " +
+                                    std::to_string(clustering->clusters.size()) + " clusters");
+
+    for (const double d : mean_cluster_distances)
+      if (d < 0.0)
+        throw cpmml::ParsingException("AnomalyDetectionModel: MeanClusterDistances must be non-negative, got " +
+                                      double_to_string(d));
+  }
+
+  /**
+   * "its anomaly index defined as the ratio of the distances/similarities (with
+   *  special treatment for the average distance of 0)."
+   *
+   * The spec's own worked example is this arithmetic and nothing else: a case
+   * at distance 0.048 from the first cluster, whose mean distance is 0.165,
+   * scores 0.048/0.165 = 0.291; one at 0.457 from the third, mean 0.210, scores
+   * 2.176 and is flagged. cPMML returned the bare 0.048 and 0.457, so every
+   * clusterMeanDist score was off by an unapplied per-cluster divisor -- and
+   * off by a *different* divisor per cluster, so it was not even a monotone
+   * rescaling of the right answer.
+   *
+   * The "special treatment" is left unspecified, so this takes the reading the
+   * ratio forces: against a cluster whose members all sat exactly on its
+   * centre, any distance at all is unboundedly anomalous, and no distance is
+   * not anomalous.
+   */
+  double cluster_mean_dist_score(const ClusteringModel::Nearest& n) const {
+    const double mean = mean_cluster_distances[n.index];
+    if (mean > 0.0) return n.distance / mean;
+
+    return n.distance > 0.0 ? std::numeric_limits<double>::infinity() : 0.0;
+  }
+
   double iforest_score(double avg_path) const {
     double c_n = compute_c_n(sample_data_size);
     return std::pow(2.0, -avg_path / c_n);

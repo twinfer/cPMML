@@ -83,10 +83,17 @@ class ClusteringModel : public InternalModel {
 
   inline std::string predict_raw(const Sample& sample) const override { return find_cluster(sample); }
 
-  // Distance (dissimilarity) to the nearest cluster centroid, with the full
-  // prepare/transform pipeline applied. Used by AnomalyDetection
-  // clusterMeanDist, where the score is the distance itself, not the cluster id.
-  double min_distance(const std::unordered_map<std::string, std::string>& sample) const {
+  struct Nearest {
+    size_t index = 0;
+    double distance = std::numeric_limits<double>::max();
+  };
+
+  // The nearest cluster and the dissimilarity to it, with the full
+  // prepare/transform pipeline applied. AnomalyDetection clusterMeanDist needs
+  // both: the distance is the numerator of the anomaly score and the index
+  // selects that cluster's entry in MeanClusterDistances. This used to return
+  // the distance alone, which is why the divisor could not be applied.
+  Nearest nearest(const std::unordered_map<std::string, std::string>& sample) const {
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
@@ -94,10 +101,7 @@ class ClusteringModel : public InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
-    const Eigen::VectorXd q = build_query(internal_sample);
-    double best = std::numeric_limits<double>::max();
-    for (const auto& cluster : clusters) best = std::min(best, compute_distance_to(q, cluster.centroid));
-    return best;
+    return nearest_of(internal_sample);
   }
 
  private:
@@ -173,23 +177,25 @@ class ClusteringModel : public InternalModel {
         [&](size_t i) { return fields[i].similarity_scale; });
   }
 
-  std::string find_cluster(const Sample& sample) const {
+  Nearest nearest_of(const Sample& sample) const {
+    if (clusters.empty()) throw cpmml::ParsingException("ClusteringModel: no Cluster elements");
+
     const Eigen::VectorXd q = build_query(sample);
     // compute_distance is uniformly a dissimilarity (similarity measures are
     // flipped to 1−s), so the closest cluster is always the minimum.
-    double best_val = std::numeric_limits<double>::max();
-    size_t best_idx = 0;
-
+    Nearest best;
     for (size_t i = 0; i < clusters.size(); i++) {
       const double d = compute_distance_to(q, clusters[i].centroid);
-      if (d < best_val) {
-        best_val = d;
-        best_idx = i;
+      if (d < best.distance) {
+        best.distance = d;
+        best.index = i;
       }
     }
 
-    return clusters[best_idx].id;
+    return best;
   }
+
+  std::string find_cluster(const Sample& sample) const { return clusters[nearest_of(sample).index].id; }
 };
 
 #endif

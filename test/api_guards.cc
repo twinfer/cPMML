@@ -239,12 +239,88 @@ static void csvreader_reads_past_a_long_row() {
   std::remove(path.c_str());
 }
 
+// MeanClusterDistances is "required when the algorithm type is clusterMeanDist"
+// and its array length must match the cluster count -- an off-by-one there
+// silently divides by the wrong cluster's mean, which is the same class of
+// error as not dividing at all.
+static const char* ANOMALY_PMML_TEMPLATE = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4">
+  <DataDictionary numberOfFields="2">
+    <DataField name="a" optype="continuous" dataType="double"/>
+    <DataField name="s" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <AnomalyDetectionModel functionName="regression" algorithmType="@ALGO@">
+    <MiningSchema>
+      <MiningField name="a" usageType="active"/>
+    </MiningSchema>
+    <ClusteringModel functionName="clustering" modelClass="centerBased" numberOfClusters="2">
+      <MiningSchema>
+        <MiningField name="a" usageType="active"/>
+        <MiningField name="s" usageType="predicted"/>
+      </MiningSchema>
+      <ComparisonMeasure kind="distance"><euclidean/></ComparisonMeasure>
+      <ClusteringField field="a"/>
+      <Cluster name="1"><Array n="1" type="real">0.0</Array></Cluster>
+      <Cluster name="2"><Array n="1" type="real">1.0</Array></Cluster>
+    </ClusteringModel>@MCD@
+  </AnomalyDetectionModel>
+</PMML>
+)";
+
+static bool anomaly_loads(const std::string& algo, const std::string& mcd) {
+  std::string pmml = ANOMALY_PMML_TEMPLATE;
+  pmml.replace(pmml.find("@ALGO@"), 6, algo);
+  pmml.replace(pmml.find("@MCD@"), 5, mcd);
+
+  const std::string path = "anomaly_guard.pmml";
+  FILE* out = std::fopen(path.c_str(), "w");
+  if (out == nullptr) {
+    std::cerr << "FAIL could not write " << path << "\n";
+    ++failures;
+    return false;
+  }
+  std::fputs(pmml.c_str(), out);
+  std::fclose(out);
+
+  bool loaded = false;
+  try {
+    cpmml::Model model(path, false);
+    loaded = true;
+  } catch (const cpmml::Exception&) {
+  }
+
+  std::remove(path.c_str());
+  return loaded;
+}
+
+static void mean_cluster_distances_is_validated() {
+  const std::string two = R"(
+    <MeanClusterDistances><Array n="2" type="real">0.5 0.25</Array></MeanClusterDistances>)";
+  const std::string three = R"(
+    <MeanClusterDistances><Array n="3" type="real">0.5 0.25 0.1</Array></MeanClusterDistances>)";
+  const std::string negative = R"(
+    <MeanClusterDistances><Array n="2" type="real">0.5 -0.25</Array></MeanClusterDistances>)";
+
+  CHECK(anomaly_loads("clusterMeanDist", two));
+
+  CHECK(!anomaly_loads("clusterMeanDist", ""));        // required for this algorithm
+  CHECK(!anomaly_loads("clusterMeanDist", three));     // one entry per cluster
+  CHECK(!anomaly_loads("clusterMeanDist", negative));  // "an array of non-negative real values"
+
+  // Not "iforest" used to mean "score the inner model raw", so clusterMeanDist,
+  // an unknown value and an absent attribute were one branch.
+  CHECK(!anomaly_loads("other", ""));
+  CHECK(!anomaly_loads("notAnAlgorithm", ""));
+  CHECK(!anomaly_loads("ocsvm", two));  // MeanClusterDistances belongs to clusterMeanDist alone
+}
+
 int main() {
   default_result_is_answerable();
   default_model_throws();
   mkstring_handles_empty();
   cyclic_derived_fields_are_rejected();
   unsupported_baseline_statistics_are_rejected();
+  mean_cluster_distances_is_validated();
   csvreader_reads_past_a_long_row();
 
   if (failures > 0) {
