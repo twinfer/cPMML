@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "core/datadictionary.h"
+#include "core/enum_parser.h"
 #include "core/internal_model.h"
 #include "core/internal_score.h"
 #include "core/transformationdictionary.h"
@@ -68,7 +69,12 @@ class AssociationModel : public InternalModel {
   // -------------------------------------------------------------------------
   // Members
   // -------------------------------------------------------------------------
-  Algorithm algorithm = Algorithm::RECOMMENDATION;
+  // "exclusiveRecommendation", per OutputField/@algorithm's declared default.
+  // This was recommendation, which differs in exactly the case the two are
+  // named for: recommendation selects a rule whose antecedent is in the input,
+  // exclusiveRecommendation additionally requires that the consequent is not --
+  // so the default was recommending items the input itemset already contained.
+  Algorithm algorithm = Algorithm::EXCLUSIVE_RECOMMENDATION;
   bool is_transactional = false;       // true when MiningSchema has a group field
   std::string item_field_name;         // the active item field (transactional schema)
   std::unordered_map<std::string, Item>                              items;    // item id → Item
@@ -401,11 +407,16 @@ class AssociationModel : public InternalModel {
     return result;
   }
 
-  static Algorithm algorithm_from_string(const std::string& s) {
-    const std::string lower = to_lower(s);
-    if (lower == "exclusiverecommendation") return Algorithm::EXCLUSIVE_RECOMMENDATION;
-    if (lower == "ruleassociation")         return Algorithm::RULE_ASSOCIATION;
-    return Algorithm::RECOMMENDATION;
+  static constexpr EnumEntry<Algorithm> ALGORITHM_TABLE[] = {
+      {"recommendation", Algorithm::RECOMMENDATION, "recommendation"},
+      {"exclusiverecommendation", Algorithm::EXCLUSIVE_RECOMMENDATION, "exclusiveRecommendation"},
+      {"ruleassociation", Algorithm::RULE_ASSOCIATION, "ruleAssociation"},
+  };
+
+  // Everything unrecognised used to become recommendation, so a misspelt
+  // algorithm silently scored as the least restrictive of the three.
+  static Algorithm algorithm_from_string(const std::string& raw) {
+    return enum_value(raw, ALGORITHM_TABLE, "OutputField/@algorithm", Algorithm::EXCLUSIVE_RECOMMENDATION);
   }
 };
 

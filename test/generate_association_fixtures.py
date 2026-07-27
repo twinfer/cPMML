@@ -6,7 +6,8 @@ Run:
     python test/generate_association_fixtures.py
 
 Outputs (overwriting any existing files):
-    test/data/model/AssociationRules.zip            recommendation (default)
+    test/data/model/AssociationRules.zip            recommendation (explicit)
+    test/data/model/AssociationRulesDefault.zip     no algorithm attribute → exclusiveRecommendation
     test/data/dataset/AssociationRules.csv
     test/data/model/AssociationRulesExcl.zip        exclusiveRecommendation
     test/data/dataset/AssociationRulesExcl.csv
@@ -64,7 +65,15 @@ class Model:
     items: dict[str, Item]          # item id → Item
     itemsets: dict[str, Itemset]    # itemset id → Itemset
     rules: list[AssociationRule]
-    algorithm: str = "recommendation"   # recommendation | exclusiveRecommendation | ruleAssociation
+    # recommendation | exclusiveRecommendation | ruleAssociation, or None to
+    # leave OutputField/@algorithm off the document entirely -- which is a case
+    # worth covering on its own, because the attribute's declared default is
+    # exclusiveRecommendation and cPMML used to fall back to recommendation.
+    algorithm: str | None = "recommendation"
+
+    @property
+    def effective_algorithm(self) -> str:
+        return self.algorithm if self.algorithm is not None else "exclusiveRecommendation"
 
 # ---------------------------------------------------------------------------
 # Scorer — mirrors C++ AssociationModel::score_raw / predict_raw exactly
@@ -99,9 +108,9 @@ def _antecedent_matches(rule: AssociationRule, active: frozenset[str],
 def _consequent_ok(rule: AssociationRule, active: frozenset[str],
                    model: Model) -> bool:
     cons = model.itemsets[rule.consequent].item_refs
-    if model.algorithm == "exclusiveRecommendation":
+    if model.effective_algorithm == "exclusiveRecommendation":
         return cons.isdisjoint(active)       # consequent must NOT be in basket already
-    if model.algorithm == "ruleAssociation":
+    if model.effective_algorithm == "ruleAssociation":
         return cons.issubset(active)         # consequent MUST already be in basket
     return True                              # recommendation: no constraint on consequent
 
@@ -142,11 +151,11 @@ def _build_pmml(model: Model) -> str:
     )
 
     # Output section: always present so output_name() returns a stable name
+    algorithm_attr = f'\n                   algorithm="{model.algorithm}"' if model.algorithm else ""
     output_xml = (
         "\n    <Output>\n"
         f'      <OutputField name="recommendation" feature="predictedValue"\n'
-        f'                   dataType="string" optype="categorical"\n'
-        f'                   algorithm="{model.algorithm}"/>\n'
+        f'                   dataType="string" optype="categorical"{algorithm_attr}/>\n'
         "    </Output>"
     )
 
@@ -285,7 +294,7 @@ RULES = [
     AssociationRule("A3", "C3", support=0.25, confidence=0.70, lift=1.8, id="R3"),
 ]
 
-def make_model(algorithm: str, name: str) -> Model:
+def make_model(algorithm: str | None, name: str) -> Model:
     return Model(
         name=name,
         n_transactions=100,
@@ -392,6 +401,10 @@ def main() -> None:
         (make_model("recommendation",          "AssociationRules"),          RECOMMENDATION_CASES),
         (make_model("exclusiveRecommendation", "AssociationRulesExcl"),      EXCLUSIVE_REC_CASES),
         (make_model("ruleAssociation",         "AssociationRulesRuleAssoc"), RULE_ASSOC_CASES),
+        # No algorithm attribute: the document says nothing, so the declared
+        # default applies and the answers must equal the explicit
+        # exclusiveRecommendation ones above.
+        (make_model(None,                      "AssociationRulesDefault"),    EXCLUSIVE_REC_CASES),
     ]
 
     for model, cases in fixtures:
