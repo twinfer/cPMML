@@ -293,15 +293,37 @@ def arima_psi_variance(
     theta_poly = np.convolve(_lag_polynomial(list(ma or [])), _lag_polynomial(list(seasonal_ma or []), period))
     theta = [-c for c in theta_poly[1:]]
 
+    weights = np.asarray(_psi(horizon - 1, phi, theta), dtype=float)
+    return np.asarray([sigma2 * np.sum(weights[:h] ** 2) for h in range(1, horizon + 1)], dtype=float)
+
+
+def _psi(count: int, phi: list[float], theta: list[float]) -> list[float]:
+    """psi_0..psi_count of THETA(B)/PHI(B), with psi_0 = 1."""
     psi = [1.0]
-    for j in range(1, horizon):
+    for j in range(1, count + 1):
         value = sum(phi[i] * psi[j - 1 - i] for i in range(len(phi)) if i < j)
         if j <= len(theta):
             value -= theta[j - 1]
         psi.append(value)
+    return psi
 
-    weights = np.asarray(psi, dtype=float)
-    return np.asarray([sigma2 * np.sum(weights[:h] ** 2) for h in range(1, horizon + 1)], dtype=float)
+
+def arima_h_vector(ar: list[float] | None = None, ma: list[float] | None = None) -> list[float]:
+    """PMML's HVector: "the first m psi weights", m = max(p, q).
+
+    The spec defines them as the coefficients in
+
+        (1 - t1 B - ... - tq B^q) / (1 - f1 B - ... - fp B^p) = 1 + psi1 B + ...
+
+    i.e. psi_1 onward, with the implicit psi_0 = 1 not written out -- the same
+    convention as StateSpaceModel's PsiVector. No differencing enters here: the
+    state space operates on the differenced series, so H is built from the
+    stationary polynomials alone. (Contrast arima_psi_variance, whose weights
+    describe y and therefore must fold the differencing in.)
+    """
+    ar, ma = list(ar or []), list(ma or [])
+    mm = max(len(ar), len(ma), 1)
+    return _psi(mm, ar, ma)[1:]
 
 
 def psi_variance(sigma2: float, psi: list[float], horizon: int) -> np.ndarray:

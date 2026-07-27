@@ -16,13 +16,15 @@ drop-in reference. Two oracles split the work by whether a third-party
 implementation actually constrains the answer:
 
   statsmodels (oracle_statsmodels.py)   pure AR models with non-seasonal and
-    seasonal differencing. Real recursion, real machinery, genuinely
-    independent -- and the home of the open findings about differencing.
+    seasonal differencing, and the whole exactLeastSquares path including
+    q > 0. Real recursion, real machinery, genuinely independent -- and the
+    home of the findings about differencing and about the state space.
 
-  spec transcription (oracle_spec.py)   everything statsmodels cannot express:
-    MA terms driven by the residuals the PMML supplies rather than residuals
-    re-derived by filtering, the constantTerm shift, and StateSpaceModel,
-    whose forecast the spec defines as a closed form with the errors ignored.
+  spec transcription (oracle_spec.py)   what statsmodels cannot express:
+    conditionalLeastSquares MA terms, driven by the residuals the PMML
+    supplies rather than by residuals re-derived by filtering, and
+    StateSpaceModel, whose forecast the spec defines as a closed form with
+    the errors ignored.
 
 The two are cross-checked against each other on every pure-AR fixture, where
 both apply, and the transcription oracle is additionally anchored on the
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from xml.etree import ElementTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -42,7 +45,7 @@ import numpy as np
 
 import oracle_spec
 import oracle_statsmodels
-from _harness import Fixture, format_number, main, provenance
+from _harness import Fixture, format_number, main, provenance, read_model
 
 SCRIPT = "tools/fixture-gen/gen_timeseries.py"
 
@@ -91,9 +94,36 @@ def _document(name: str, note: str, body: str, series: list[float] | None) -> st
     )
 
 
+def _kalman_state(final_state, h_vector) -> str:
+    """<MaximumLikelihoodStat> as the schema defines it: a child of ARIMA, with
+    FinalOmega and FinalStateVector required and HVector optional.
+
+    FinalOmega is emitted because the schema requires it, not because scoring
+    needs it -- the spec's Omega(h) recursion runs in the differenced basis, so
+    it describes w rather than y, and the psi-weight variance answers the
+    question the forecast actually poses. A conformant document has to carry it
+    either way, which is the point of including it here.
+    """
+    mm = len(final_state)
+    omega = [[0.0] * mm for _ in range(mm)]
+    h_element = ""
+    if h_vector is not None:
+        h_element = f"        <HVector>\n{_array(h_vector, '          ')}\n        </HVector>\n"
+    return (
+        '      <MaximumLikelihoodStat method="kalman">\n'
+        "        <KalmanState>\n"
+        f"{_matrix('FinalOmega', omega, '          ')}\n"
+        f"          <FinalStateVector>\n{_array(final_state, '            ')}\n          </FinalStateVector>\n"
+        f"{h_element}"
+        "        </KalmanState>\n"
+        "      </MaximumLikelihoodStat>\n"
+    )
+
+
 def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0, seasonal_ar=None,
                    seasonal_d=0, period=1, constant=0.0, rmse=None,
-                   prediction_method="conditionalLeastSquares") -> str:
+                   prediction_method="conditionalLeastSquares",
+                   final_state=None, h_vector=None) -> str:
     p, q = len(ar or []), len(ma or [])
     rmse_attr = "" if rmse is None else f' RMSE="{format_number(rmse)}"'
     parts = [f'    <ARIMA{rmse_attr} constantTerm="{format_number(constant)}" '
@@ -122,9 +152,12 @@ def arima_document(name, note, series, *, ar=None, ma=None, residuals=None, d=0,
             parts.append(_array(seasonal_ar, "          "))
             parts.append("        </AR>")
         parts.append("      </SeasonalComponent>")
-    parts.append("    </ARIMA>")
+    body = "\n".join(parts) + "\n"
+    if final_state is not None:
+        body += _kalman_state(final_state, h_vector)
+    body += "    </ARIMA>\n"
 
-    return _document(name, note, "\n".join(parts) + "\n", series)
+    return _document(name, note, body, series)
 
 
 def garch_document(name, *, ar, ma, residuals, constant, omega, alpha, garch_residuals, beta,
@@ -225,7 +258,7 @@ def forecast_fixture(name: str, pmml: str, values, variance=None) -> Fixture:
 AR_RMSE = 1.2
 
 
-def cross_checked_variance(name: str, horizon: int, rmse: float, kw: dict) -> np.ndarray:
+def cross_checked_variance(name: str, horizon: int, rmse: float, kw: dict, rtol: float = 1e-9) -> np.ndarray:
     """Forecast variance from statsmodels, cross-checked against the transcription.
 
     Both oracles have to fold the differencing operators into the AR polynomial
@@ -234,17 +267,66 @@ def cross_checked_variance(name: str, horizon: int, rmse: float, kw: dict) -> np
     polynomials explicitly. Agreement is therefore real evidence and not two
     copies of one reading.
 
-    constantTerm shifts the mean, not the spread, so it is dropped here.
+    constantTerm shifts the mean, not the spread, so it is dropped here; so are
+    the `<Residuals>`, which the variance does not read.
+
+    rtol is loosened for q > 0, where the two answer genuinely different
+    questions: statsmodels keeps the finite-sample uncertainty of the filtered
+    state, while the psi formula is the asymptotic variance. On the ten-point
+    SERIES that is a 0.6% gap at h=1, decaying with h -- larger than the
+    harness's own 0.1% tolerance, so the committed column has to be one or the
+    other and it is the spec's. The loose band is still worth running: it would
+    catch a sign or a factor, just not a convention.
     """
-    var_kw = {k: v for k, v in kw.items() if k != "constant"}
+    var_kw = {k: v for k, v in kw.items() if k not in ("constant", "residuals")}
     by_statsmodels = oracle_statsmodels.arima_forecast_variance(SERIES, horizon, rmse**2, **var_kw)
     by_spec = oracle_spec.arima_psi_variance(horizon, rmse**2, **var_kw)
-    if not np.allclose(by_statsmodels, by_spec, rtol=1e-9):
+    if not np.allclose(by_statsmodels, by_spec, rtol=rtol):
         raise AssertionError(
             f"{name}: statsmodels and the spec transcription disagree on forecast variance\n"
             f"  statsmodels {by_statsmodels}\n  transcription {by_spec}"
         )
-    return by_statsmodels
+    return by_spec if var_kw.get("ma") else by_statsmodels
+
+
+def regenerate_arima_kalman(horizon: int) -> Fixture:
+    """ARIMA_Kalman: keep the committed hand-authored model, regenerate the
+    expectations from it.
+
+    The oracle reads the document rather than a copy of its numbers, which is
+    the whole point of the pmml=None mode -- the committed expectations were
+    produced by the evaluator under test and cannot be trusted as a starting
+    point for anything.
+    """
+    ns = {"p": "http://www.dmg.org/PMML-4_4"}
+    root = ElementTree.fromstring(read_model("ARIMA_Kalman"))
+
+    def numbers(path: str) -> list[float]:
+        node = root.find(path, ns)
+        return [] if node is None else [float(v) for v in node.text.split()]
+
+    series = [float(tv.get("value")) for tv in root.findall(".//p:TimeSeries/p:TimeValue", ns)]
+    ar = numbers(".//p:NonseasonalComponent/p:AR/p:Array")
+    ma = numbers(".//p:NonseasonalComponent/p:MA/p:MACoefficients/p:Array")
+    nsc = root.find(".//p:NonseasonalComponent", ns)
+    d = int(nsc.get("d", "0"))
+    arima = root.find(".//p:ARIMA", ns)
+    constant = float(arima.get("constantTerm", "0"))
+    # No RMSE attribute means sigma^2 = 1, which is what cPMML defaults to.
+    sigma2 = float(arima.get("RMSE", "1")) ** 2
+
+    kw = dict(ar=ar, ma=ma, d=d, constant=constant)
+    return Fixture(
+        **{
+            **forecast_fixture(
+                "ARIMA_Kalman",
+                "",
+                oracle_statsmodels.arima_exact_forecast(series, horizon, **kw),
+                oracle_spec.arima_psi_variance(horizon, sigma2, ar=ar, ma=ma, d=d),
+            ).__dict__,
+            "pmml": None,
+        }
+    )
 
 
 def build() -> list[Fixture]:
@@ -314,36 +396,102 @@ def build() -> list[Fixture]:
         )
 
     # --- 2b. exactLeastSquares ----------------------------------------------
-    # The first fixture to reach the Kalman path at all, and it is deliberately
-    # a pure AR: statsmodels then pins the whole path, because a pure AR's
-    # terminal state is an exact function of the observed data whichever
-    # state-space basis the filter uses.
+    # The spec's state space, S(t+1) = F S(t) + H e(t), Y(t) = G S(t) + e(t),
+    # with m = max(p,q) and G = (1,0,...,0). statsmodels is a full oracle on
+    # this path including for q > 0, because exactLeastSquares recovers the
+    # innovations by filtering rather than reading <Residuals> -- see the scope
+    # note in oracle_statsmodels.py.
     #
-    # No MaximumLikelihoodStat. The supplied-state branch reads FinalStateVector
-    # in a basis the spec does not define it in (M-S13), so a fixture for it
-    # would be a fixture for the bug; it is unreachable today in any case.
+    # A pure AR is not enough on its own: it is exactly the case a wrong state
+    # space can still get right, since its terminal state is an exact function
+    # of the observed data whichever basis the filter works in. fix_arima_kalman
+    # _arma is the one that pins the form.
+    exact_cases = [
+        (
+            "fix_arima_kalman_state",
+            dict(ar=[0.5, -0.2], d=1),
+            "pure AR; exactLeastSquares must agree with conditionalLeastSquares on the same coefficients",
+        ),
+        (
+            "fix_arima_kalman_arma",
+            dict(ar=[0.5, -0.2], ma=[-0.4, 0.3], d=1),
+            "ARMA with q>0: the moving-average polynomial reaches the forecast only through H",
+        ),
+        (
+            "fix_arima_kalman_constant",
+            dict(ar=[0.5, -0.2], d=1, constant=0.8),
+            "constantTerm on the exactLeastSquares path, where the zero-mean state space "
+            "takes it as mu = c/(1-sum phi) rather than as an intercept",
+        ),
+    ]
+    for name, kw, description in exact_cases:
+        # q>0 loosens the variance cross-check; see cross_checked_variance.
+        variance = cross_checked_variance(name, horizon, AR_RMSE, kw, rtol=1e-2 if kw.get("ma") else 1e-9)
+        fixtures.append(
+            forecast_fixture(
+                name,
+                arima_document(
+                    name,
+                    f"{oracle_statsmodels.VERSION} SARIMAX; {description}",
+                    SERIES,
+                    rmse=AR_RMSE,
+                    prediction_method="exactLeastSquares",
+                    **kw,
+                ),
+                oracle_statsmodels.arima_exact_forecast(SERIES, horizon, **kw),
+                variance,
+            )
+        )
+
+    # --- 2c. the supplied-state shortcut -------------------------------------
+    # ARIMA/MaximumLikelihoodStat/KalmanState lets a producer ship the state its
+    # own filter reached, so the scorer does not re-derive it. Testing that it is
+    # actually honoured needs a document where re-deriving gives a *different*
+    # answer, so the TimeSeries here carries only the tail of the data the state
+    # was estimated on -- a realistic shape for a producer that ships a fitted
+    # model rather than its whole training set.
     #
-    # Both the forecast and the variance have to match the conditionalLeastSquares
-    # answer on the same coefficients, and that is the point of the fixture:
-    # predictionMethod selects how the forecast is computed, not a different
-    # process, so the terminal filter covariance has no business in the variance.
-    kalman_kw = dict(ar=[0.5, -0.2], d=1)
+    # The state itself is oracle-derived rather than transcribed. Since
+    # G = (1,0,...,0), S = (Y(n+1|n), ..., Y(n+m|n)) in the zero-mean basis, so
+    # the m numbers a producer would write are just statsmodels' first m
+    # forecasts less mu. Nothing here commits to an implementation's internal
+    # representation, which is what made the earlier fixture for this branch
+    # impossible to write honestly.
+    supplied_kw = dict(ar=[0.6, -0.2], ma=[-0.3, 0.15], constant=60.0)
+    supplied_state = oracle_statsmodels.arima_exact_state(SERIES, **supplied_kw)
+    supplied_values = oracle_statsmodels.arima_exact_forecast(SERIES, horizon, **supplied_kw)
+    shipped = SERIES[-4:]
+    if np.allclose(supplied_values, oracle_statsmodels.arima_exact_forecast(shipped, horizon, **supplied_kw),
+                   rtol=1e-3):
+        raise AssertionError(
+            "fix_arima_kalman_supplied: filtering the shipped TimeSeries reproduces the supplied state's "
+            "forecast to within the harness tolerance, so the fixture cannot tell the two apart"
+        )
     fixtures.append(
         forecast_fixture(
-            "fix_arima_kalman_state",
+            "fix_arima_kalman_supplied",
             arima_document(
-                "fix_arima_kalman_state",
-                f"{oracle_statsmodels.VERSION} SARIMAX, cross-checked against the spec transcription; "
-                "exactLeastSquares must score as conditionalLeastSquares does on the same coefficients",
-                SERIES,
+                "fix_arima_kalman_supplied",
+                f"{oracle_statsmodels.VERSION} SARIMAX; FinalStateVector and HVector supplied, and the "
+                "TimeSeries deliberately shorter than the data they were estimated on",
+                shipped,
                 rmse=AR_RMSE,
                 prediction_method="exactLeastSquares",
-                **kalman_kw,
+                final_state=supplied_state,
+                h_vector=oracle_spec.arima_h_vector(supplied_kw["ar"], supplied_kw["ma"]),
+                **supplied_kw,
             ),
-            oracle_statsmodels.arima_forecast(SERIES, horizon, **kalman_kw),
-            cross_checked_variance("fix_arima_kalman_state", horizon, AR_RMSE, kalman_kw),
+            supplied_values,
+            cross_checked_variance("fix_arima_kalman_supplied", horizon, AR_RMSE, supplied_kw, rtol=1e-2),
         )
     )
+
+    # --- 2d. the pre-existing hand-authored Kalman fixture -------------------
+    # ARIMA_Kalman shipped with expectations that recorded cPMML's own output
+    # (h=1 = 1.1, which is 0.5 * 2.2 -- the AR term alone, with the MA
+    # polynomial dropped). The model is left untouched and only the expected
+    # columns are regenerated, from the document itself.
+    fixtures.append(regenerate_arima_kalman(horizon))
 
     # --- 3. MA with supplied residuals: transcription only -------------------
     # statsmodels re-derives residuals by filtering; PMML applies the ones the

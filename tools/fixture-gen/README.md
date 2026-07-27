@@ -73,12 +73,14 @@ scikit-learn equivalent.
 implementation actually constrains the answer:
 
 - **statsmodels `SARIMAX`** for pure AR models with non-seasonal and seasonal
-  differencing. Real recursion, genuinely independent.
+  differencing, and for the whole `exactLeastSquares` path including q > 0.
+  Real recursion, genuinely independent.
 - **Spec transcription** (`oracle_spec.py`) for everything SARIMAX cannot
-  express: MA terms driven by the `<Residuals>` the document supplies rather
-  than residuals re-derived by filtering, and `StateSpaceModel`, whose forecast
-  the spec defines as the closed form `Y = G·Fʰ·X` with "the errors ignored" —
-  there is no Kalman filter to mirror and no Q/H that PMML ever states.
+  express: `conditionalLeastSquares` MA terms, which are driven by the
+  `<Residuals>` the document supplies rather than by residuals re-derived by
+  filtering, and `StateSpaceModel`, whose forecast the spec defines as the
+  closed form `Y = G·Fʰ·X` with "the errors ignored" — there is no Kalman
+  filter to mirror and no Q/H that PMML ever states.
 
 A transcription is weaker evidence than an independent implementation, so it is
 constrained two ways: every pure-AR fixture is computed by *both* oracles and
@@ -145,6 +147,13 @@ the two reach the same answer by different routes, SARIMAX through the state
 space and `oracle_spec` by convolving the polynomials, so agreement is evidence
 rather than two copies of one reading.
 
+For q > 0 the two stop being the same quantity and the cross-check runs at a
+loosened band. statsmodels keeps the finite-sample uncertainty of the filtered
+state; the ψ formula is the asymptotic variance. On the ten-point series here
+that is 0.6% at h=1, decaying with h — wider than the harness's own 0.1%, so the
+committed column has to be one or the other and it is the spec's. The loose band
+is still run: it would catch a sign or a factor, just not a convention.
+
 Three traps worth knowing, each of which cost a debugging round here:
 
 - GARCH's `<Residuals>` under `ResidualSquareCoefficients` holds ε, not ε².
@@ -159,17 +168,61 @@ Three traps worth knowing, each of which cost a debugging round here:
 
 ### The exactLeastSquares path
 
-`fix_arima_kalman_state` is a **pure AR on purpose**. A pure AR's terminal state
-is an exact function of the observed data whichever basis the filter works in,
-so statsmodels pins the whole path — forecast and variance — without the fixture
-having to commit to a state-space convention.
+The spec defines this path as a state space,
 
-It carries no `MaximumLikelihoodStat`. cPMML's supplied-state branch reads
-`FinalStateVector` in a basis the spec does not define it in (M-S13), so a
-fixture for it would be a fixture for the bug. ARMA models on this path are
-wrong for a related reason — the MA polynomial never reaches the forecast — and
-`ARIMA_Kalman.zip` still holds self-derived expectations that record that
-behaviour rather than contradict it. Do not treat it as evidence.
+```
+S(t+1) = F S(t) + H e(t)      Y(t) = G S(t) + e(t)
+```
+
+with `m = max(p,q)`, `G = (1,0,…,0)`, `F` carrying 1's above the diagonal and
+`φm…φ1` along the bottom row, and `H` the first `m` ψ weights. The one fact that
+makes the fixtures here writable: because `G = (1,0,…,0)`, **the state is the
+forecast vector**, `S = (Ŷ(n+1|n), …, Ŷ(n+m|n))`. `F` shifts it along and
+`H·e(t)` is the revision that arrives with each new observation.
+
+statsmodels is a full oracle here, **including for q > 0** — a restriction that
+applies to `conditionalLeastSquares` and does not carry over. That method reads
+its residuals out of `<Residuals>`; this one recovers them by filtering, which
+is what statsmodels does, so the two implement the same estimator rather than
+neighbouring ones.
+
+Four fixtures, because each pins something a different one cannot:
+
+- `fix_arima_kalman_state` — pure AR. Deliberately *not* sufficient on its own:
+  a pure AR's terminal state is an exact function of the observed data in any
+  basis, so a wrong state space still scores it correctly. It passes both before
+  and after the M-S13 fix, which is exactly the point.
+- `fix_arima_kalman_arma` — q > 0, where the MA polynomial reaches the forecast
+  only through `H`. This is the one that fails on a companion-form filter.
+- `fix_arima_kalman_constant` — `constantTerm`. The state space is zero-mean, so
+  the intercept the conditional-LS recursion carries has to enter as
+  `μ = c/(1−Σφ)` instead.
+- `fix_arima_kalman_supplied` — `MaximumLikelihoodStat/KalmanState`. Its
+  `TimeSeries` deliberately carries only the tail of the data the state was
+  estimated on, so re-deriving the state instead of using the supplied one gives
+  a visibly different answer; without that the fixture could not tell whether
+  the shortcut was honoured. The state is oracle-derived rather than
+  transcribed — being the forecast vector, it is just statsmodels' first `m`
+  forecasts less μ, which commits to no implementation's internal basis.
+
+Two conventions that cost a round each:
+
+- **Initialisation is part of "exact".** Ω₁ is the *unconditional* covariance
+  solving `Ω = FΩFᵀ + HHᵀ`, not a steady state. In statsmodels that is the
+  default; passing `enforce_stationarity=False` switches it to approximately
+  diffuse and moves `ARIMA_Kalman` from 0.594 to 0.608. Pure AR models are
+  insensitive to it, so an AR-only fixture set will not notice.
+- **`HVector` and `FinalOmega` cannot change a forecast**, and the generator
+  emits them anyway. `H` drives the filter that *produces* the state; once the
+  state exists the forecast is `G·F^(h−1)·S` with no `H` in it, and the only
+  case that needs `H` is deriving the state, which is the case where no
+  `KalmanState` exists to carry one. `FinalOmega`'s recursion runs in the
+  differenced basis. cPMML validates both shapes at load and reads neither.
+
+`ARIMA_Kalman.zip` is regenerated in `pmml=None` mode: the hand-authored model
+is kept and only the expectations are refreshed, from the document itself. Its
+committed value was 1.1, which is `0.5 × 2.2` — the AR term alone, with the MA
+polynomial dropped.
 
 ## Invariants the generators assert
 
