@@ -143,6 +143,7 @@ add_library(
         src/core/predicate.h
         src/core/optype.h
         src/core/internal_evaluator.h
+        src/core/model_evaluator.h
         src/core/miningfield.h
         src/core/target.h
         src/treemodel/treescore.h
@@ -150,12 +151,10 @@ add_library(
         src/treemodel/scoredistribution.h
         src/treemodel/node.h
         src/treemodel/treemodel.h
-        src/treemodel/treeevaluator.h
         src/regressionmodel/regressionscore.h
         src/regressionmodel/regressiontable.h
         src/regressionmodel/numericpredictor.h
         src/regressionmodel/regressionmodel.h
-        src/regressionmodel/regressionevaluator.h
         src/regressionmodel/predictorterm.h
         src/regressionmodel/categoricalpredictor.h
         src/regressionmodel/normalizationmethodtype.h
@@ -163,7 +162,6 @@ add_library(
         src/ensemblemodel/ensemblemodel.h
         src/ensemblemodel/segment.h
         src/ensemblemodel/multiplemodelmethod.h
-        src/ensemblemodel/ensembleevaluator.h
         src/math/misc.h
         src/math/normalizationmethods.h
         src/treetable/treetablenode.h
@@ -189,27 +187,17 @@ add_library(
         src/output/transformedvalue.h
         src/neuralnetwork/neuralactivation.h
         src/neuralnetwork/neuralnetworkmodel.h
-        src/neuralnetwork/neuralnetworkevaluator.h
         src/svmmodel/svmkernel.h
         src/svmmodel/svmmodel.h
-        src/svmmodel/svmevaluator.h
         src/knnmodel/knnmodel.h
-        src/knnmodel/knnevaluator.h
         src/generalregressionmodel/generalregressionmodel.h
-        src/generalregressionmodel/generalregressionevaluator.h
         src/scorecard/scorecardmodel.h
-        src/scorecard/scorecardevaluator.h
         src/naivebayesmodel/naivebayesmodel.h
-        src/naivebayesmodel/naivebayesevaluator.h
         src/clusteringmodel/clusteringmodel.h
-        src/clusteringmodel/clusteringevaluator.h
         src/rulesetmodel/rulesetmodel.h
-        src/rulesetmodel/rulesetevaluator.h
         src/baselinemodel/baselinemodel.h
-        src/baselinemodel/baselineevaluator.h
         src/anomalydetectionmodel/anomalydetectionevaluator.h
         src/gaussianprocessmodel/gaussianprocessmodel.h
-        src/gaussianprocessmodel/gaussianprocessevaluator.h
         src/textmodel/textmodel.h
         src/timeseriesmodel/timeseriesmodel.h
         src/timeseriesmodel/timeseriesevaluator.h

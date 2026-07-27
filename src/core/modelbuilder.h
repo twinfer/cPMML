@@ -8,28 +8,29 @@
 #define CPMML_MODELBUILDER_H
 
 #include <pugixml.hpp>
+#include <memory>
 #include <string>
 
 #include "anomalydetectionmodel/anomalydetectionevaluator.h"
 #include "associationmodel/associationevaluator.h"
-#include "baselinemodel/baselineevaluator.h"
-#include "clusteringmodel/clusteringevaluator.h"
+#include "baselinemodel/baselinemodel.h"
+#include "clusteringmodel/clusteringmodel.h"
 #include "datadictionary.h"
-#include "ensemblemodel/ensembleevaluator.h"
-#include "gaussianprocessmodel/gaussianprocessevaluator.h"
-#include "generalregressionmodel/generalregressionevaluator.h"
+#include "ensemblemodel/ensemblemodel.h"
+#include "gaussianprocessmodel/gaussianprocessmodel.h"
+#include "generalregressionmodel/generalregressionmodel.h"
 #include "header.h"
 #include "internal_evaluator.h"
-#include "knnmodel/knnevaluator.h"
-#include "naivebayesmodel/naivebayesevaluator.h"
-#include "neuralnetwork/neuralnetworkevaluator.h"
-#include "regressionmodel/regressionevaluator.h"
-#include "rulesetmodel/rulesetevaluator.h"
-#include "scorecard/scorecardevaluator.h"
-#include "svmmodel/svmevaluator.h"
+#include "knnmodel/knnmodel.h"
+#include "model_evaluator.h"
+#include "naivebayesmodel/naivebayesmodel.h"
+#include "neuralnetwork/neuralnetworkmodel.h"
+#include "regressionmodel/regressionmodel.h"
+#include "rulesetmodel/rulesetmodel.h"
+#include "scorecard/scorecardmodel.h"
+#include "svmmodel/svmmodel.h"
 #include "textmodel/textmodel.h"
 #include "timeseriesmodel/timeseriesevaluator.h"
-#include "treemodel/treeevaluator.h"
 #include "treemodel/treemodel.h"
 #include "xmlnode.h"
 
@@ -52,43 +53,15 @@ class ModelBuilder {
     // restores the previous value on every exit path so the thread-local never
     // dangles past the model's lifetime.
     Value::ScopedIndexer parse_scope(Value::active_indexer);
+
     std::unique_ptr<InternalEvaluator> evaluator;
-    if (xmlNode.exists_child("MiningModel"))
-      evaluator = std::make_unique<EnsembleEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("RegressionModel"))
-      evaluator = std::make_unique<RegressionEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("TreeModel"))
-      evaluator = std::make_unique<TreeEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("NeuralNetwork"))
-      evaluator = std::make_unique<NeuralNetworkEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("SupportVectorMachineModel"))
-      evaluator = std::make_unique<SvmEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("NearestNeighborModel"))
-      evaluator = std::make_unique<KnnEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("GeneralRegressionModel"))
-      evaluator = std::make_unique<GeneralRegressionEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("Scorecard"))
-      evaluator = std::make_unique<ScorecardEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("NaiveBayesModel"))
-      evaluator = std::make_unique<NaiveBayesEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("ClusteringModel"))
-      evaluator = std::make_unique<ClusteringEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("RuleSetModel"))
-      evaluator = std::make_unique<RuleSetEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("BaselineModel"))
-      evaluator = std::make_unique<BaselineEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("AnomalyDetectionModel"))
-      evaluator = std::make_unique<AnomalyDetectionEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("GaussianProcessModel"))
-      evaluator = std::make_unique<GaussianProcessEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("TextModel"))
-      evaluator = std::make_unique<TextEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("TimeSeriesModel"))
-      evaluator = std::make_unique<TimeSeriesEvaluator>(xmlNode);
-    else if (xmlNode.exists_child("AssociationModel"))
-      evaluator = std::make_unique<AssociationEvaluator>(xmlNode);
-    else
-      throw cpmml::ParsingException("unsupported model type");
+    for (const auto& entry : MODEL_TABLE)
+      if (xmlNode.exists_child(entry.element)) {
+        evaluator = entry.make(xmlNode, entry.element);
+        break;
+      }
+
+    if (!evaluator) throw cpmml::ParsingException("unsupported model type");
 
     // Parsing is done: freeze the per-model string map so concurrent scoring
     // threads can read it without synchronization.
@@ -96,6 +69,49 @@ class ModelBuilder {
 
     return evaluator;
   }
+
+ private:
+  using Factory = std::unique_ptr<InternalEvaluator> (*)(const XmlNode&, const char*);
+
+  // Most models want the stock ModelEvaluator<T>; a few carry their own
+  // evaluator because they score from something other than a flattened
+  // string map. Both shapes go in one table.
+  template <class ModelT>
+  static std::unique_ptr<InternalEvaluator> wrap_model(const XmlNode& node, const char* element) {
+    return std::make_unique<ModelEvaluator<ModelT>>(node, element);
+  }
+
+  template <class EvaluatorT>
+  static std::unique_ptr<InternalEvaluator> wrap_evaluator(const XmlNode& node, const char*) {
+    return std::make_unique<EvaluatorT>(node);
+  }
+
+  struct ModelKind {
+    const char* element;
+    Factory make;
+  };
+
+  // Order is the order of the if/else chain this replaces, and it matters: a
+  // document may carry more than one MODEL-ELEMENT and the first match wins.
+  static constexpr ModelKind MODEL_TABLE[] = {
+      {"MiningModel", &wrap_model<EnsembleModel>},
+      {"RegressionModel", &wrap_model<RegressionModel>},
+      {"TreeModel", &wrap_model<TreeModel>},
+      {"NeuralNetwork", &wrap_model<NeuralNetworkModel>},
+      {"SupportVectorMachineModel", &wrap_model<SupportVectorMachineModel>},
+      {"NearestNeighborModel", &wrap_model<NearestNeighborModel>},
+      {"GeneralRegressionModel", &wrap_model<GeneralRegressionModel>},
+      {"Scorecard", &wrap_model<ScorecardModel>},
+      {"NaiveBayesModel", &wrap_model<NaiveBayesModel>},
+      {"ClusteringModel", &wrap_model<ClusteringModel>},
+      {"RuleSetModel", &wrap_model<RuleSetModel>},
+      {"BaselineModel", &wrap_model<BaselineModel>},
+      {"AnomalyDetectionModel", &wrap_evaluator<AnomalyDetectionEvaluator>},
+      {"GaussianProcessModel", &wrap_model<GaussianProcessModel>},
+      {"TextModel", &wrap_evaluator<TextEvaluator>},
+      {"TimeSeriesModel", &wrap_evaluator<TimeSeriesEvaluator>},
+      {"AssociationModel", &wrap_evaluator<AssociationEvaluator>},
+  };
 };
 
 #endif
