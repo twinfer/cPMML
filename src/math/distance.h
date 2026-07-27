@@ -6,8 +6,13 @@
 #ifndef CPMML_DISTANCE_H
 #define CPMML_DISTANCE_H
 
+#include <Eigen/Dense>
 #include <cmath>
 #include <limits>
+#include <string>
+#include <vector>
+
+#include "utils/utils.h"
 
 /**
  * Per-field comparison functions used by both ClusteringModel and
@@ -16,8 +21,52 @@
  */
 enum class CompareFunc { ABS_DIFF, GAUSS_SIM, DELTA, EQUAL };
 
-inline CompareFunc parse_compare_func(const std::string& s, CompareFunc fallback = CompareFunc::ABS_DIFF) {
-  // Caller is expected to pass a lowered string.
+/**
+ * One field of a distance computation, as declared by a PMML ClusteringField or
+ * a KNNInput. Both carry field, compareFunction and fieldWeight, and were
+ * transcribed into two structs that differed only in the one attribute
+ * ClusteringField adds -- similarityScale, which KNNInput does not have and
+ * which stays at its default of 1 there.
+ */
+struct ComparisonField {
+  std::string field_name;
+  size_t field_index = 0;
+  CompareFunc compare_func = CompareFunc::ABS_DIFF;
+  double field_weight = 1.0;
+  double similarity_scale = 1.0;
+};
+
+/**
+ * The query vector for a distance computation: one entry per comparison field,
+ * read from the prepared sample in field order.
+ *
+ * ClusteringModel and NearestNeighborModel each carried their own copy of this,
+ * differing only in the wording of the exception -- neither of which said which
+ * field was missing. Templated on the sample type so math/ does not depend on
+ * core/.
+ */
+template <class SampleT>
+inline Eigen::VectorXd build_query(const SampleT& sample, const std::vector<ComparisonField>& fields,
+                                   const char* element) {
+  Eigen::VectorXd query(static_cast<Eigen::Index>(fields.size()));
+  for (size_t i = 0; i < fields.size(); i++) {
+    const auto& value = sample[fields[i].field_index].value;
+    if (value.missing)
+      throw cpmml::MissingValueException(std::string("missing value for ") + element + " \"" + fields[i].field_name +
+                                         "\"");
+    query[static_cast<Eigen::Index>(i)] = value.value;
+  }
+
+  return query;
+}
+
+// COMPARE-FUNCTION is spelled absDiff / gaussSim / delta / equal. This used to
+// require the caller to lower-case first, and NearestNeighborModel did not:
+// "gaussSim" matched nothing and fell through to the absDiff fallback, so a
+// KNNInput asking for a Gaussian similarity silently got an absolute
+// difference. It lower-cases its own argument now.
+inline CompareFunc parse_compare_func(const std::string& raw, CompareFunc fallback = CompareFunc::ABS_DIFF) {
+  const std::string s = to_lower(raw);
   if (s == "absdiff") return CompareFunc::ABS_DIFF;
   if (s == "gausssim") return CompareFunc::GAUSS_SIM;
   if (s == "delta") return CompareFunc::DELTA;

@@ -14,6 +14,7 @@
 
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
+#include "core/traininginstances.h"
 #include "core/internal_score.h"
 #include "core/transformationdictionary.h"
 #include "core/value.h"
@@ -207,7 +208,7 @@ class GaussianProcessModel : public InternalModel {
     std::string target_col;
     for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
       std::string field = f.get_attribute("field");
-      std::string col = f.get_attribute("column");
+      std::string col = instance_field_column(f);
       if (field == target_name) {
         target_col = col;
       } else {

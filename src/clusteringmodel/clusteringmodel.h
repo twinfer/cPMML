@@ -34,13 +34,9 @@
  */
 class ClusteringModel : public InternalModel {
  public:
-  struct ClusteringField {
-    std::string field_name;
-    size_t field_index;
-    CompareFunc compare_func;
-    double field_weight;
-    double similarity_scale = 1.0;  // gaussSim similarityScale
-  };
+  // Shared with NearestNeighborModel: a ClusteringField and a KNNInput declare
+  // the same thing. See math/distance.h.
+  using ClusteringField = ComparisonField;
 
   struct Cluster {
     std::string id;
@@ -164,16 +160,6 @@ class ClusteringModel : public InternalModel {
     }
   }
 
-  Eigen::VectorXd build_query(const Sample& sample) const {
-    Eigen::VectorXd q(static_cast<Eigen::Index>(fields.size()));
-    for (size_t i = 0; i < fields.size(); i++) {
-      const Value& v = sample[fields[i].field_index].value;
-      if (v.missing) throw cpmml::MissingValueException("missing value for clustering field");
-      q[static_cast<Eigen::Index>(i)] = v.value;
-    }
-    return q;
-  }
-
   double compute_distance_to(const Eigen::VectorXd& q, const Eigen::VectorXd& c) const {
     const size_t n = fields.size();
     return compute_distance(
@@ -184,7 +170,7 @@ class ClusteringModel : public InternalModel {
 
   // clusters is non-empty: the constructor refuses a model without one.
   Nearest nearest_of(const Sample& sample) const {
-    const Eigen::VectorXd q = build_query(sample);
+    const Eigen::VectorXd q = ::build_query(sample, fields, "ClusteringField");
     // compute_distance is uniformly a dissimilarity (similarity measures are
     // flipped to 1−s), so the closest cluster is always the minimum.
     Nearest best;

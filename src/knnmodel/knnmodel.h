@@ -19,6 +19,7 @@
 #include "core/datadictionary.h"
 #include "core/fieldusagetype.h"
 #include "core/internal_model.h"
+#include "core/traininginstances.h"
 #include "core/miningfunction.h"
 #include "core/transformationdictionary.h"
 #include "core/value.h"
@@ -47,12 +48,10 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Nested types ---
 
-  struct KnnInput {
-    std::string field_name;
-    size_t field_index;
-    CompareFunc compare_func;
-    double field_weight;
-  };
+  // Shared with ClusteringModel: a KNNInput and a ClusteringField declare the
+  // same thing, bar the similarityScale only ClusteringField carries. See
+  // math/distance.h.
+  using KnnInput = ComparisonField;
 
   // --- Members ---
 
@@ -115,7 +114,7 @@ class NearestNeighborModel : public InternalModel {
   // --- Scoring ---
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    const Eigen::VectorXd query = build_query(sample);
+    const Eigen::VectorXd query = ::build_query(sample, knn_inputs, "KNNInput");
     auto neighbors = find_k_nearest(query);
 
     if (is_clustering) {
@@ -159,7 +158,7 @@ class NearestNeighborModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
-    const Eigen::VectorXd query = build_query(sample);
+    const Eigen::VectorXd query = ::build_query(sample, knn_inputs, "KNNInput");
     auto neighbors = find_k_nearest(query);
 
     if (is_clustering) {
@@ -211,9 +210,7 @@ class NearestNeighborModel : public InternalModel {
     // Build field → column mapping from InstanceFields
     std::unordered_map<std::string, std::string> field_to_col;
     for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
-      const std::string fname = f.get_attribute("field");
-      const std::string col = (f.get_attribute("column") == "null") ? fname : f.get_attribute("column");
-      field_to_col[fname] = col;
+      field_to_col[f.get_attribute("field")] = instance_field_column(f);
     }
 
     // Instance ID column (for clustering models with instanceIdVariable)
@@ -312,14 +309,14 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Query vector ---
 
-  Eigen::VectorXd build_query(const Sample& sample) const {
-    Eigen::VectorXd q(static_cast<Eigen::Index>(knn_inputs.size()));
-    for (size_t i = 0; i < knn_inputs.size(); i++) {
-      const Value& v = sample[knn_inputs[i].field_index].value;
-      if (v.missing) throw cpmml::MissingValueException("missing value for KNN input");
-      q[static_cast<Eigen::Index>(i)] = v.value;
-    }
-    return q;
+  // "the distance weighted average, where the weight is 1/distance": a
+  // neighbour sitting exactly on the query has infinite weight, so it is capped
+  // rather than dividing by zero. Both the categorical and the continuous
+  // aggregation need this, and each had its own copy of the expression.
+  static double neighbor_weight(double distance, bool weighted) {
+    if (!weighted) return 1.0;
+
+    return distance > 0.0 ? 1.0 / distance : 1e10;
   }
 
   // --- Distance computation (uses shared math/distance.h) ---
@@ -353,7 +350,7 @@ class NearestNeighborModel : public InternalModel {
     const bool weighted = (categorical_method == "weightedmajorityvote");
     std::vector<double> votes(classes.size(), 0.0);
     for (const auto& [dist, idx] : neighbors) {
-      const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
+      const double w = neighbor_weight(dist, weighted);
       const auto it = std::find(classes.cbegin(), classes.cend(), training_targets[idx]);
       if (it != classes.cend()) votes[static_cast<size_t>(std::distance(classes.cbegin(), it))] += w;
     }
@@ -409,7 +406,7 @@ class NearestNeighborModel : public InternalModel {
     const bool weighted = (continuous_method == "weightedaverage");
     double sum = 0.0, weight_sum = 0.0;
     for (const auto& [dist, idx] : neighbors) {
-      const double w = weighted ? (dist > 0.0 ? 1.0 / dist : 1e10) : 1.0;
+      const double w = neighbor_weight(dist, weighted);
       sum += w * to_double(training_targets[idx]);
       weight_sum += w;
     }
