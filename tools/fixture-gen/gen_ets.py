@@ -137,8 +137,15 @@ def build() -> list[Fixture]:
         fixtures.append(
             Fixture(
                 name=name,
-                columns=["forecast"],
-                rows=[{"forecast": format_number(v)} for v in values],
+                # Every ETS fixture asserts variance = NaN, including the ones
+                # that carry alpha/gamma/delta. An ExponentialSmoothing document
+                # does not determine a forecast variance: the spec defines no
+                # formula, and writes no update equations either, so the weights
+                # are not tied to a parameterisation one could be rebuilt from.
+                # Asserting NaN keeps a plausible-looking number from creeping
+                # back in the way sigma^2*h once did.
+                columns=["forecast", "variance"],
+                rows=[{"forecast": format_number(v), "variance": "nan"} for v in values],
                 pmml=document(name, note, **kw),
             )
         )

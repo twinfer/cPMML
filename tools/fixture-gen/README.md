@@ -103,6 +103,12 @@ spec says the weights are "not needed for scoring". `fix_ets_weights` asserts
 exactly that. `trend="polynomial_exponential"` (Brown's method) is uncovered:
 statsmodels does not implement it either, and cPMML now rejects it at load.
 
+That same silence is why the ETS *variance* has no oracle at all — see the NaN
+column below. Note the asymmetry: the forecast recursion is fully determined by
+the smoothed states the document supplies, so a third-party implementation of
+Gardner's taxonomy answers it; the variance is a function of the smoothing
+weights, whose recursion the document never writes.
+
 GARCH is covered for both the conditional mean and the conditional variance.
 The mean fixture exists mainly to pin the MA sign, which the GARCH section of
 the spec deliberately writes the opposite way round from the ARIMA section
@@ -117,9 +123,18 @@ GP fixtures' `variance` column, so it reads the same across model types.
 
 Use it wherever the spec defines a variance — `oracle_spec.psi_variance` for
 `StateSpaceModel` with a `PsiVector`, `oracle_spec.arima_psi_variance` for
-ARIMA, `oracle_spec.garch_variance` for GARCH. `ExponentialSmoothing` has no
-spec-defined variance (Gardner again) and cPMML returns a documented
-approximation, so ETS fixtures deliberately omit the column.
+ARIMA, `oracle_spec.garch_variance` for GARCH.
+
+`ExponentialSmoothing` is the exception, and its fixtures assert **NaN**. A
+`variance` cell of `nan` is a real expectation: the harness passes it when the
+scorer also returns NaN and fails otherwise, in both directions. An ETS document
+does not determine a forecast variance — the spec defines no formula, and writes
+no smoothing update equations either, so `alpha`/`gamma`/`delta` are not tied to
+a parameterisation Gardner's `c_j` weights could be rebuilt from. That is
+measurable, not theoretical: statsmodels' `holtwinters` and `ETSModel` agree only
+under β = α·γ for the trend, and their seasonal recursions differ by a factor of
+(1−α). Nothing in a PMML document chooses between them, so nothing here should
+either.
 
 ARIMA variance is the one case with a genuine third-party oracle:
 `oracle_statsmodels.arima_forecast_variance` reads `get_forecast().var_pred_mean`,

@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <unsupported/Eigen/KroneckerProduct>
 #include <utility>
@@ -64,7 +65,9 @@ class TimeSeriesModel {
     int phase = 0;
     std::vector<double> s;  // seasonal components, one per season index
     Transform transform = Transform::NONE;
-    double rmse = 1.0;  // in-sample RMSE for variance
+    // Parsed because the spec defines it, but nothing consumes it: the forecast
+    // does not need it and there is no ETS variance to scale — see variance_ets.
+    double rmse = 1.0;
   } ets;
 
   // -------------------------------------------------------------------------
@@ -320,21 +323,35 @@ class TimeSeriesModel {
   }
 
   /**
-   * Deliberate approximation, not a spec formula.
+   * NaN: an ExponentialSmoothing document does not determine a forecast variance.
    *
-   * PMML defines no predictive variance for ExponentialSmoothing — as with the
-   * point forecasts, it defers to Gardner (2005), where the variance depends on
-   * the error/trend/seasonality combination. This returns sigma^2 * h, which is
-   * exact only for the local-level model and conservative elsewhere. Callers
-   * relying on ExponentialSmoothing variance should treat it as indicative.
+   * Two independent reasons, both from TimeSeriesModel.html:
+   *
+   *  1. No formula. The spec defines no prediction interval, standard error or
+   *     variance for ExponentialSmoothing anywhere. It defers the point
+   *     forecasts to Gardner (2005) and does not reproduce his formulas, and it
+   *     never takes up the variance at all.
+   *
+   *  2. No parameterisation to reconstruct one from. Gardner's variance is a
+   *     function of the smoothing weights, but the spec writes no update
+   *     equations, so `alpha`/`gamma`/`delta` are not tied to a particular form
+   *     of the recursion — consistently with the spec calling them optional and
+   *     "not needed for scoring". The common forms differ: the seasonal weight
+   *     enters the error-form recursion as δ under one and δ(1−α) under
+   *     another, and the trend weight as γ or αγ, which change the answer from
+   *     h > m and from h = 2 respectively. Nothing in the document chooses.
+   *
+   * This used to return σ²·h. That is not a bound in either direction, so it
+   * could not even be defended as conservative: with an additive trend the true
+   * variance grows like σ²(αγ)²h³/3 and σ²·h understates it badly, while for a
+   * level-only model with α < 1 it overstates. NaN says what is actually known.
+   *
+   * Every other algorithm here does report a variance, because for those the
+   * spec either writes the recursion out (GARCH), supplies the weights
+   * (PsiVector) or determines them from stated coefficients (ARIMA).
    */
   std::vector<double> variance_ets(int horizon) const {
-    // Approximate h-step variance: σ² × h (linear growth, conservative)
-    double s2 = ets.rmse * ets.rmse;
-    std::vector<double> v;
-    v.reserve(horizon);
-    for (int h = 1; h <= horizon; ++h) v.push_back(s2 * h);
-    return v;
+    return std::vector<double>(horizon, std::numeric_limits<double>::quiet_NaN());
   }
 
   // =========================================================================

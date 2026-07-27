@@ -29,6 +29,10 @@ static const double REL_TOL = 0.001;
 static const double ABS_TOL = 1e-9;
 
 static bool within_tolerance(double actual, double expected) {
+  // NaN is an expectation, not an error. A model type for which PMML defines no
+  // predictive variance reports NaN rather than inventing a number, and the
+  // fixture asserts exactly that.
+  if (std::isnan(expected)) return std::isnan(actual);
   double err = std::abs(actual - expected);
   double rel = (std::abs(expected) > ABS_TOL) ? (err / std::abs(expected)) : err;
   return rel <= REL_TOL;
