@@ -52,6 +52,19 @@ class RegressionTable {
     return intercept + partial;
   }
 
+  // True if a term of this table has no value for the sample. Per the spec a
+  // missing input makes a NumericPredictor or PredictorTerm "evaluate to a
+  // missing value", while a missing CategoricalPredictor field only makes every
+  // indicator 0, so categorical fields are deliberately not checked here.
+  inline bool has_missing_input(const Sample& sample) const {
+    for (const auto& numeric_predictor : numeric_predictors)
+      if (sample[numeric_predictor.index].value.missing) return true;
+    for (const auto& predictor_term : predictor_terms)
+      for (const auto& field : predictor_term.fields)
+        if (field.value(sample).missing) return true;
+    return false;
+  }
+
   static std::vector<RegressionTable> to_regressiontables(const std::vector<XmlNode>& nodes,
                                                           const std::shared_ptr<Indexer>& indexer) {
     std::vector<RegressionTable> res;

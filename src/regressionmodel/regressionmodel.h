@@ -53,7 +53,21 @@ class RegressionModel : public InternalModel {
       classes.push_back(mining_schema.target.name);
   }
 
+  // A NumericPredictor or PredictorTerm whose input is missing makes the whole
+  // model yield no prediction, as the spec says ("the result evaluates to a
+  // missing value", and the probability formulas "do not apply") and as JPMML
+  // does, for regression and for classification under every
+  // normalizationMethod: one table with a missing term voids every table's
+  // probability. Scoring the term as 0 gave a confident wrong answer. The spec
+  // says priorProbability in Targets then defines the prediction; Target fills
+  // in those probabilities but does not yet pick the predicted class from them
+  // (JPMML does), so such a model returns the priors with an empty prediction.
+  // A missing CategoricalPredictor field is not
+  // missing here: its indicators are simply 0. A model wanting a substitute
+  // says so with missingValueReplacement, which MiningSchema applies before
+  // this point.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     std::vector<double> scores;
     double regressed_value;
     switch (mining_function.value) {
@@ -70,6 +84,7 @@ class RegressionModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return "";
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::REGRESSION:
         return double_to_string(regression_normalization(regression_tables[0].score(sample)));
@@ -78,6 +93,12 @@ class RegressionModel : public InternalModel {
       default:
         throw cpmml::ParsingException(mining_function.to_string() + "not available in RegressionModel");
     }
+  }
+
+  inline bool has_missing_input(const Sample& sample) const {
+    for (const auto& regression_table : regression_tables)
+      if (regression_table.has_missing_input(sample)) return true;
+    return false;
   }
 
   inline std::vector<double> get_scores(const Sample& sample) const {
