@@ -91,7 +91,15 @@ class DataField {
     n_values = allowed_values.size() > 0 ? allowed_values.size() : 1;
   };
 
-  inline bool validate(const Sample& sample) const { return constraints.is_empty ? true : constraints(sample); }
+  // A missing value is not an invalid one: PMML keeps the two apart, and what
+  // happens to a missing input is for missingValueTreatment and the model to
+  // decide. Without this, a field declaring its valid <Value>s or an <Interval>
+  // rejected the whole record, because the isIn/interval constraint answers
+  // UNKNOWN for a missing operand and UNKNOWN does not pass.
+  inline bool validate(const Sample& sample) const {
+    if (constraints.is_empty || sample[index].value.missing) return true;
+    return constraints(sample);
+  }
   inline Value createValue(const std::string& value) const { return Value(value, datatype); }
 
   static std::unordered_map<std::string, DataField> to_datafields(const std::vector<XmlNode>& nodes,
