@@ -61,6 +61,7 @@ class NearestNeighborModel : public InternalModel {
   std::string categorical_method;  // to_lower of categoricalScoringMethod
   std::string continuous_method;   // to_lower of continuousScoringMethod
   std::string instance_id_variable;  // instanceIdVariable attribute (for clustering)
+  double threshold = 0.001;          // threshold attribute: added to the distance for weighted methods
   bool is_clustering = false;
   bool uses_derived_inputs = false;  // KNNInputs reference DerivedFields
 
@@ -89,6 +90,7 @@ class NearestNeighborModel : public InternalModel {
                                        ? "average"
                                        : node.get_attribute("continuousScoringMethod"))),
         instance_id_variable(node.exists_attribute("instanceIdVariable") ? node.get_attribute("instanceIdVariable") : ""),
+        threshold(node.get_double_attribute("threshold", 0.001)),
         is_clustering(mining_function.value == MiningFunction::MiningFunctionType::CLUSTERING) {
     parse_metric(node);
     parse_knn_inputs(node, indexer);
@@ -113,8 +115,29 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A missing KNNInput is left out of the distance, not a reason to give up:
+  // the ComparisonMeasure aggregations sum over the non-missing fields only
+  // (SumNM) and scale by AdjustM = sum[Qi] / sum[nonmissing(Xi)*Qi]
+  // (ClusteringModel spec). A NearestNeighborModel has no MissingValueWeights,
+  // so every Qi is 1. JPMML 1.7.7 does exactly this. AdjustM is the same for
+  // every training instance, so it changes no ranking, but it does change the
+  // 1/(d + threshold) weights. With every KNNInput missing, AdjustM divides by
+  // zero, and the model gives no prediction. JPMML throws "Undefined result"
+  // there. The binary measures (simpleMatching, jaccard, tanimoto,
+  // binarySimilarity) have no SumNM form in the spec, and JPMML fails with a
+  // NullPointerException, so with any input missing they give no prediction
+  // too. This replaces a MissingValueException for any missing input.
+  inline bool has_missing_input(const Sample& sample) const {
+    size_t present = 0;
+    for (const auto& input : knn_inputs)
+      if (!sample[input.field_index].value.missing) present++;
+    if (present == 0) return true;
+    return present < knn_inputs.size() && is_binary_metric();
+  }
+
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    const Eigen::VectorXd query = ::build_query(sample, knn_inputs, "KNNInput");
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
+    const Query query = build_query(sample);
     auto neighbors = find_k_nearest(query);
 
     if (is_clustering) {
@@ -158,7 +181,8 @@ class NearestNeighborModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
-    const Eigen::VectorXd query = ::build_query(sample, knn_inputs, "KNNInput");
+    if (has_missing_input(sample)) return "";
+    const Query query = build_query(sample);
     auto neighbors = find_k_nearest(query);
 
     if (is_clustering) {
@@ -309,29 +333,76 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Query vector ---
 
-  // "the distance weighted average, where the weight is 1/distance": a
-  // neighbour sitting exactly on the query has infinite weight, so it is capped
-  // rather than dividing by zero. Both the categorical and the continuous
-  // aggregation need this, and each had its own copy of the expression.
-  static double neighbor_weight(double distance, bool weighted) {
+  // The query's values, and which KNNInputs have one. A missing entry's value
+  // is never read.
+  struct Query {
+    Eigen::VectorXd values;
+    std::vector<size_t> present;
+  };
+
+  Query build_query(const Sample& sample) const {
+    Query query;
+    query.values = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(knn_inputs.size()));
+    for (size_t i = 0; i < knn_inputs.size(); i++) {
+      const Value& value = sample[knn_inputs[i].field_index].value;
+      if (value.missing) continue;
+      query.values[static_cast<Eigen::Index>(i)] = value.value;
+      query.present.push_back(i);
+    }
+
+    return query;
+  }
+
+  bool is_binary_metric() const {
+    return metric == DistanceMetric::SIMPLE_MATCHING || metric == DistanceMetric::JACCARD ||
+           metric == DistanceMetric::TANIMOTO || metric == DistanceMetric::BINARY_SIMILARITY;
+  }
+
+  // "The weights are proportional to the inverse of the distance", with the
+  // model's threshold ("a very small positive number to be used for weighted
+  // scoring methods to avoid numerical problems when distance ... is zero",
+  // default 0.001) added to the distance first, as JPMML does: 1/(d +
+  // threshold). This used to be 1/d, capped at 1e10 for d = 0, and ignored
+  // threshold. The difference is large only at small distances, but a
+  // missing input scales every distance by AdjustM, which 1/d cancels and
+  // 1/(d + threshold) does not. A model declaring threshold="0" keeps the
+  // old cap for a neighbour exactly on the query.
+  double neighbor_weight(double distance, bool weighted) const {
     if (!weighted) return 1.0;
 
-    return distance > 0.0 ? 1.0 / distance : 1e10;
+    const double shifted = distance + threshold;
+    return shifted > 0.0 ? 1.0 / shifted : 1e10;
   }
 
   // --- Distance computation (uses shared math/distance.h) ---
 
-  double compute_row_distance(const Eigen::VectorXd& query, Eigen::Index row) const {
+  // SumNM over the present KNNInputs, then AdjustM (all Qi = 1) applied where
+  // each aggregation puts it: inside the root for euclidean and minkowski,
+  // outside for the rest. With no input missing AdjustM is 1 and this is the
+  // plain distance.
+  double compute_row_distance(const Query& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
-    const size_t n = knn_inputs.size();
-    return compute_distance(
-        metric, n, minkowski_p, [&](size_t i) { return query[i]; }, [&](size_t i) { return train[i]; },
-        [&](size_t i) { return knn_inputs[i].field_weight; }, [&](size_t i) { return knn_inputs[i].compare_func; });
+    const std::vector<size_t>& present = query.present;
+    const double distance = compute_distance(
+        metric, present.size(), minkowski_p, [&](size_t j) { return query.values[present[j]]; },
+        [&](size_t j) { return train[present[j]]; }, [&](size_t j) { return knn_inputs[present[j]].field_weight; },
+        [&](size_t j) { return knn_inputs[present[j]].compare_func; });
+    if (present.size() == knn_inputs.size()) return distance;
+
+    const double adjust = static_cast<double>(knn_inputs.size()) / static_cast<double>(present.size());
+    switch (metric) {
+      case DistanceMetric::EUCLIDEAN:
+        return distance * std::sqrt(adjust);
+      case DistanceMetric::MINKOWSKI:
+        return distance * std::pow(adjust, 1.0 / minkowski_p);
+      default:
+        return distance * adjust;
+    }
   }
 
   // --- K-nearest neighbor search ---
 
-  std::vector<std::pair<double, int>> find_k_nearest(const Eigen::VectorXd& query) const {
+  std::vector<std::pair<double, int>> find_k_nearest(const Query& query) const {
     const int n = static_cast<int>(training_features.rows());
     std::vector<std::pair<double, int>> distances(n);
     for (int i = 0; i < n; i++) distances[i] = {compute_row_distance(query, i), i};
