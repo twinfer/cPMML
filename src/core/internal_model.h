@@ -196,7 +196,9 @@ class InternalModel {
     }
 
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
-    score->raw_score = score->score;  // preserve pre-Target prediction
+    // Preserve the pre-Target prediction. A modelChain's final step has already
+    // applied its own Targets and kept its raw class here; keep that one.
+    if (score->raw_score.empty()) score->raw_score = score->score;
     target(*score);
     output.add_output(internal_sample, *score);
 

@@ -9,6 +9,7 @@
 #ifndef CPMML_SRC_CORE_TARGET_H_
 #define CPMML_SRC_CORE_TARGET_H_
 
+#include <charconv>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -20,6 +21,58 @@
 #include "optype.h"
 #include "transformationdictionary.h"
 #include "xmlnode.h"
+
+/**
+ * @class Category
+ *
+ * How the classes of a categorical target are compared. PMML dataTypes reuse the
+ * XML Schema value spaces, so for a numeric target "4" and "4.0" are one class
+ * and a ScoreDistribution, a targetCategory, a TargetValue and a probability
+ * OutputField may each spell it either way. Classes of any other dataType
+ * compare as written. A spelling that is not a number in full ("4abc") is
+ * compared as written even for a numeric target.
+ */
+class Category {
+ public:
+  bool numeric = false;
+
+  Category() = default;
+  explicit Category(const DataType& datatype)
+      : numeric(datatype.value == DataType::DataTypeValue::INTEGER ||
+                datatype.value == DataType::DataTypeValue::FLOAT ||
+                datatype.value == DataType::DataTypeValue::DOUBLE),
+        is_float(datatype.value == DataType::DataTypeValue::FLOAT) {}
+
+  inline bool same(const std::string& a, const std::string& b) const {
+    if (a == b) return true;
+    if (!numeric) return false;
+    double x = 0, y = 0;
+    if (!parse(a, x) || !parse(b, y)) return false;
+    return is_float ? static_cast<float>(x) == static_cast<float>(y) : x == y;
+  }
+
+  // The entry of probabilities naming the class `key`, or end().
+  template <typename Map>
+  inline auto find(Map& probabilities, const std::string& key) const -> decltype(probabilities.begin()) {
+    auto it = probabilities.find(key);
+    if (it != probabilities.end() || !numeric) return it;
+    for (it = probabilities.begin(); it != probabilities.end(); ++it)
+      if (same(it->first, key)) return it;
+    return it;
+  }
+
+ private:
+  bool is_float = false;
+
+  // The whole string must be the number: try_to_double ignores trailing text.
+  inline static bool parse(const std::string& value, double& parsed) {
+    const char* const last = value.data() + value.size();
+    const char* const first = skip_numeric_prefix(value.data(), last);
+    if (first == last) return false;
+    const auto result = std::from_chars(first, last, parsed);
+    return result.ec == std::errc() && result.ptr == last;
+  }
+};
 
 /**
  * @class Target
@@ -111,6 +164,7 @@ class Target {
   double rescale_factor = double_min();
   OpType optype;
   std::vector<TargetValue> target_values;
+  Category category;  // compares the TargetValue classes with the model's
   std::function<void(InternalScore&)> transform_score;
 
   Target() = default;
@@ -129,7 +183,8 @@ class Target {
         rescale_constant(node.get_double_attribute("rescaleConstant")),
         has_rescale_factor(node.exists_attribute("rescaleFactor")),
         rescale_factor(node.get_double_attribute("rescaleFactor")),
-        target_values(TargetValue::to_targetvalues(node.get_childs("TargetValue"))) {}
+        target_values(TargetValue::to_targetvalues(node.get_childs("TargetValue"))),
+        category(mining_schema.target.datatype) {}
 
   // When the model produced no prediction, Targets supply one: the class with
   // the highest priorProbability, or the defaultValue of a continuous target.
@@ -143,16 +198,22 @@ class Target {
   //   rescaleFactor 2 and rescaleConstant 1 predicts 85).
   // A Target with neither leaves the score without a prediction.
   //
-  // display chooses how classes are named. A model scored on its own reports
-  // the displayValue (display = true). A segment inside a MiningModel hands its
-  // parent the raw class values (display = false): JPMML 1.7.7 votes, averages
-  // probabilities and writes modelChain predictedValue outputs by value, never
-  // by displayValue. Priors, defaultValue and the rescaling apply either way.
+  // display chooses how the predicted class is named. A model scored on its
+  // own reports the displayValue (display = true). A segment inside a
+  // MiningModel hands its parent the raw class values (display = false): JPMML
+  // 1.7.7 votes, averages probabilities and writes modelChain predictedValue
+  // outputs by value, never by displayValue. Priors, defaultValue and the
+  // rescaling apply either way.
+  //
+  // The probabilities stay keyed by the raw class whatever display is: a
+  // probability OutputField's value "corresponds to one of the target
+  // categories of the model" (PMML 4.4.1 Output), and JPMML 1.7.7 matches it
+  // against the raw class, so value="<displayValue>" names no class.
   inline void operator()(InternalScore& score, const bool display = true) const {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         if (score.empty) {
-          const TargetValue* best = apply_priors(score, display);
+          const TargetValue* best = apply_priors(score);
           if (best == nullptr) break;
           score.empty = false;
           score.raw_score = best->value;
@@ -165,32 +226,34 @@ class Target {
           break;
         }
 
-        for (const auto& target_value : target_values) {
-          const std::string& name = display ? target_value.label() : target_value.value;
-          if (display && score.score == target_value.value && target_value.has_display_value) {
-            score.score = target_value.display_value;
-            try {
-              score.double_score = to_double(score.score);
-            } catch (const cpmml::ParsingException& e) {
-              score.double_score = double_min();
+        {
+          bool renamed = false;
+          for (const auto& target_value : target_values) {
+            if (display && !renamed && target_value.has_display_value &&
+                category.same(score.score, target_value.value)) {
+              // Keep the raw class: it names the probabilities, and a modelChain
+              // whose final step this is has not recorded it yet.
+              if (score.raw_score.empty()) score.raw_score = score.score;
+              score.score = target_value.display_value;
+              renamed = true;
+              try {
+                score.double_score = to_double(score.score);
+              } catch (const cpmml::ParsingException& e) {
+                score.double_score = double_min();
+              }
             }
-          }
 
-          const auto it = score.probabilities.find(target_value.value);
-          if (it != score.probabilities.cend()) {
-            // Class present in the score: rename its key to the display value.
-            if (display && target_value.has_display_value && target_value.display_value != target_value.value) {
-              score.probabilities[target_value.display_value] = it->second;
-              score.probabilities.erase(target_value.value);
+            // The model may spell a numeric class differently ("4" for "4.0").
+            if (category.find(score.probabilities, target_value.value) != score.probabilities.end()) continue;
+            if (!score.probabilities.empty()) {
+              // Class absent from a distribution the model did produce: its
+              // probability is 0. Priors apply only when there is no prediction;
+              // filling them in here made the probabilities sum past 1.
+              score.probabilities[target_value.value] = 0.0;
+            } else if (target_value.has_prior_probability) {
+              // A prediction without any distribution: the prior is all there is.
+              score.probabilities[target_value.value] = target_value.prior_probability;
             }
-          } else if (!score.probabilities.empty()) {
-            // Class absent from a distribution the model did produce: its
-            // probability is 0. Priors apply only when there is no prediction;
-            // filling them in here made the probabilities sum past 1.
-            score.probabilities[name] = 0.0;
-          } else if (target_value.has_prior_probability) {
-            // A prediction without any distribution: the prior is all there is.
-            score.probabilities[name] = target_value.prior_probability;
           }
         }
         break;
@@ -223,7 +286,8 @@ class Target {
         }
         if (!display) break;
         for (const auto& target_value : target_values) {
-          if (predicted == target_value.value && target_value.has_display_value) return target_value.display_value;
+          if (target_value.has_display_value && category.same(predicted, target_value.value))
+            return target_value.display_value;
         }
         break;
 
@@ -278,7 +342,7 @@ class Target {
 
   // Replaces the probabilities with the normalized priors and returns the
   // TargetValue to predict, or nullptr when no TargetValue carries a prior.
-  inline const TargetValue* apply_priors(InternalScore& score, const bool display) const {
+  inline const TargetValue* apply_priors(InternalScore& score) const {
     const TargetValue* best = top_prior();
     if (best == nullptr) return nullptr;
 
@@ -289,7 +353,7 @@ class Target {
     score.probabilities.clear();
     for (const auto& target_value : target_values)
       if (target_value.has_prior_probability)
-        score.probabilities[display ? target_value.label() : target_value.value] =
+        score.probabilities[target_value.value] =
             total > 0 ? target_value.prior_probability / total : target_value.prior_probability;
 
     return best;

@@ -42,7 +42,9 @@ class OutputExpressionBuilder {
       case OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE:
         return std::make_shared<TransformedValue>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PROBABILITY:
-        return std::make_shared<Probability>(node, indexer, output_index, output_type);
+        return std::make_shared<Probability>(
+            node, indexer, output_index, output_type,
+            indexer->contains(model_target) ? indexer->get_type(model_target) : DataType::DataTypeValue::STRING);
       case OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID:
         // Association models use entityId to reference rule IDs (with algorithm/rank attrs)
         if (node.exists_attribute("algorithm"))

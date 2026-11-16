@@ -21,6 +21,7 @@
 
 #include "core/enum_parser.h"
 #include "core/internal_score.h"
+#include "core/target.h"
 #include "segment.h"
 #include "utils/utils.h"
 
@@ -66,7 +67,7 @@ class MultipleModelMethod {
   // spec's "proportion of votes" implies.
   struct Classes {
     std::vector<std::string> values;
-    bool numeric = false;  // compare as numbers: "1" and "1.0" are one category
+    Category category;  // for a numeric target "1" and "1.0" are one category
   };
 
   using Function = std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)>;
@@ -94,7 +95,7 @@ class MultipleModelMethod {
   static Classes classes_of(const DataField& target_field) {
     Classes classes;
     classes.values = target_field.valid_values;
-    classes.numeric = target_field.datatype.value != DataType::DataTypeValue::STRING;
+    classes.category = Category(target_field.datatype);
     return classes;
   }
 
@@ -201,19 +202,20 @@ class MultipleModelMethod {
   // Gives every declared category that has no probability yet a probability of
   // 0. Called after the winner is chosen, so it never changes the prediction.
   inline static void add_unpredicted(std::unordered_map<std::string, double>& probabilities, const Classes& classes) {
-    for (const auto& category : classes.values) {
-      bool present = probabilities.count(category) > 0;
-      double declared = 0;
-      if (!present && classes.numeric && try_to_double(category, declared))
-        for (const auto& entry : probabilities) {
-          double predicted = 0;
-          if (try_to_double(entry.first, predicted) && predicted == declared) {
-            present = true;
-            break;
-          }
-        }
-      if (!present) probabilities.emplace(category, 0.0);
-    }
+    for (const auto& category : classes.values)
+      if (classes.category.find(probabilities, category) == probabilities.end()) probabilities.emplace(category, 0.0);
+  }
+
+  // Adds amount to the entry of `category`, however a segment spelled it: two
+  // segments predicting "4" and "4.0" of a numeric target vote for one class.
+  // The first spelling seen names it.
+  inline static void accumulate(std::unordered_map<std::string, double>& probabilities, const std::string& category,
+                                const double amount, const Classes& classes) {
+    const auto it = classes.category.find(probabilities, category);
+    if (it != probabilities.end())
+      it->second += amount;
+    else
+      probabilities.emplace(category, amount);
   }
 
   inline static void normalize(std::unordered_map<std::string, double>& probabilities, const double total) {
@@ -347,7 +349,7 @@ class MultipleModelMethod {
     double total = 0;
     for (const auto& r : usable.results) {
       const double w = weighted ? r.segment->weight : 1.0;
-      probabilities[r.result] += w;
+      accumulate(probabilities, r.result, w, classes);
       total += w;
     }
 
@@ -375,7 +377,7 @@ class MultipleModelMethod {
     for (const auto& r : usable.results) {
       const double w = weighted ? r.segment->weight : 1.0;
       for (const auto& probability : r.result->probabilities)
-        probabilities[probability.first] += probability.second * w;
+        accumulate(probabilities, probability.first, probability.second * w, classes);
       total += w;
     }
 
