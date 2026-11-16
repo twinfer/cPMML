@@ -88,7 +88,15 @@ class GaussianProcessModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A missing input gives no prediction: an empty score, and "" from
+  // predict_raw. Every kernel needs |x_i - z_i| for every InstanceField input, so with
+  // one missing the spec's mean and variance are undefined, and the spec gives
+  // GaussianProcessModel no missing-value method of its own. JPMML 1.7.7 cannot
+  // load the model at all. Only the InstanceFields count: an active
+  // MiningField the kernel does not use may be missing, and
+  // missingValueReplacement has already been applied by MiningSchema.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     Eigen::VectorXd k = compute_k_star(sample);
     double mean = k.dot(alpha);
     Eigen::VectorXd v = L.triangularView<Eigen::Lower>().solve(k);
@@ -99,6 +107,7 @@ class GaussianProcessModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return "";
     return double_to_string(compute_k_star(sample).dot(alpha));
   }
 
@@ -141,6 +150,14 @@ class GaussianProcessModel : public InternalModel {
     return k;
   }
 
+  bool has_missing_input(const Sample& sample) const {
+    for (const size_t index : feat_indices)
+      if (sample[index].value.missing) return true;
+    return false;
+  }
+
+  // The throw is a backstop: score_raw and predict_raw check
+  // has_missing_input first.
   Eigen::VectorXd extract(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(n_feat));
     for (size_t i = 0; i < n_feat; ++i) {
