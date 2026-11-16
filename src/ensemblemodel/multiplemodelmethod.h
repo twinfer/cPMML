@@ -439,10 +439,22 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(result);
   }
 
-  // modelChain: segments whose predicate is false are skipped entirely; the
-  // last *matching* segment supplies the chain result. Since predicates are
-  // evaluated against the evolving sample, each matching segment's execution
-  // is deferred until a later match proves it is not the last one.
+  // modelChain: "Segments whose Predicates evaluate to TRUE are executed in the
+  // order they appear", and the result is that of the last one executed. A
+  // predicate may read the OutputFields of the segments before it, so segment
+  // i's predicate is evaluated only after every earlier selected segment has
+  // run and written its target and OutputFields into the sample. An OutputField
+  // of a segment that did not run stays missing, as the spec says. (JPMML 1.7.7
+  // throws "Field ... is not defined" there instead.)
+  //
+  // Whether a segment is the last one executed is known only once every
+  // predicate after it has been evaluated, which needs its outputs. So each
+  // selected segment runs as an intermediate step (augment), and if it then
+  // turns out to be the last, it is run again as the final step (augment_last)
+  // on the sample as it was before its intermediate run. That keeps the final
+  // step's input exactly what it was before modelChain ran in document order.
+  // The segment last in the document is final whenever it is selected and runs
+  // only once.
   //
   // A segment without a prediction leaves its target and OutputFields missing
   // for the segments after it (continue), or voids the chain (returnMissing).
@@ -452,27 +464,24 @@ class MultipleModelMethod {
   inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble,
                                                            const MissingPrediction& mp) {
     Sample tmp_sample = sample;
-    bool first = true;
-    const Segment* pending = nullptr;  // last matching segment, not yet executed
+    Sample before_last;                // tmp_sample as it was before `last` ran
+    const Segment* last = nullptr;     // the last segment executed so far
 
-    for (const auto& segment : ensemble) {
+    for (size_t i = 0; i < ensemble.size(); i++) {
+      const Segment& segment = ensemble[i];
       if (!segment.predicate(tmp_sample)) continue;
-      if (pending) {
-        bool predicted;
-        if (first) {
-          predicted = pending->model->augment_first(tmp_sample);
-          first = false;
-        } else {
-          predicted = pending->model->augment(tmp_sample);
-        }
-        if (!predicted && mp.treatment == MissingPredictionTreatment::RETURN_MISSING)
-          return std::make_unique<InternalScore>();
-      }
-      pending = &segment;
+      if (i + 1 == ensemble.size()) return segment.model->augment_last(tmp_sample);
+
+      before_last = tmp_sample;
+      const bool predicted = last ? segment.model->augment(tmp_sample) : segment.model->augment_first(tmp_sample);
+      if (!predicted && mp.treatment == MissingPredictionTreatment::RETURN_MISSING)
+        return std::make_unique<InternalScore>();
+      last = &segment;
     }
 
-    if (!pending) return std::make_unique<InternalScore>();  // no segment matched
-    return pending->model->augment_last(tmp_sample);
+    if (!last) return std::make_unique<InternalScore>();  // no segment selected
+    tmp_sample = std::move(before_last);
+    return last->model->augment_last(tmp_sample);
   }
 };
 
