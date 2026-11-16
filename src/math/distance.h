@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "core/xmlnode.h"
 #include "utils/utils.h"
 
 /**
@@ -196,6 +197,27 @@ double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, Get
       return compute_distance(DistanceMetric::SIMPLE_MATCHING, n, minkowski_p, q, r, w, cf, sc);
   }
   return 0.0;
+}
+
+/**
+ * The p of a ComparisonMeasure <minkowski> element, shared by ClusteringModel
+ * and NearestNeighborModel. The schema declares p-parameter use="required" and
+ * the ComparisonMeasure text restricts it to p-parameter>0, so a missing,
+ * non-numeric, non-positive or non-finite value is a load error rather than a
+ * default. JPMML 1.7.7 agrees for a missing attribute and a negative value; it
+ * accepts p-parameter="0" and then scores every neighbour at an infinite
+ * distance, which the spec does not allow.
+ */
+inline double parse_minkowski_p(const XmlNode& minkowski) {
+  if (!minkowski.exists_attribute("p-parameter")) {
+    const std::string hint = minkowski.exists_attribute("p") ? " (the attribute is p-parameter, not p)" : "";
+    throw cpmml::ParsingException("minkowski: required attribute p-parameter is missing" + hint);
+  }
+  const std::string text = minkowski.get_attribute("p-parameter");
+  const double p = to_double(text);
+  if (!std::isfinite(p) || !(p > 0.0))
+    throw cpmml::ParsingException("minkowski: p-parameter must be a finite number > 0, got \"" + text + "\"");
+  return p;
 }
 
 // Convenience overload without per-field similarityScale (scale = 1).

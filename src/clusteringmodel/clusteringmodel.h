@@ -159,8 +159,7 @@ class ClusteringModel : public InternalModel {
     if (cm.exists_child("chebychev")) { metric = DistanceMetric::CHEBYSHEV; return; }
     if (cm.exists_child("minkowski")) {
       metric = DistanceMetric::MINKOWSKI;
-      const XmlNode mn = cm.get_child("minkowski");
-      if (mn.exists_attribute("p")) minkowski_p = to_double(mn.get_attribute("p"));
+      minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
       return;
     }
     // Similarity measures (aggregated as 1−s dissimilarities in compute_distance)

@@ -212,9 +212,7 @@ class NearestNeighborModel : public InternalModel {
     if (!node.exists_child("ComparisonMeasure")) return;
     const XmlNode cm = node.get_child("ComparisonMeasure");
     metric = parse_metric_type(cm);
-    if (metric == DistanceMetric::MINKOWSKI && cm.exists_child("minkowski"))
-      if (cm.get_child("minkowski").exists_attribute("p"))
-        minkowski_p = to_double(cm.get_child("minkowski").get_attribute("p"));
+    if (metric == DistanceMetric::MINKOWSKI) minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
   }
 
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
