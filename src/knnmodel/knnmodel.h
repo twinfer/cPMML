@@ -37,7 +37,8 @@
  * - All 9 PMML ComparisonMeasure measures (euclidean, squaredEuclidean,
  *   cityBlock, chebychev, minkowski, simpleMatching, jaccard, tanimoto,
  *   binarySimilarity)
- * - Per-field compare functions: absDiff, gaussSim, delta, equal
+ * - Per-field compare functions: absDiff, gaussSim, delta, equal, defaulting
+ *   to the ComparisonMeasure compareFunction
  * - Per-field weights (KNNInput fieldWeight)
  * - Classification: majorityVote, weightedMajorityVote
  * - Regression: average, median, weightedAverage
@@ -60,6 +61,7 @@ class NearestNeighborModel : public InternalModel {
   DistanceMetric metric;
   double minkowski_p;
   BinarySimilarityParams binary_params;  // read only for binarySimilarity
+  CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // ComparisonMeasure/@compareFunction
   std::string categorical_method;  // to_lower of categoricalScoringMethod
   std::string continuous_method;   // to_lower of continuousScoringMethod
   std::string instance_id_variable;  // instanceIdVariable attribute (for clustering)
@@ -248,9 +250,26 @@ class NearestNeighborModel : public InternalModel {
       throw cpmml::ParsingException("NearestNeighborModel: required element ComparisonMeasure is missing");
     const XmlNode cm = node.get_child("ComparisonMeasure");
     metric = parse_metric_type(cm);
+    default_compare_func = parse_compare_function(cm, CompareFunc::ABS_DIFF, "ComparisonMeasure");
     if (metric == DistanceMetric::MINKOWSKI) minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
     if (metric == DistanceMetric::BINARY_SIMILARITY)
       binary_params = parse_binary_similarity(cm.get_child("binarySimilarity"));
+  }
+
+  // compareFunction on ComparisonMeasure is the default (absDiff when absent)
+  // for every KNNInput that does not declare its own. KNNInput used to ignore
+  // the ComparisonMeasure value and fall back to absDiff, so a model declaring
+  // <ComparisonMeasure compareFunction="delta"> compared categorical codes by
+  // their difference; it also took any unknown value as absDiff. An unknown
+  // value is now a load error. JPMML 1.7.7 reads the ComparisonMeasure default
+  // the same way, but takes an unknown value (at either level) as absDiff.
+  static CompareFunc parse_compare_function(const XmlNode& node, CompareFunc fallback, const std::string& where) {
+    if (!node.exists_attribute("compareFunction")) return fallback;
+    const std::string raw = node.get_attribute("compareFunction");
+    const std::string s = to_lower(raw);
+    if (s != "absdiff" && s != "gausssim" && s != "delta" && s != "equal")
+      throw cpmml::ParsingException("NearestNeighborModel: unknown compareFunction \"" + raw + "\" on " + where);
+    return parse_compare_func(s);
   }
 
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
@@ -258,7 +277,8 @@ class NearestNeighborModel : public InternalModel {
       KnnInput input;
       input.field_name = ki.get_attribute("field");
       input.field_index = indexer->get_index(input.field_name);
-      input.compare_func = parse_compare_func(ki.get_attribute("compareFunction"));
+      input.compare_func =
+          parse_compare_function(ki, default_compare_func, "KNNInput \"" + input.field_name + "\"");
       input.field_weight = ki.exists_attribute("fieldWeight") ? to_double(ki.get_attribute("fieldWeight")) : 1.0;
       knn_inputs.push_back(std::move(input));
     }
@@ -340,10 +360,16 @@ class NearestNeighborModel : public InternalModel {
           fv[static_cast<Eigen::Index>(i)] = train_sample[knn_inputs[i].field_index].value.value;
         rows.push_back(fv);
       } else {
-        // Direct KNNInputs: read feature columns directly from InlineTable
+        // Direct KNNInputs: read feature columns directly from InlineTable,
+        // with the field's declared dataType -- the one its query value is
+        // read with. The type used to be guessed from the text, so a string
+        // field holding "10" stored the number 10 for the training instance
+        // while a query "10" got the field's string code, and the two never
+        // compared equal. JPMML 1.7.7 parses the cell with the field's type.
         Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
         for (size_t i = 0; i < feat_cols.size(); i++)
-          fv[static_cast<Eigen::Index>(i)] = Value(xml_row.get_child(feat_cols[i]).value()).value;
+          fv[static_cast<Eigen::Index>(i)] =
+              Value(xml_row.get_child(feat_cols[i]).value(), indexer->get_type(knn_inputs[i].field_name)).value;
         rows.push_back(fv);
       }
 
@@ -400,6 +426,14 @@ class NearestNeighborModel : public InternalModel {
   // The binary measures are similarities s, ranked as the dissimilarity 1 - s.
   // They are only reached with every input present (has_missing_input), and
   // are NaN where s is undefined (binary_measure_similarity).
+  //
+  // compareFunction="equal" is the spec's c(x,y) = 1 if x = y, 0 otherwise,
+  // fed into the measure as it stands, as JPMML 1.7.7 does: under a distance
+  // measure a matching value adds 1. field_compare in math/distance.h flips it
+  // to 0-if-equal, which made it the same as delta and inverted every equal
+  // field. ClusteringModel shares field_compare and is left as it is here; for
+  // KNN an equal field is passed to compute_distance as |c(x,y) - 0| under
+  // absDiff, which is c(x,y) itself.
   double compute_row_distance(const Query& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
     const std::vector<size_t>& present = query.present;
@@ -407,10 +441,16 @@ class NearestNeighborModel : public InternalModel {
       return 1.0 - binary_measure_similarity(
                        metric, binary_params, present.size(), [&](size_t j) { return query.values[present[j]]; },
                        [&](size_t j) { return train[present[j]]; });
+    const auto is_equal = [&](size_t j) { return knn_inputs[present[j]].compare_func == CompareFunc::EQUAL; };
     const double distance = compute_distance(
-        metric, present.size(), minkowski_p, [&](size_t j) { return query.values[present[j]]; },
-        [&](size_t j) { return train[present[j]]; }, [&](size_t j) { return knn_inputs[present[j]].field_weight; },
-        [&](size_t j) { return knn_inputs[present[j]].compare_func; });
+        metric, present.size(), minkowski_p,
+        [&](size_t j) {
+          const double x = query.values[present[j]];
+          return is_equal(j) ? (x == train[present[j]] ? 1.0 : 0.0) : x;
+        },
+        [&](size_t j) { return is_equal(j) ? 0.0 : train[present[j]]; },
+        [&](size_t j) { return knn_inputs[present[j]].field_weight; },
+        [&](size_t j) { return is_equal(j) ? CompareFunc::ABS_DIFF : knn_inputs[present[j]].compare_func; });
     return apply_adjust(metric, distance, query.adjust, minkowski_p);
   }
 

@@ -1,0 +1,13 @@
+x,c,y_pred
+0.1,red,B
+0.1,green,A
+1.2,green,B
+1.4,red,B
+2.2,blue,C
+2.2,red,A
+2.9,blue,A
+1.0,green,B
+0.7,,B
+1.8,,C
+,red,B
+,blue,B
