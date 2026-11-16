@@ -60,6 +60,15 @@ class MultipleModelMethod {
     double threshold = 1;                                                         // missingThreshold
   };
 
+  // The categories of the ensemble's target: the <Value property="valid">
+  // entries of its DataField. A category no segment voted for (or gave a
+  // probability to) still has a probability, 0, as in JPMML 1.7.7 and as the
+  // spec's "proportion of votes" implies.
+  struct Classes {
+    std::vector<std::string> values;
+    bool numeric = false;  // compare as numbers: "1" and "1.0" are one category
+  };
+
   using Function = std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)>;
 
   MultipleModelMethodType value = MultipleModelMethodType::MAJORITY_VOTE;
@@ -73,9 +82,21 @@ class MultipleModelMethod {
 
   MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
                       const MissingPrediction& missing_prediction)
+      : MultipleModelMethod(multiplemodelmethod, mining_function, missing_prediction, Classes{}) {}
+
+  MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
+                      const MissingPrediction& missing_prediction, const Classes& classes)
       : value(from_string(multiplemodelmethod)),
         missing_prediction(missing_prediction),
-        function(to_function(multiplemodelmethod, mining_function, missing_prediction)) {}
+        function(to_function(multiplemodelmethod, mining_function, missing_prediction, classes)) {}
+
+  // The target field's declared categories, in document order.
+  static Classes classes_of(const DataField& target_field) {
+    Classes classes;
+    classes.values = target_field.valid_values;
+    classes.numeric = target_field.datatype.value != DataType::DataTypeValue::STRING;
+    return classes;
+  }
 
   static constexpr EnumEntry<MultipleModelMethodType> TABLE[] = {
       {"majorityvote", MultipleModelMethodType::MAJORITY_VOTE, "majorityVote"},
@@ -115,21 +136,21 @@ class MultipleModelMethod {
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 
   static Function to_function(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
-                              const MissingPrediction& mp) {
+                              const MissingPrediction& mp, const Classes& classes) {
     // The spec says skipSegment "should not be used with modelChain", and JPMML
     // 1.7.7 refuses to score it there and with selectAll. cPMML keeps scoring
     // those documents as it did before the attribute was read: such a segment
     // is treated as under continue (select_all, model_chain).
     switch (from_string(multiplemodelmethod)) {
       case MultipleModelMethodType::MAJORITY_VOTE:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, false); };
+        return [mp, classes](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, false, classes); };
       case MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, true); };
+        return [mp, classes](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, true, classes); };
       case MultipleModelMethodType::AVERAGE:
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::CLASSIFICATION:
-            return [mp](const Sample& s, const std::vector<Segment>& e) {
-              return classification_average(s, e, mp, false);
+            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+              return classification_average(s, e, mp, false, classes);
             };
           case MiningFunction::MiningFunctionType::REGRESSION:
             return [mp](const Sample& s, const std::vector<Segment>& e) { return regression_average(s, e, mp, false); };
@@ -139,8 +160,9 @@ class MultipleModelMethod {
       case MultipleModelMethodType::WEIGHTED_AVERAGE:
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::CLASSIFICATION:
-            return
-                [mp](const Sample& s, const std::vector<Segment>& e) { return classification_average(s, e, mp, true); };
+            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+              return classification_average(s, e, mp, true, classes);
+            };
           case MiningFunction::MiningFunctionType::REGRESSION:
             return [mp](const Sample& s, const std::vector<Segment>& e) { return regression_average(s, e, mp, true); };
           default:
@@ -174,6 +196,24 @@ class MultipleModelMethod {
         best = category;
       }
     return best;
+  }
+
+  // Gives every declared category that has no probability yet a probability of
+  // 0. Called after the winner is chosen, so it never changes the prediction.
+  inline static void add_unpredicted(std::unordered_map<std::string, double>& probabilities, const Classes& classes) {
+    for (const auto& category : classes.values) {
+      bool present = probabilities.count(category) > 0;
+      double declared = 0;
+      if (!present && classes.numeric && try_to_double(category, declared))
+        for (const auto& entry : probabilities) {
+          double predicted = 0;
+          if (try_to_double(entry.first, predicted) && predicted == declared) {
+            present = true;
+            break;
+          }
+        }
+      if (!present) probabilities.emplace(category, 0.0);
+    }
   }
 
   inline static void normalize(std::unordered_map<std::string, double>& probabilities, const double total) {
@@ -295,7 +335,8 @@ class MultipleModelMethod {
   // ---- methods --------------------------------------------------------------
 
   inline static std::unique_ptr<InternalScore> vote(const Sample& sample, const std::vector<Segment>& ensemble,
-                                                    const MissingPrediction& mp, const bool weighted) {
+                                                    const MissingPrediction& mp, const bool weighted,
+                                                    const Classes& classes) {
     auto usable =
         apply_missing_prediction(evaluate_selected<std::string>(sample, ensemble, predict), mp, true, weighted);
     // Every selected segment skipped or voting for no prediction: JPMML throws
@@ -315,13 +356,16 @@ class MultipleModelMethod {
     if (usable.missing_votes > most) return std::make_unique<InternalScore>();
 
     normalize(probabilities, total);
-    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
+    const std::string winner = argmax(probabilities);
+    add_unpredicted(probabilities, classes);
+    return std::make_unique<InternalScore>(winner, probabilities);
   }
 
   inline static std::unique_ptr<InternalScore> classification_average(const Sample& sample,
                                                                       const std::vector<Segment>& ensemble,
                                                                       const MissingPrediction& mp,
-                                                                      const bool weighted) {
+                                                                      const bool weighted,
+                                                                      const Classes& classes) {
     auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
                                            mp, false, weighted);
     if (usable.missing || usable.results.empty()) return std::make_unique<InternalScore>();
@@ -336,7 +380,9 @@ class MultipleModelMethod {
     }
 
     normalize(probabilities, total);
-    return std::make_unique<InternalScore>(argmax(probabilities), probabilities);
+    const std::string winner = argmax(probabilities);
+    add_unpredicted(probabilities, classes);
+    return std::make_unique<InternalScore>(winner, probabilities);
   }
 
   inline static std::unique_ptr<InternalScore> regression_average(const Sample& sample,
