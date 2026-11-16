@@ -38,9 +38,20 @@ class Segment {
         predicate(predicate_builder.build_from_parent(node)),
         model(model) {}
 
-  inline std::unique_ptr<InternalScore> score(const Sample& sample) const { return model->score_raw(sample); }
+  // A segment's result is its model's result after the model's own Targets,
+  // exactly as when that model is scored on its own: min/max, rescaleFactor,
+  // rescaleConstant and castInteger on a prediction, and priorProbability or
+  // defaultValue when the model makes none. So a segment that makes no
+  // prediction but has a prior or a default is not empty, and
+  // missingPredictionTreatment never sees it. Classes stay raw values, not
+  // displayValues, as in JPMML 1.7.7 (see Target::operator()).
+  inline std::unique_ptr<InternalScore> score(const Sample& sample) const {
+    std::unique_ptr<InternalScore> result = model->score_raw(sample);
+    model->target(*result, false);
+    return result;
+  }
 
-  inline std::string predict(const Sample& sample) const { return model->predict_raw(sample); }
+  inline std::string predict(const Sample& sample) const { return model->target(model->predict_raw(sample), false); }
 };
 
 #endif

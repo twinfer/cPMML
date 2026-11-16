@@ -142,15 +142,21 @@ class Target {
   //   rescaleConstant and castInteger like any predicted value (42 with
   //   rescaleFactor 2 and rescaleConstant 1 predicts 85).
   // A Target with neither leaves the score without a prediction.
-  inline void operator()(InternalScore& score) const {
+  //
+  // display chooses how classes are named. A model scored on its own reports
+  // the displayValue (display = true). A segment inside a MiningModel hands its
+  // parent the raw class values (display = false): JPMML 1.7.7 votes, averages
+  // probabilities and writes modelChain predictedValue outputs by value, never
+  // by displayValue. Priors, defaultValue and the rescaling apply either way.
+  inline void operator()(InternalScore& score, const bool display = true) const {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         if (score.empty) {
-          const TargetValue* best = apply_priors(score);
+          const TargetValue* best = apply_priors(score, display);
           if (best == nullptr) break;
           score.empty = false;
           score.raw_score = best->value;
-          score.score = best->label();
+          score.score = display ? best->label() : best->value;
           try {
             score.double_score = to_double(score.score);
           } catch (const cpmml::ParsingException& e) {
@@ -160,7 +166,8 @@ class Target {
         }
 
         for (const auto& target_value : target_values) {
-          if (score.score == target_value.value && target_value.has_display_value) {
+          const std::string& name = display ? target_value.label() : target_value.value;
+          if (display && score.score == target_value.value && target_value.has_display_value) {
             score.score = target_value.display_value;
             try {
               score.double_score = to_double(score.score);
@@ -172,7 +179,7 @@ class Target {
           const auto it = score.probabilities.find(target_value.value);
           if (it != score.probabilities.cend()) {
             // Class present in the score: rename its key to the display value.
-            if (target_value.has_display_value && target_value.display_value != target_value.value) {
+            if (display && target_value.has_display_value && target_value.display_value != target_value.value) {
               score.probabilities[target_value.display_value] = it->second;
               score.probabilities.erase(target_value.value);
             }
@@ -180,10 +187,10 @@ class Target {
             // Class absent from a distribution the model did produce: its
             // probability is 0. Priors apply only when there is no prediction;
             // filling them in here made the probabilities sum past 1.
-            score.probabilities[target_value.label()] = 0.0;
+            score.probabilities[name] = 0.0;
           } else if (target_value.has_prior_probability) {
             // A prediction without any distribution: the prior is all there is.
-            score.probabilities[target_value.label()] = target_value.prior_probability;
+            score.probabilities[name] = target_value.prior_probability;
           }
         }
         break;
@@ -206,13 +213,15 @@ class Target {
     }
   }
 
-  inline std::string operator()(const std::string& predicted) const {
+  inline std::string operator()(const std::string& predicted, const bool display = true) const {
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         if (predicted.empty()) {
           const TargetValue* best = top_prior();
-          return best == nullptr ? predicted : best->label();
+          if (best == nullptr) return predicted;
+          return display ? best->label() : best->value;
         }
+        if (!display) break;
         for (const auto& target_value : target_values) {
           if (predicted == target_value.value && target_value.has_display_value) return target_value.display_value;
         }
@@ -269,7 +278,7 @@ class Target {
 
   // Replaces the probabilities with the normalized priors and returns the
   // TargetValue to predict, or nullptr when no TargetValue carries a prior.
-  inline const TargetValue* apply_priors(InternalScore& score) const {
+  inline const TargetValue* apply_priors(InternalScore& score, const bool display) const {
     const TargetValue* best = top_prior();
     if (best == nullptr) return nullptr;
 
@@ -280,7 +289,7 @@ class Target {
     score.probabilities.clear();
     for (const auto& target_value : target_values)
       if (target_value.has_prior_probability)
-        score.probabilities[target_value.label()] =
+        score.probabilities[display ? target_value.label() : target_value.value] =
             total > 0 ? target_value.prior_probability / total : target_value.prior_probability;
 
     return best;

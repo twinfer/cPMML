@@ -111,10 +111,13 @@ class InternalModel {
     return mining_schema.validate(internal_sample);
   }
 
-  // Model-chain steps. Each returns whether the model made a prediction. One
-  // that made none leaves its target missing and writes no OutputField, so the
-  // segments after it see missing inputs, rather than converting "" to a number
-  // and throwing.
+  // Model-chain steps. Each returns whether the model made a prediction, after
+  // its own Targets: a step with no prediction of its own but a
+  // priorProbability or defaultValue predicts that, as a standalone model does.
+  // One that still has none leaves its target missing and writes no
+  // OutputField, so the segments after it see missing inputs, rather than
+  // converting "" to a number and throwing. The value written for the next
+  // steps is the raw class, not its displayValue, as in JPMML 1.7.7.
   inline bool augment_first(Sample& sample) const {
     if (!transformation_dictionary.empty)
       for (const auto& derivedfield_name : derivedfields_dag)
@@ -125,11 +128,12 @@ class InternalModel {
 
   inline bool augment(Sample& sample) const {
     std::unique_ptr<InternalScore> score = score_raw(sample);
+    target(*score, false);
     if (score->empty) {
       sample.change_value(indexer->get_index(target_field.name), Value());
       return false;
     }
-    sample.change_value(indexer->get_index(target_field.name), Value(target(score->score), target_field.datatype));
+    sample.change_value(indexer->get_index(target_field.name), Value(score->score, target_field.datatype));
     _write_outputs_to_sample(sample, *score);
     return true;
   };
@@ -152,8 +156,8 @@ class InternalModel {
         sample.change_value_if_missing(of.index, of.expression->eval(sample));
       } else {
         // Prefer the sample-derived value: for predictedValue-type outputs it
-        // carries the post-Target (rescaled) prediction written by augment(),
-        // while score.double_score is the raw pre-Target value at this point.
+        // carries the post-Target (rescaled) prediction written by augment().
+        // The score is post-Target too, so probabilities include the priors.
         const Value sv = of.expression->eval(sample);
         if (!sv.missing) {
           sample.change_value(of.index, sv);
