@@ -34,8 +34,9 @@
  * href="http://dmg.org/pmml/v4-4/KNN.html">PMML NearestNeighborModel</a>.
  *
  * Supports:
- * - All 8 PMML distance/similarity metrics (euclidean, cityBlock, chebyshev,
- *   minkowski, simpleMatching, jaccard, tanimoto, binarySimilarity)
+ * - All 9 PMML ComparisonMeasure measures (euclidean, squaredEuclidean,
+ *   cityBlock, chebychev, minkowski, simpleMatching, jaccard, tanimoto,
+ *   binarySimilarity)
  * - Per-field compare functions: absDiff, gaussSim, delta, equal
  * - Per-field weights (KNNInput fieldWeight)
  * - Classification: majorityVote, weightedMajorityVote
@@ -58,6 +59,7 @@ class NearestNeighborModel : public InternalModel {
   int k;
   DistanceMetric metric;
   double minkowski_p;
+  BinarySimilarityParams binary_params;  // read only for binarySimilarity
   std::string categorical_method;  // to_lower of categoricalScoringMethod
   std::string continuous_method;   // to_lower of continuousScoringMethod
   std::string instance_id_variable;  // instanceIdVariable attribute (for clustering)
@@ -138,7 +140,8 @@ class NearestNeighborModel : public InternalModel {
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     const Query query = build_query(sample);
-    auto neighbors = find_k_nearest(query);
+    std::vector<std::pair<double, int>> neighbors;
+    if (!find_k_nearest(query, neighbors)) return std::make_unique<InternalScore>();
 
     if (is_clustering) {
       // Clustering: return nearest neighbor instance IDs
@@ -183,7 +186,8 @@ class NearestNeighborModel : public InternalModel {
   inline std::string predict_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return "";
     const Query query = build_query(sample);
-    auto neighbors = find_k_nearest(query);
+    std::vector<std::pair<double, int>> neighbors;
+    if (!find_k_nearest(query, neighbors)) return "";
 
     if (is_clustering) {
       return neighbors.empty() ? "" : training_instance_ids[neighbors[0].second];
@@ -196,23 +200,57 @@ class NearestNeighborModel : public InternalModel {
  private:
   // --- Parsing ---
 
+  // ComparisonMeasure holds exactly one measure element (an xs:choice of the
+  // nine below), besides any Extension. This used to have no squaredEuclidean
+  // case and to return euclidean for anything it did not recognise -- so
+  // <squaredEuclidean/> scored with the root taken, which ranks the same but
+  // changes 1/(d + threshold) weights and AdjustM -- and to take euclidean
+  // for a model with no ComparisonMeasure at all. A missing, unknown or second
+  // measure is now a load error. JPMML 1.7.7 refuses the first two ("Required
+  // element ComparisonMeasure/<Measure> is not defined") and a missing
+  // ComparisonMeasure; it skips an unknown element next to a known one and
+  // takes the last of two measures, both schema violations cPMML refuses.
   static DistanceMetric parse_metric_type(const XmlNode& measure) {
-    if (measure.exists_child("euclidean")) return DistanceMetric::EUCLIDEAN;
-    if (measure.exists_child("cityBlock")) return DistanceMetric::CITYBLOCK;
-    if (measure.exists_child("chebychev")) return DistanceMetric::CHEBYSHEV;
-    if (measure.exists_child("minkowski")) return DistanceMetric::MINKOWSKI;
-    if (measure.exists_child("simpleMatching")) return DistanceMetric::SIMPLE_MATCHING;
-    if (measure.exists_child("jaccard")) return DistanceMetric::JACCARD;
-    if (measure.exists_child("tanimoto")) return DistanceMetric::TANIMOTO;
-    if (measure.exists_child("binarySimilarity")) return DistanceMetric::BINARY_SIMILARITY;
-    return DistanceMetric::EUCLIDEAN;
+    static const std::pair<const char*, DistanceMetric> measures[] = {
+        {"euclidean", DistanceMetric::EUCLIDEAN},
+        {"squaredEuclidean", DistanceMetric::SQUARED_EUCLIDEAN},
+        {"cityBlock", DistanceMetric::CITYBLOCK},
+        {"chebychev", DistanceMetric::CHEBYSHEV},
+        {"minkowski", DistanceMetric::MINKOWSKI},
+        {"simpleMatching", DistanceMetric::SIMPLE_MATCHING},
+        {"jaccard", DistanceMetric::JACCARD},
+        {"tanimoto", DistanceMetric::TANIMOTO},
+        {"binarySimilarity", DistanceMetric::BINARY_SIMILARITY},
+    };
+
+    bool found = false;
+    DistanceMetric result = DistanceMetric::EUCLIDEAN;
+    for (const auto& child : measure.get_childs()) {
+      const std::string name = child.name();
+      if (name.empty() || name == "Extension") continue;  // text, or an Extension
+      const auto it = std::find_if(std::cbegin(measures), std::cend(measures),
+                                   [&](const auto& m) { return name == m.first; });
+      if (it == std::cend(measures))
+        throw cpmml::ParsingException("NearestNeighborModel: unknown ComparisonMeasure measure <" + name + ">");
+      if (found)
+        throw cpmml::ParsingException("NearestNeighborModel: ComparisonMeasure has more than one measure (<" + name +
+                                      "> after another)");
+      found = true;
+      result = it->second;
+    }
+    if (!found) throw cpmml::ParsingException("NearestNeighborModel: ComparisonMeasure has no measure element");
+
+    return result;
   }
 
   void parse_metric(const XmlNode& node) {
-    if (!node.exists_child("ComparisonMeasure")) return;
+    if (!node.exists_child("ComparisonMeasure"))
+      throw cpmml::ParsingException("NearestNeighborModel: required element ComparisonMeasure is missing");
     const XmlNode cm = node.get_child("ComparisonMeasure");
     metric = parse_metric_type(cm);
     if (metric == DistanceMetric::MINKOWSKI) minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
+    if (metric == DistanceMetric::BINARY_SIMILARITY)
+      binary_params = parse_binary_similarity(cm.get_child("binarySimilarity"));
   }
 
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
@@ -378,9 +416,18 @@ class NearestNeighborModel : public InternalModel {
   // each aggregation puts it: inside the root for euclidean and minkowski,
   // outside for the rest. With no input missing AdjustM is 1 and this is the
   // plain distance.
+  //
+  // binarySimilarity is a similarity s with its own parameters; like the other
+  // binary measures it is ranked as the dissimilarity 1 - s. It is only
+  // reached with every input present (has_missing_input), and is NaN where s
+  // is undefined.
   double compute_row_distance(const Query& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
     const std::vector<size_t>& present = query.present;
+    if (metric == DistanceMetric::BINARY_SIMILARITY)
+      return 1.0 - binary_similarity(
+                       binary_params, present.size(), [&](size_t j) { return query.values[present[j]]; },
+                       [&](size_t j) { return train[present[j]]; });
     const double distance = compute_distance(
         metric, present.size(), minkowski_p, [&](size_t j) { return query.values[present[j]]; },
         [&](size_t j) { return train[present[j]]; }, [&](size_t j) { return knn_inputs[present[j]].field_weight; },
@@ -393,20 +440,27 @@ class NearestNeighborModel : public InternalModel {
         return distance * std::sqrt(adjust);
       case DistanceMetric::MINKOWSKI:
         return distance * std::pow(adjust, 1.0 / minkowski_p);
-      default:
+      default:  // squaredEuclidean, cityBlock, chebychev
         return distance * adjust;
     }
   }
 
   // --- K-nearest neighbor search ---
 
-  std::vector<std::pair<double, int>> find_k_nearest(const Query& query) const {
+  // False, leaving `neighbors` empty, when the distance to some training
+  // instance is undefined (NaN: a binarySimilarity denominator of 0), which
+  // is no prediction. A NaN would also break partial_sort's ordering.
+  bool find_k_nearest(const Query& query, std::vector<std::pair<double, int>>& neighbors) const {
     const int n = static_cast<int>(training_features.rows());
     std::vector<std::pair<double, int>> distances(n);
-    for (int i = 0; i < n; i++) distances[i] = {compute_row_distance(query, i), i};
+    for (int i = 0; i < n; i++) {
+      distances[i] = {compute_row_distance(query, i), i};
+      if (std::isnan(distances[i].first)) return false;
+    }
     const int kk = std::min(k, n);
     std::partial_sort(distances.begin(), distances.begin() + kk, distances.end());
-    return {distances.begin(), distances.begin() + kk};
+    neighbors.assign(distances.begin(), distances.begin() + kk);
+    return true;
   }
 
   // --- Classification voting ---

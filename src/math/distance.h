@@ -192,8 +192,12 @@ double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, Get
       return (denom > 0) ? 1.0 - static_cast<double>(a11 + a00) / denom : 0.0;
     }
     case DistanceMetric::BINARY_SIMILARITY:
-      // binarySimilarity is equivalent to simpleMatching when custom c/d
-      // parameters are not provided (PMML default c11=c10=c01=c00=d11=d10=d01=d00=1).
+      // Not binarySimilarity: its eight c/d parameters are required and are
+      // not seen here, and this is simpleMatching, which binarySimilarity is
+      // only for c11 = c00 = 1, c10 = c01 = 0 and equal d's (all eight at 1
+      // gives s = 1 for every pair, not simpleMatching). NearestNeighborModel
+      // scores binarySimilarity with binary_similarity() below and never
+      // reaches this. ClusteringModel still does: a known gap there.
       return compute_distance(DistanceMetric::SIMPLE_MATCHING, n, minkowski_p, q, r, w, cf, sc);
   }
   return 0.0;
@@ -218,6 +222,75 @@ inline double parse_minkowski_p(const XmlNode& minkowski) {
   if (!std::isfinite(p) || !(p > 0.0))
     throw cpmml::ParsingException("minkowski: p-parameter must be a finite number > 0, got \"" + text + "\"");
   return p;
+}
+
+/**
+ * The parameters of a ComparisonMeasure <binarySimilarity> element:
+ *
+ *   s = (c11*a11 + c10*a10 + c01*a01 + c00*a00) /
+ *       (d11*a11 + d10*a10 + d01*a01 + d00*a00)
+ *
+ * where aXY counts the fields with x = X and y = Y. The schema declares all
+ * eight c??-parameter / d??-parameter attributes use="required" and gives no
+ * default, so a missing or non-numeric one is a load error, as in JPMML 1.7.7
+ * ("Required attribute binarySimilarity@c00-parameter is not defined").
+ */
+struct BinarySimilarityParams {
+  double c00 = 0.0, c01 = 0.0, c10 = 0.0, c11 = 0.0;
+  double d00 = 0.0, d01 = 0.0, d10 = 0.0, d11 = 0.0;
+};
+
+inline BinarySimilarityParams parse_binary_similarity(const XmlNode& node) {
+  const auto read = [&](const char* name) {
+    if (!node.exists_attribute(name))
+      throw cpmml::ParsingException(std::string("binarySimilarity: required attribute ") + name + " is missing");
+    const std::string text = node.get_attribute(name);
+    double v = 0.0;
+    try {
+      v = to_double(text);
+    } catch (const cpmml::ParsingException&) {
+      v = std::numeric_limits<double>::quiet_NaN();
+    }
+    if (!std::isfinite(v))
+      throw cpmml::ParsingException(std::string("binarySimilarity: ") + name + " must be a finite number, got \"" +
+                                    text + "\"");
+    return v;
+  };
+  BinarySimilarityParams p;
+  p.c00 = read("c00-parameter");
+  p.c01 = read("c01-parameter");
+  p.c10 = read("c10-parameter");
+  p.c11 = read("c11-parameter");
+  p.d00 = read("d00-parameter");
+  p.d01 = read("d01-parameter");
+  p.d10 = read("d10-parameter");
+  p.d11 = read("d11-parameter");
+  return p;
+}
+
+/**
+ * The binarySimilarity similarity s of a query and a row, with a field read as
+ * 1 when > 0.5, as the other binary measures here do. A zero denominator leaves
+ * s undefined: NaN is returned, for the caller to turn into no prediction
+ * (JPMML 1.7.7 throws "Undefined result").
+ */
+template <typename GetQuery, typename GetRow>
+double binary_similarity(const BinarySimilarityParams& p, size_t n, GetQuery q, GetRow r) {
+  double a00 = 0.0, a01 = 0.0, a10 = 0.0, a11 = 0.0;
+  for (size_t i = 0; i < n; i++) {
+    const bool xi = q(i) > 0.5, yi = r(i) > 0.5;
+    if (xi && yi)
+      a11++;
+    else if (xi)
+      a10++;
+    else if (yi)
+      a01++;
+    else
+      a00++;
+  }
+  const double num = p.c11 * a11 + p.c10 * a10 + p.c01 * a01 + p.c00 * a00;
+  const double den = p.d11 * a11 + p.d10 * a10 + p.d01 * a01 + p.d00 * a00;
+  return den != 0.0 ? num / den : std::numeric_limits<double>::quiet_NaN();
 }
 
 // Convenience overload without per-field similarityScale (scale = 1).
