@@ -19,6 +19,7 @@
 #include <locale>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "cPMML.h"
@@ -47,6 +48,69 @@ static cpmml::Input to_input(const std::unordered_map<std::string, std::string>&
 
 // ---- scoring mode -----------------------------------------------------------
 
+// Checks every column of `row` other than the predicted one against the
+// OutputFields of `result`, on scored rows and on no-prediction rows alike.
+//   - empty cell: not asserted (input columns, and hand-written fixtures that
+//     leave an output unspecified);
+//   - "N/A" (the oracle's missing value): the output must be absent, or an
+//     empty string;
+//   - anything else: the output must be present and match (numeric outputs
+//     within tolerance, string outputs exactly).
+static bool check_other_outputs(const cpmml::Result& result,
+                                const std::unordered_map<std::string, std::string>& row,
+                                const std::string& out_col,
+                                const std::unordered_set<std::string>& declared_outputs) {
+  const auto nout = result.num_outputs();
+  const auto sout = result.str_outputs();
+  for (const auto& [col, expected_val] : row) {
+    if (col == out_col || expected_val.empty()) continue;
+
+    auto nit = nout.find(col);
+    auto sit = sout.find(col);
+
+    if (expected_val == "N/A") {
+      if (nit != nout.end()) {
+        std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: no value"
+                  << "  sample: " << to_string(row) << std::endl;
+        return false;
+      }
+      if (sit != sout.end() && !sit->second.empty()) {
+        std::cerr << "output '" << col << "': predicted: " << sit->second << "  expected: no value"
+                  << "  sample: " << to_string(row) << std::endl;
+        return false;
+      }
+      continue;
+    }
+
+    // A declared OutputField that produced nothing is a failure, not a
+    // column to skip. Without this an evaluator that silently stopped
+    // emitting an output passed every fixture that asserted it.
+    if (declared_outputs.count(col) && nit == nout.end() && sit == sout.end()) {
+      std::cerr << "output '" << col << "': model declares it but produced no value"
+                << "  expected: " << expected_val << "  sample: " << to_string(row) << std::endl;
+      return false;
+    }
+
+    if (nit != nout.end()) {
+      try {
+        if (!within_tolerance(nit->second, to_double(expected_val))) {
+          std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: " << expected_val
+                    << "  sample: " << to_string(row) << std::endl;
+          return false;
+        }
+      } catch (const cpmml::ParsingException&) {}
+      continue;
+    }
+
+    if (sit != sout.end() && sit->second != expected_val) {
+      std::cerr << "output '" << col << "': predicted: " << sit->second << "  expected: " << expected_val
+                << "  sample: " << to_string(row) << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
+
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
   const std::string out_col = model.output_name();
   const auto names = model.output_names();
@@ -63,13 +127,17 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
     // The oracle emits "N/A" (and hand-written fixtures leave the cell blank)
     // when the model yields no prediction: require the same of cPMML rather
     // than skipping the row.
+    // The other output columns of such a row are still checked: a model that
+    // gives no prediction can still emit (wrong) probabilities.
     if (expected.empty() || expected == "N/A") {
-      const std::string predicted = model.evaluate(to_input(row)).as_string();
+      const cpmml::Result result = model.evaluate(to_input(row));
+      const std::string predicted = result.as_string();
       if (!predicted.empty()) {
         std::cerr << "predicted: " << predicted << "  expected: no prediction"
                   << "  sample: " << to_string(row) << std::endl;
         return -1;
       }
+      if (!check_other_outputs(result, row, out_col, declared_outputs)) return -1;
       row = reader.read();
       continue;
     }
@@ -108,41 +176,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
     // Verify every other oracle column the model claims to produce
     // (probability/transformedValue/... OutputFields keyed by name).
-    {
-      const auto nout = result.num_outputs();
-      const auto sout = result.str_outputs();
-      for (const auto& [col, expected_val] : row) {
-        if (col == out_col || expected_val.empty()) continue;
-
-        // A declared OutputField that produced nothing is a failure, not a
-        // column to skip. Without this an evaluator that silently stopped
-        // emitting an output passed every fixture that asserted it.
-        if (declared_outputs.count(col) && !nout.count(col) && !sout.count(col)) {
-          std::cerr << "output '" << col << "': model declares it but produced no value"
-                    << "  expected: " << expected_val << "  sample: " << to_string(row) << std::endl;
-          return -1;
-        }
-
-        auto nit = nout.find(col);
-        if (nit != nout.end()) {
-          try {
-            if (!within_tolerance(nit->second, to_double(expected_val))) {
-              std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: " << expected_val
-                        << "  sample: " << to_string(row) << std::endl;
-              return -1;
-            }
-          } catch (const cpmml::ParsingException&) {}
-          continue;
-        }
-
-        auto sit = sout.find(col);
-        if (sit != sout.end() && sit->second != expected_val) {
-          std::cerr << "output '" << col << "': predicted: " << sit->second << "  expected: " << expected_val
-                    << "  sample: " << to_string(row) << std::endl;
-          return -1;
-        }
-      }
-    }
+    if (!check_other_outputs(result, row, out_col, declared_outputs)) return -1;
     row = reader.read();
   }
   return 0;
