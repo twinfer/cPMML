@@ -111,20 +111,27 @@ class InternalModel {
     return mining_schema.validate(internal_sample);
   }
 
-  inline void augment_first(Sample& sample) const {
+  // Model-chain steps. Each returns whether the model made a prediction. One
+  // that made none leaves its target missing and writes no OutputField, so the
+  // segments after it see missing inputs, rather than converting "" to a number
+  // and throwing.
+  inline bool augment_first(Sample& sample) const {
     if (!transformation_dictionary.empty)
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(sample);
 
-    std::unique_ptr<InternalScore> score = score_raw(sample);
-    sample.change_value(indexer->get_index(target_field.name), Value(target(score->score), target_field.datatype));
-    _write_outputs_to_sample(sample, *score);
+    return augment(sample);
   };
 
-  inline void augment(Sample& sample) const {
+  inline bool augment(Sample& sample) const {
     std::unique_ptr<InternalScore> score = score_raw(sample);
+    if (score->empty) {
+      sample.change_value(indexer->get_index(target_field.name), Value());
+      return false;
+    }
     sample.change_value(indexer->get_index(target_field.name), Value(target(score->score), target_field.datatype));
     _write_outputs_to_sample(sample, *score);
+    return true;
   };
 
   inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {

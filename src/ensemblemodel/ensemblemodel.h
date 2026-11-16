@@ -48,7 +48,8 @@ class EnsembleModel : public InternalModel {
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         multiplemodelmethod(node.get_child("Segmentation").get_attribute("multipleModelMethod"),
-                            InternalModel::mining_function) {
+                            InternalModel::mining_function,
+                            MultipleModelMethod::missing_prediction_from(node.get_child("Segmentation"))) {
     PredicateBuilder predicate_builder(indexer);
     for (const auto& child : node.get_child("Segmentation").get_childs("Segment"))
       ensemble.push_back(Segment(child, predicate_builder,
