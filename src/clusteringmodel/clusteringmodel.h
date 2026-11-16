@@ -138,9 +138,13 @@ class ClusteringModel : public InternalModel {
   // selects that cluster's entry in MeanClusterDistances. This used to return
   // the distance alone, which is why the divisor could not be applied.
   // With a ClusteringField missing the distance carries AdjustM. Where the
-  // model gives no prediction (has_missing_input) there is no nearest cluster
-  // and this throws MissingValueException, as it did for any missing field;
-  // where the measure is undefined it throws EvaluationException.
+  // model gives no prediction there is no nearest cluster and defined is
+  // false, exactly where score_raw and predict_raw give none: AdjustM
+  // undefined or a binary measure with a field missing (has_missing_input),
+  // or a measure undefined against some cluster (nearest_of). This used to
+  // throw MissingValueException and EvaluationException for those, so an
+  // AnomalyDetectionModel clusterMeanDist record with every ClusteringField
+  // missing aborted scoring instead of giving no prediction.
   Nearest nearest(const std::unordered_map<std::string, std::string>& sample) const {
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
@@ -149,12 +153,8 @@ class ClusteringModel : public InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
-    if (has_missing_input(internal_sample))
-      throw cpmml::MissingValueException("ClusteringModel: no distance defined for the missing ClusteringFields");
-    const Nearest best = nearest_of(internal_sample);
-    if (!best.defined)
-      throw cpmml::EvaluationException("ClusteringModel: the similarity measure is undefined for this record");
-    return best;
+    if (has_missing_input(internal_sample)) return Nearest{0, std::numeric_limits<double>::quiet_NaN(), false};
+    return nearest_of(internal_sample);
   }
 
  private:

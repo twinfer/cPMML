@@ -77,17 +77,34 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
     auto flat = flatten_input(arguments);
 
+    // The anomaly score is a function of the inner model's result, so where
+    // the inner model gives no prediction there is no score either: the
+    // AnomalyDetectionModel page says nothing of missing values, and the
+    // inner models' own rules decide (a ClusteringModel with AdjustM
+    // undefined, a MiningModel whose segments give no prediction, an SVM with
+    // a FieldRef missing). Each of these used to throw -- MissingValueException
+    // from nearest(), or a ParsingException from to_double("") -- so one such
+    // record aborted the batch. JPMML 1.7.7 cannot load AnomalyDetectionModel;
+    // on the inner models alone it gives no prediction for the forest and
+    // throws for the other two.
     switch (algorithm) {
       case Algorithm::CLUSTER_MEAN_DIST: {
         // clusterMeanDist scores with the distance to the nearest cluster —
         // inner->predict would return the cluster *id*, which is not a score.
         const ClusteringModel::Nearest n = clustering->nearest(flat);
+        if (!n.defined) return std::make_unique<InternalScore>();
         return std::make_unique<InternalScore>(cluster_mean_dist_score(n));
       }
-      case Algorithm::IFOREST:
-        return std::make_unique<InternalScore>(iforest_score(to_double(inner->predict(flat))));
-      case Algorithm::OCSVM:
-        return std::make_unique<InternalScore>(to_double(inner->predict(flat)));
+      case Algorithm::IFOREST: {
+        const std::string avg_path = inner->predict(flat);
+        if (avg_path.empty()) return std::make_unique<InternalScore>();
+        return std::make_unique<InternalScore>(iforest_score(to_double(avg_path)));
+      }
+      case Algorithm::OCSVM: {
+        const std::string decision = inner->predict(flat);
+        if (decision.empty()) return std::make_unique<InternalScore>();
+        return std::make_unique<InternalScore>(to_double(decision));
+      }
     }
 
     throw cpmml::EvaluationException("AnomalyDetectionModel: unreachable algorithmType");
