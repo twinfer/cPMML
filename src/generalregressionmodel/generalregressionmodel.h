@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/datadictionary.h"
+#include "core/enum_parser.h"
 #include "core/internal_model.h"
 #include "core/miningfunction.h"
 #include "core/optype.h"
@@ -55,11 +56,17 @@ class GeneralRegressionModel : public InternalModel {
     double beta;
   };
 
+  // The inverse link F. One enumeration serves both attributes: cumulativeLink
+  // (CUMULATIVE-LINK-FUNCTION) and linkFunction (LINK-FUNCTION) share five
+  // members with identical formulas, and each attribute is parsed against its
+  // own table so neither accepts the other's extra members.
+  enum class Link { IDENTITY, LOG, LOGC, LOGIT, PROBIT, CLOGLOG, LOGLOG, CAUCHIT, POWER, ODDSPOWER, NEGBIN };
+
   // --- Members ---
 
-  std::string model_type;     // to_lower of modelType attribute
-  std::string link_function;  // to_lower of linkFunction attribute
-  double link_parameter;      // for power/oddspower/negbin links
+  std::string model_type;  // to_lower of modelType attribute
+  Link link;               // cumulativeLink for ordinalMultinomial, else linkFunction
+  double link_parameter;   // for power/oddspower/negbin links
 
   // Factors (categorical predictors) — set of field names
   std::unordered_set<std::string> factors;
@@ -96,8 +103,7 @@ class GeneralRegressionModel : public InternalModel {
                          const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         model_type(to_lower(node.get_attribute("modelType"))),
-        link_function(
-            to_lower(node.get_attribute("linkFunction") == "null" ? "identity" : node.get_attribute("linkFunction"))),
+        link(parse_link(node, model_type)),
         link_parameter(node.exists_attribute("linkParameter") ? to_double(node.get_attribute("linkParameter")) : 1.0),
         reference_category(node.get_attribute("targetReferenceCategory")) {
     // Offset
@@ -161,6 +167,63 @@ class GeneralRegressionModel : public InternalModel {
   }
 
   // --- Parsing ---
+
+  static constexpr EnumEntry<Link> CUMULATIVE_LINK_TABLE[] = {
+      {"logit", Link::LOGIT, "logit"},       {"probit", Link::PROBIT, "probit"},
+      {"cloglog", Link::CLOGLOG, "cloglog"}, {"loglog", Link::LOGLOG, "loglog"},
+      {"cauchit", Link::CAUCHIT, "cauchit"},
+  };
+
+  // LINK-FUNCTION's ten members, plus cauchit: not in the 4.4 enumeration, but
+  // accepted here before this table existed and its formula is unambiguous.
+  static constexpr EnumEntry<Link> LINK_FUNCTION_TABLE[] = {
+      {"identity", Link::IDENTITY, "identity"},    {"log", Link::LOG, "log"},
+      {"logc", Link::LOGC, "logc"},                {"logit", Link::LOGIT, "logit"},
+      {"probit", Link::PROBIT, "probit"},          {"cloglog", Link::CLOGLOG, "cloglog"},
+      {"loglog", Link::LOGLOG, "loglog"},          {"cauchit", Link::CAUCHIT, "cauchit"},
+      {"power", Link::POWER, "power"},             {"oddspower", Link::ODDSPOWER, "oddspower"},
+      {"negbin", Link::NEGBIN, "negbin"},
+  };
+
+  /**
+   * The spec gives each model type its own link attribute: cumulativeLink "when
+   * ordinalMultinomial model type is specified", linkFunction "when
+   * generalizedLinear model type is specified". This read linkFunction for
+   * every type, so an ordinal model -- which carries cumulativeLink and no
+   * linkFunction -- fell through to identity and returned raw differences of
+   * linear predictors as probabilities (-4, 2, 3).
+   *
+   * ordinalMultinomial: cumulativeLink is required. The schema marks it
+   * optional with no default, and an ordinal model has no meaning without F;
+   * JPMML 1.7.7 rejects such a document ("Required attribute
+   * GeneralRegressionModel@cumulativeLink is not defined") whether or not
+   * linkFunction is present, and when both are present scores with
+   * cumulativeLink alone. linkFunction is ignored here for the same reason.
+   *
+   * Other types: linkFunction as before, absent meaning identity (which is the
+   * only correct reading for regression/generalLinear, and what cPMML has
+   * always done for generalizedLinear). multinomialLogistic reads neither.
+   *
+   * In both cases a value that is present and unrecognised is a load error;
+   * it used to become identity.
+   */
+  static Link parse_link(const XmlNode& node, const std::string& model_type) {
+    if (model_type == "ordinalmultinomial") {
+      const std::string raw = node.get_attribute("cumulativeLink");
+      if (is_absent_attribute(raw))
+        throw cpmml::ParsingException(
+            "GeneralRegressionModel: ordinalMultinomial requires cumulativeLink (linkFunction does not apply to it)");
+      return enum_value(raw, CUMULATIVE_LINK_TABLE, "GeneralRegressionModel@cumulativeLink");
+    }
+    // linkFunction belongs to generalizedLinear alone, the same way cumulativeLink
+    // belongs to ordinalMultinomial. regression and generalLinear are identity
+    // by definition, and producers do write linkFunction="identity" on them, so
+    // it is ignored there, not validated -- as JPMML does. Applying a present
+    // one there scored linkFunction="log" on a regression as exp(eta).
+    if (model_type != "generalizedlinear") return Link::IDENTITY;  // incl. multinomialLogistic: softmax
+    return enum_value(node.get_attribute("linkFunction"), LINK_FUNCTION_TABLE, "GeneralRegressionModel@linkFunction",
+                      Link::IDENTITY);
+  }
 
   void parse_factors(const XmlNode& node) {
     if (!node.exists_child("FactorList")) return;
@@ -325,23 +388,29 @@ class GeneralRegressionModel : public InternalModel {
 
   // --- Inverse link functions ---
 
+  // Formulas as the spec states them for both the ordinal and the
+  // generalizedLinear sections. cloglog and loglog are mirror images, not
+  // inverses: cloglog = 1 - exp(-exp(y)), loglog = exp(-exp(-y)).
   double apply_inverse_link(double eta) const {
-    if (link_function == "identity") return eta;
-    if (link_function == "log") return std::exp(eta);
-    if (link_function == "logit") return 1.0 / (1.0 + std::exp(-eta));
-    if (link_function == "probit") return probit(eta);
-    if (link_function == "cloglog") return 1.0 - std::exp(-std::exp(eta));
-    if (link_function == "loglog") return std::exp(-std::exp(-eta));
-    if (link_function == "cauchit") return 0.5 + std::atan(eta) / M_PI;
-    if (link_function == "power") return std::pow(eta, 1.0 / link_parameter);
-    if (link_function == "oddspower") {
-      if (link_parameter == 0.0) return 1.0 / (1.0 + std::exp(-eta));
-      return 1.0 / (1.0 + std::pow(1.0 + link_parameter * eta, -1.0 / link_parameter));
+    switch (link) {
+      case Link::IDENTITY: return eta;
+      case Link::LOG: return std::exp(eta);
+      case Link::LOGC: return 1.0 - std::exp(eta);
+      case Link::LOGIT: return 1.0 / (1.0 + std::exp(-eta));
+      case Link::PROBIT: return probit(eta);
+      case Link::CLOGLOG: return 1.0 - std::exp(-std::exp(eta));
+      case Link::LOGLOG: return std::exp(-std::exp(-eta));
+      case Link::CAUCHIT: return 0.5 + std::atan(eta) / M_PI;
+      case Link::POWER:
+        // y^(1/d) for d != 0, exp(y) for d = 0 (pow(y, inf) before).
+        if (link_parameter == 0.0) return std::exp(eta);
+        return std::pow(eta, 1.0 / link_parameter);
+      case Link::ODDSPOWER:
+        if (link_parameter == 0.0) return 1.0 / (1.0 + std::exp(-eta));
+        return 1.0 / (1.0 + std::pow(1.0 + link_parameter * eta, -1.0 / link_parameter));
+      case Link::NEGBIN: return 1.0 / (link_parameter * (std::exp(-eta) - 1.0));
     }
-    if (link_function == "negbin") {
-      return 1.0 / (link_parameter * (std::exp(-eta) - 1.0));
-    }
-    return eta;
+    return eta;  // unreachable: every Link is handled above
   }
 
   // --- Model-type prediction methods ---
