@@ -1,0 +1,9 @@
+x,color,y_pred
+1.0,red,6.5
+2.0,green,6.5
+-1.5,blue,0.0
+0.0,red,4.5
+,red,N/A
+,blue,N/A
+4.0,,N/A
+,,N/A

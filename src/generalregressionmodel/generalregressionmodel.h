@@ -118,7 +118,13 @@ class GeneralRegressionModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A missing predictor yields no prediction, as in JPMML and as a TreeModel's
+  // nullPrediction does. Throwing made one incomplete record an error for the
+  // caller; scoring it as 0 (the pre-bf17bd7 behaviour) gave a confident wrong
+  // answer. A model wanting a substitute says so with missingValueReplacement,
+  // which MiningSchema applies before this point.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     if (model_type == "multinomiallogistic") {
       auto [winner, scores] = predict_multinomial(sample);
       return std::make_unique<RegressionScore>(winner, 1.0, classes, scores);
@@ -133,6 +139,7 @@ class GeneralRegressionModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return "";
     if (model_type == "multinomiallogistic") {
       auto [winner, scores] = predict_multinomial(sample);
       return winner;
@@ -145,6 +152,14 @@ class GeneralRegressionModel : public InternalModel {
   }
 
  private:
+  bool has_missing_input(const Sample& sample) const {
+    if (has_offset_variable && sample[offset_variable_index].value.missing) return true;
+    for (const auto& [param, cells] : pp_matrix)
+      for (const auto& cell : cells)
+        if (sample[cell.predictor_index].value.missing) return true;
+    return false;
+  }
+
   // --- Parsing ---
 
   void parse_factors(const XmlNode& node) {
