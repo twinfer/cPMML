@@ -54,6 +54,9 @@ class ClusteringModel : public InternalModel {
 
   std::vector<ClusteringField> fields;
   std::vector<Cluster> clusters;
+  // MissingValueWeights: Qi per ClusteringField, in field order. Without the
+  // element every Qi is 1.
+  std::vector<double> missing_value_weights;
 
   // --- Constructors ---
 
@@ -67,6 +70,7 @@ class ClusteringModel : public InternalModel {
         is_similarity(false) {
     parse_comparison_measure(node);
     parse_clustering_fields(node, indexer);
+    parse_missing_value_weights(node);
     parse_clusters(node);
 
     // A ClusteringModel with no Cluster has nothing to assign a case to. This
@@ -77,12 +81,44 @@ class ClusteringModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A missing ClusteringField is left out of the distance, not a reason to
+  // give up: the ComparisonMeasure aggregations sum over the non-missing
+  // fields only (SumNM) and scale by AdjustM = sum[Qi] / sum[nonmissing(Xi)*Qi],
+  // Qi from MissingValueWeights or 1. JPMML 1.7.7 does exactly this, for every
+  // distance measure, with and without MissingValueWeights. AdjustM is the
+  // same for every cluster, so it never changes which cluster wins; it only
+  // changes the distance (see nearest()).
+  //
+  // The model gives no prediction when AdjustM is undefined, that is when the
+  // present fields' Qi sum to 0 (every ClusteringField missing, or only fields
+  // with Qi = 0 present), and for the binary measures (simpleMatching,
+  // jaccard, tanimoto, binarySimilarity) with any field missing, which have
+  // no SumNM form in the spec. JPMML throws in all of these ("Undefined
+  // result", or a NullPointerException for the binary measures). This
+  // replaces a MissingValueException for any missing ClusteringField.
+  inline bool has_missing_input(const Sample& sample) const {
+    size_t present = 0;
+    double present_weight = 0.0;
+    for (size_t i = 0; i < fields.size(); i++) {
+      if (sample[fields[i].field_index].value.missing) continue;
+      present++;
+      present_weight += missing_value_weight(i);
+    }
+    if (present == fields.size()) return false;  // AdjustM = 1, per the spec
+
+    return is_binary_metric() || !(present_weight > 0.0);
+  }
+
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     const std::string winner = find_cluster(sample);
     return std::make_unique<InternalScore>(winner);
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return find_cluster(sample); }
+  inline std::string predict_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return "";
+    return find_cluster(sample);
+  }
 
   struct Nearest {
     size_t index = 0;
@@ -94,6 +130,9 @@ class ClusteringModel : public InternalModel {
   // both: the distance is the numerator of the anomaly score and the index
   // selects that cluster's entry in MeanClusterDistances. This used to return
   // the distance alone, which is why the divisor could not be applied.
+  // With a ClusteringField missing the distance carries AdjustM. Where the
+  // model gives no prediction (has_missing_input) there is no nearest cluster
+  // and this throws MissingValueException, as it did for any missing field.
   Nearest nearest(const std::unordered_map<std::string, std::string>& sample) const {
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
@@ -102,6 +141,8 @@ class ClusteringModel : public InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
+    if (has_missing_input(internal_sample))
+      throw cpmml::MissingValueException("ClusteringModel: no distance defined for the missing ClusteringFields");
     return nearest_of(internal_sample);
   }
 
@@ -142,6 +183,27 @@ class ClusteringModel : public InternalModel {
     }
   }
 
+  // MissingValueWeights holds one Qi per ClusteringField. JPMML rejects an
+  // array of another length when it first needs it; this refuses it at load.
+  void parse_missing_value_weights(const XmlNode& node) {
+    if (!node.exists_child("MissingValueWeights")) return;
+    const XmlNode arr = node.get_child("MissingValueWeights").get_child("Array");
+    for (const auto& v : parse_array(arr.value())) missing_value_weights.push_back(to_double(v));
+    if (missing_value_weights.size() != fields.size())
+      throw cpmml::ParsingException("ClusteringModel: MissingValueWeights has " +
+                                    std::to_string(missing_value_weights.size()) + " values for " +
+                                    std::to_string(fields.size()) + " ClusteringFields");
+  }
+
+  double missing_value_weight(size_t i) const {
+    return missing_value_weights.empty() ? 1.0 : missing_value_weights[i];
+  }
+
+  bool is_binary_metric() const {
+    return metric == DistanceMetric::SIMPLE_MATCHING || metric == DistanceMetric::JACCARD ||
+           metric == DistanceMetric::TANIMOTO || metric == DistanceMetric::BINARY_SIMILARITY;
+  }
+
   void parse_clusters(const XmlNode& node) {
     int idx = 1;
     for (const auto& cl : node.get_childs("Cluster")) {
@@ -160,17 +222,59 @@ class ClusteringModel : public InternalModel {
     }
   }
 
-  double compute_distance_to(const Eigen::VectorXd& q, const Eigen::VectorXd& c) const {
-    const size_t n = fields.size();
-    return compute_distance(
-        metric, n, minkowski_p, [&](size_t i) { return q[i]; }, [&](size_t i) { return c[i]; },
-        [&](size_t i) { return fields[i].field_weight; }, [&](size_t i) { return fields[i].compare_func; },
-        [&](size_t i) { return fields[i].similarity_scale; });
+  // The query's values, which ClusteringFields have one, and AdjustM. A
+  // missing entry's value is never read.
+  struct Query {
+    Eigen::VectorXd values;
+    std::vector<size_t> present;
+    double adjust = 1.0;
+  };
+
+  // Callers have checked has_missing_input, so the present Qi sum to > 0.
+  Query build_query(const Sample& sample) const {
+    Query query;
+    query.values = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(fields.size()));
+    double total_weight = 0.0;
+    double present_weight = 0.0;
+    for (size_t i = 0; i < fields.size(); i++) {
+      total_weight += missing_value_weight(i);
+      const Value& value = sample[fields[i].field_index].value;
+      if (value.missing) continue;
+      query.values[static_cast<Eigen::Index>(i)] = value.value;
+      query.present.push_back(i);
+      present_weight += missing_value_weight(i);
+    }
+    if (query.present.size() < fields.size()) query.adjust = total_weight / present_weight;
+
+    return query;
+  }
+
+  // SumNM over the present ClusteringFields, then AdjustM where each
+  // aggregation puts it: inside the root for euclidean and minkowski, outside
+  // for squaredEuclidean, cityBlock and chebychev. With no field missing
+  // AdjustM is 1 and this is the plain distance.
+  double compute_distance_to(const Query& q, const Eigen::VectorXd& c) const {
+    const std::vector<size_t>& present = q.present;
+    const double distance = compute_distance(
+        metric, present.size(), minkowski_p, [&](size_t j) { return q.values[present[j]]; },
+        [&](size_t j) { return c[present[j]]; }, [&](size_t j) { return fields[present[j]].field_weight; },
+        [&](size_t j) { return fields[present[j]].compare_func; },
+        [&](size_t j) { return fields[present[j]].similarity_scale; });
+    if (present.size() == fields.size()) return distance;
+
+    switch (metric) {
+      case DistanceMetric::EUCLIDEAN:
+        return distance * std::sqrt(q.adjust);
+      case DistanceMetric::MINKOWSKI:
+        return distance * std::pow(q.adjust, 1.0 / minkowski_p);
+      default:
+        return distance * q.adjust;
+    }
   }
 
   // clusters is non-empty: the constructor refuses a model without one.
   Nearest nearest_of(const Sample& sample) const {
-    const Eigen::VectorXd q = ::build_query(sample, fields, "ClusteringField");
+    const Query q = build_query(sample);
     // compute_distance is uniformly a dissimilarity (similarity measures are
     // flipped to 1−s), so the closest cluster is always the minimum.
     Nearest best;
