@@ -109,8 +109,19 @@ class NeuralNetworkModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A NeuralInput whose value is missing makes the model yield no prediction.
+  // The NeuralNetwork spec says nothing about missing inputs and the network
+  // has no arithmetic for one; JPMML 1.7.7 returns no prediction, for
+  // regression and classification alike, whether the NeuralInput is a plain
+  // FieldRef, a NormContinuous or NormDiscrete without mapMissingTo, a
+  // NormContinuous outlier under outliers="asMissingValues", or an input no
+  // neuron is connected to. A NeuralInput that defines its own substitute
+  // (mapMissingTo, or missingValueReplacement in MiningSchema, applied
+  // earlier) is not missing and scores normally.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    Eigen::VectorXd out = forward_pass(sample);
+    Eigen::VectorXd x;
+    if (!neural_input_values(sample, x)) return std::make_unique<InternalScore>();
+    Eigen::VectorXd out = forward_pass(std::move(x));
     std::vector<double> scores = collect_scores(out);
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
@@ -122,7 +133,9 @@ class NeuralNetworkModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
-    Eigen::VectorXd out = forward_pass(sample);
+    Eigen::VectorXd x;
+    if (!neural_input_values(sample, x)) return "";
+    Eigen::VectorXd out = forward_pass(std::move(x));
     std::vector<double> scores = collect_scores(out);
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
@@ -221,21 +234,26 @@ class NeuralNetworkModel : public InternalModel {
 
   // --- Forward pass ---
 
-  Eigen::VectorXd forward_pass(const Sample& sample) const {
+  // Applies the NeuralInput DerivedFields and fills x with their values.
+  // Returns false, leaving x incomplete, if any of them is missing: the one
+  // place the no-prediction rule above is decided.
+  bool neural_input_values(const Sample& sample, Eigen::VectorXd& x) const {
     // Build a local mutable sample large enough to hold any new indices
     // that NeuralInput DerivedFields may have registered after base_sample.
     Sample local(indexer->size());
     for (size_t i = 0; i < sample.features.size(); i++) local[i] = sample.features[i];
 
-    // Apply NeuralInput DerivedField transformations and read input vector
-    Eigen::VectorXd x(static_cast<Eigen::Index>(neural_inputs.size()));
+    x.resize(static_cast<Eigen::Index>(neural_inputs.size()));
     for (size_t i = 0; i < neural_inputs.size(); i++) {
       neural_inputs[i].derived_field.prepare(local);
       const Value& v = local[neural_inputs[i].derived_field.index].value;
-      if (v.missing) throw cpmml::MissingValueException("missing value for NeuralInput");
+      if (v.missing) return false;
       x[static_cast<Eigen::Index>(i)] = v.value;
     }
+    return true;
+  }
 
+  Eigen::VectorXd forward_pass(Eigen::VectorXd x) const {
     // Layer-by-layer forward pass
     for (const auto& layer : layers) {
       Eigen::VectorXd pre(layer.weights.rows());
