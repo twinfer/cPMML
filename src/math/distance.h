@@ -9,6 +9,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -36,30 +37,6 @@ struct ComparisonField {
   double field_weight = 1.0;
   double similarity_scale = 1.0;
 };
-
-/**
- * The query vector for a distance computation: one entry per comparison field,
- * read from the prepared sample in field order.
- *
- * ClusteringModel and NearestNeighborModel each carried their own copy of this,
- * differing only in the wording of the exception -- neither of which said which
- * field was missing. Templated on the sample type so math/ does not depend on
- * core/.
- */
-template <class SampleT>
-inline Eigen::VectorXd build_query(const SampleT& sample, const std::vector<ComparisonField>& fields,
-                                   const char* element) {
-  Eigen::VectorXd query(static_cast<Eigen::Index>(fields.size()));
-  for (size_t i = 0; i < fields.size(); i++) {
-    const auto& value = sample[fields[i].field_index].value;
-    if (value.missing)
-      throw cpmml::MissingValueException(std::string("missing value for ") + element + " \"" + fields[i].field_name +
-                                         "\"");
-    query[static_cast<Eigen::Index>(i)] = value.value;
-  }
-
-  return query;
-}
 
 // COMPARE-FUNCTION is spelled absDiff / gaussSim / delta / equal. This used to
 // require the caller to lower-case first, and NearestNeighborModel did not:
@@ -160,45 +137,14 @@ double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, Get
       for (size_t i = 0; i < n; i++) sum += w(i) * std::pow(field_compare(q(i), r(i), cf(i), sc(i)), minkowski_p);
       return std::pow(sum, 1.0 / minkowski_p);
     }
-    case DistanceMetric::SIMPLE_MATCHING: {
-      int match = 0;
-      for (size_t i = 0; i < n; i++)
-        if ((q(i) > 0.5) == (r(i) > 0.5)) match++;
-      return (n > 0) ? 1.0 - static_cast<double>(match) / n : 0.0;
-    }
-    case DistanceMetric::JACCARD: {
-      int a11 = 0, union_count = 0;
-      for (size_t i = 0; i < n; i++) {
-        bool xi = q(i) > 0.5, yi = r(i) > 0.5;
-        if (xi || yi) union_count++;
-        if (xi && yi) a11++;
-      }
-      return (union_count > 0) ? 1.0 - static_cast<double>(a11) / union_count : 0.0;
-    }
-    case DistanceMetric::TANIMOTO: {
-      int a11 = 0, a10 = 0, a01 = 0, a00 = 0;
-      for (size_t i = 0; i < n; i++) {
-        bool xi = q(i) > 0.5, yi = r(i) > 0.5;
-        if (xi && yi)
-          a11++;
-        else if (xi)
-          a10++;
-        else if (yi)
-          a01++;
-        else
-          a00++;
-      }
-      int denom = a11 + 2 * (a10 + a01) + a00;
-      return (denom > 0) ? 1.0 - static_cast<double>(a11 + a00) / denom : 0.0;
-    }
+    case DistanceMetric::SIMPLE_MATCHING:
+    case DistanceMetric::JACCARD:
+    case DistanceMetric::TANIMOTO:
     case DistanceMetric::BINARY_SIMILARITY:
-      // Not binarySimilarity: its eight c/d parameters are required and are
-      // not seen here, and this is simpleMatching, which binarySimilarity is
-      // only for c11 = c00 = 1, c10 = c01 = 0 and equal d's (all eight at 1
-      // gives s = 1 for every pair, not simpleMatching). NearestNeighborModel
-      // scores binarySimilarity with binary_similarity() below and never
-      // reaches this. ClusteringModel still does: a known gap there.
-      return compute_distance(DistanceMetric::SIMPLE_MATCHING, n, minkowski_p, q, r, w, cf, sc);
+      // The binary measures are similarities over 0/1 counts, with their own
+      // parameters and undefined cases: binary_measure_similarity below. This
+      // used to score them here, binarySimilarity as simpleMatching.
+      throw std::logic_error("compute_distance: binary measures are scored by binary_measure_similarity");
   }
   return 0.0;
 }
@@ -268,29 +214,120 @@ inline BinarySimilarityParams parse_binary_similarity(const XmlNode& node) {
   return p;
 }
 
+inline bool is_binary_metric(DistanceMetric metric) {
+  return metric == DistanceMetric::SIMPLE_MATCHING || metric == DistanceMetric::JACCARD ||
+         metric == DistanceMetric::TANIMOTO || metric == DistanceMetric::BINARY_SIMILARITY;
+}
+
 /**
- * The binarySimilarity similarity s of a query and a row, with a field read as
- * 1 when > 0.5, as the other binary measures here do. A zero denominator leaves
- * s undefined: NaN is returned, for the caller to turn into no prediction
- * (JPMML 1.7.7 throws "Undefined result").
+ * The similarity s of a query x and a row y under one of the binary measures
+ * of ComparisonMeasure (ClusteringModel.html, 4.4.1), over the counts aXY of
+ * fields with x = X and y = Y:
+ *
+ *   simpleMatching    (a11 + a00) / (a11 + a10 + a01 + a00)
+ *   jaccard           a11 / (a11 + a10 + a01)
+ *   tanimoto          (a11 + a00) / (a11 + 2*(a10 + a01) + a00)
+ *   binarySimilarity  (c11*a11 + c10*a10 + c01*a01 + c00*a00) /
+ *                     (d11*a11 + d10*a10 + d01*a01 + d00*a00)
+ *
+ * `params` is read for binarySimilarity only. NaN, for the caller to turn into
+ * no prediction, where s is undefined, as JPMML 1.7.7 throws there:
+ *  - a value other than 0 or 1 on either side, which the counts do not cover
+ *    (JPMML: "Expected false or true, got 0.7"). Values used to be read as 1
+ *    when > 0.5;
+ *  - a zero denominator (JPMML: "Undefined result"): jaccard for an all-zero
+ *    query against an all-zero row, which used to score as s = 1, and
+ *    binarySimilarity wherever the d's of the present counts sum to 0.
+ * fieldWeight and compareFunction take no part, as in JPMML.
  */
 template <typename GetQuery, typename GetRow>
-double binary_similarity(const BinarySimilarityParams& p, size_t n, GetQuery q, GetRow r) {
+double binary_measure_similarity(DistanceMetric metric, const BinarySimilarityParams& params, size_t n, GetQuery q,
+                                 GetRow r) {
+  constexpr double undefined = std::numeric_limits<double>::quiet_NaN();
   double a00 = 0.0, a01 = 0.0, a10 = 0.0, a11 = 0.0;
   for (size_t i = 0; i < n; i++) {
-    const bool xi = q(i) > 0.5, yi = r(i) > 0.5;
-    if (xi && yi)
-      a11++;
-    else if (xi)
-      a10++;
-    else if (yi)
-      a01++;
+    const double xi = q(i), yi = r(i);
+    if ((xi != 0.0 && xi != 1.0) || (yi != 0.0 && yi != 1.0)) return undefined;
+    if (xi == 1.0)
+      (yi == 1.0 ? a11 : a10)++;
     else
-      a00++;
+      (yi == 1.0 ? a01 : a00)++;
   }
-  const double num = p.c11 * a11 + p.c10 * a10 + p.c01 * a01 + p.c00 * a00;
-  const double den = p.d11 * a11 + p.d10 * a10 + p.d01 * a01 + p.d00 * a00;
-  return den != 0.0 ? num / den : std::numeric_limits<double>::quiet_NaN();
+
+  double num = 0.0, den = 0.0;
+  switch (metric) {
+    case DistanceMetric::SIMPLE_MATCHING:
+      num = a11 + a00;
+      den = a11 + a10 + a01 + a00;
+      break;
+    case DistanceMetric::JACCARD:
+      num = a11;
+      den = a11 + a10 + a01;
+      break;
+    case DistanceMetric::TANIMOTO:
+      num = a11 + a00;
+      den = a11 + 2.0 * (a10 + a01) + a00;
+      break;
+    case DistanceMetric::BINARY_SIMILARITY:
+      num = params.c11 * a11 + params.c10 * a10 + params.c01 * a01 + params.c00 * a00;
+      den = params.d11 * a11 + params.d10 * a10 + params.d01 * a01 + params.d00 * a00;
+      break;
+    default:
+      throw std::logic_error("binary_measure_similarity: not a binary measure");
+  }
+  return den != 0.0 ? num / den : undefined;
+}
+
+/**
+ * The query of a distance computation: one value per comparison field, which
+ * of them are present, and AdjustM = sum[Qi] / sum[nonmissing(Xi)*Qi] from the
+ * ComparisonMeasure text. A missing entry's value is never read.
+ * ClusteringModel takes Qi from MissingValueWeights; a NearestNeighborModel has
+ * none, so every Qi is 1 and AdjustM = n / present. Each model kept its own
+ * copy of this. Callers have checked that the present Qi sum to > 0.
+ */
+struct Query {
+  Eigen::VectorXd values;
+  std::vector<size_t> present;
+  double adjust = 1.0;
+};
+
+// Templated on the sample type so math/ does not depend on core/.
+template <class SampleT, class GetQi>
+Query build_query(const SampleT& sample, const std::vector<ComparisonField>& fields, GetQi qi) {
+  Query query;
+  query.values = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(fields.size()));
+  double total_weight = 0.0;
+  double present_weight = 0.0;
+  for (size_t i = 0; i < fields.size(); i++) {
+    total_weight += qi(i);
+    const auto& value = sample[fields[i].field_index].value;
+    if (value.missing) continue;
+    query.values[static_cast<Eigen::Index>(i)] = value.value;
+    query.present.push_back(i);
+    present_weight += qi(i);
+  }
+  if (query.present.size() < fields.size()) query.adjust = total_weight / present_weight;
+
+  return query;
+}
+
+/**
+ * A center-based distance over the present fields (SumNM), with AdjustM
+ * applied where each aggregation puts it: inside the root for euclidean and
+ * minkowski, outside it for squaredEuclidean, cityBlock and chebychev. With
+ * nothing missing AdjustM is 1 and this is the plain distance.
+ */
+inline double apply_adjust(DistanceMetric metric, double distance, double adjust, double minkowski_p) {
+  if (adjust == 1.0) return distance;
+  switch (metric) {
+    case DistanceMetric::EUCLIDEAN:
+      return distance * std::sqrt(adjust);
+    case DistanceMetric::MINKOWSKI:
+      return distance * std::pow(adjust, 1.0 / minkowski_p);
+    default:
+      return distance * adjust;
+  }
 }
 
 // Convenience overload without per-field similarityScale (scale = 1).

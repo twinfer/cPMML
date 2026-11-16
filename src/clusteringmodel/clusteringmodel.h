@@ -48,6 +48,7 @@ class ClusteringModel : public InternalModel {
 
   DistanceMetric metric;
   double minkowski_p;
+  BinarySimilarityParams binary_params;  // read only for binarySimilarity
   bool is_similarity;  // kind="similarity"; compute_distance flips similarities
                        // to dissimilarities, so selection always minimizes
   CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // model-level ComparisonMeasure/@compareFunction
@@ -111,18 +112,24 @@ class ClusteringModel : public InternalModel {
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return std::make_unique<InternalScore>();
-    const std::string winner = find_cluster(sample);
-    return std::make_unique<InternalScore>(winner);
+    const Nearest best = nearest_of(sample);
+    if (!best.defined) return std::make_unique<InternalScore>();
+    return std::make_unique<InternalScore>(clusters[best.index].id);
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return "";
-    return find_cluster(sample);
+    const Nearest best = nearest_of(sample);
+    return best.defined ? clusters[best.index].id : "";
   }
 
+  // defined is false when the measure is undefined against some cluster (a
+  // binary measure on a value other than 0/1, or with a zero denominator):
+  // the model gives no prediction, where JPMML 1.7.7 throws.
   struct Nearest {
     size_t index = 0;
     double distance = std::numeric_limits<double>::max();
+    bool defined = true;
   };
 
   // The nearest cluster and the dissimilarity to it, with the full
@@ -132,7 +139,8 @@ class ClusteringModel : public InternalModel {
   // the distance alone, which is why the divisor could not be applied.
   // With a ClusteringField missing the distance carries AdjustM. Where the
   // model gives no prediction (has_missing_input) there is no nearest cluster
-  // and this throws MissingValueException, as it did for any missing field.
+  // and this throws MissingValueException, as it did for any missing field;
+  // where the measure is undefined it throws EvaluationException.
   Nearest nearest(const std::unordered_map<std::string, std::string>& sample) const {
     Value::ScopedIndexer _scope(indexer.get());
     Sample internal_sample = base_sample;
@@ -143,7 +151,10 @@ class ClusteringModel : public InternalModel {
 
     if (has_missing_input(internal_sample))
       throw cpmml::MissingValueException("ClusteringModel: no distance defined for the missing ClusteringFields");
-    return nearest_of(internal_sample);
+    const Nearest best = nearest_of(internal_sample);
+    if (!best.defined)
+      throw cpmml::EvaluationException("ClusteringModel: the similarity measure is undefined for this record");
+    return best;
   }
 
  private:
@@ -162,11 +173,15 @@ class ClusteringModel : public InternalModel {
       minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
       return;
     }
-    // Similarity measures (aggregated as 1−s dissimilarities in compute_distance)
+    // Similarity measures (ranked as 1−s dissimilarities, binary_measure_similarity)
     if (cm.exists_child("simpleMatching")) { metric = DistanceMetric::SIMPLE_MATCHING; return; }
     if (cm.exists_child("jaccard")) { metric = DistanceMetric::JACCARD; return; }
     if (cm.exists_child("tanimoto")) { metric = DistanceMetric::TANIMOTO; return; }
-    if (cm.exists_child("binarySimilarity")) { metric = DistanceMetric::BINARY_SIMILARITY; return; }
+    if (cm.exists_child("binarySimilarity")) {
+      metric = DistanceMetric::BINARY_SIMILARITY;
+      binary_params = parse_binary_similarity(cm.get_child("binarySimilarity"));
+      return;
+    }
     // default: euclidean
   }
 
@@ -198,10 +213,7 @@ class ClusteringModel : public InternalModel {
     return missing_value_weights.empty() ? 1.0 : missing_value_weights[i];
   }
 
-  bool is_binary_metric() const {
-    return metric == DistanceMetric::SIMPLE_MATCHING || metric == DistanceMetric::JACCARD ||
-           metric == DistanceMetric::TANIMOTO || metric == DistanceMetric::BINARY_SIMILARITY;
-  }
+  bool is_binary_metric() const { return ::is_binary_metric(metric); }
 
   void parse_clusters(const XmlNode& node) {
     int idx = 1;
@@ -221,54 +233,30 @@ class ClusteringModel : public InternalModel {
     }
   }
 
-  // The query's values, which ClusteringFields have one, and AdjustM. A
-  // missing entry's value is never read.
-  struct Query {
-    Eigen::VectorXd values;
-    std::vector<size_t> present;
-    double adjust = 1.0;
-  };
-
   // Callers have checked has_missing_input, so the present Qi sum to > 0.
   Query build_query(const Sample& sample) const {
-    Query query;
-    query.values = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(fields.size()));
-    double total_weight = 0.0;
-    double present_weight = 0.0;
-    for (size_t i = 0; i < fields.size(); i++) {
-      total_weight += missing_value_weight(i);
-      const Value& value = sample[fields[i].field_index].value;
-      if (value.missing) continue;
-      query.values[static_cast<Eigen::Index>(i)] = value.value;
-      query.present.push_back(i);
-      present_weight += missing_value_weight(i);
-    }
-    if (query.present.size() < fields.size()) query.adjust = total_weight / present_weight;
-
-    return query;
+    return ::build_query(sample, fields, [&](size_t i) { return missing_value_weight(i); });
   }
 
   // SumNM over the present ClusteringFields, then AdjustM where each
-  // aggregation puts it: inside the root for euclidean and minkowski, outside
-  // for squaredEuclidean, cityBlock and chebychev. With no field missing
-  // AdjustM is 1 and this is the plain distance.
+  // aggregation puts it (apply_adjust).
+  //
+  // The binary measures are similarities s, ranked as the dissimilarity 1 - s;
+  // they are only reached with every field present (has_missing_input), and
+  // are NaN where s is undefined (binary_measure_similarity). binarySimilarity
+  // used to be scored as simpleMatching here, its c/d parameters unread.
   double compute_distance_to(const Query& q, const Eigen::VectorXd& c) const {
     const std::vector<size_t>& present = q.present;
+    if (is_binary_metric())
+      return 1.0 - binary_measure_similarity(
+                       metric, binary_params, present.size(), [&](size_t j) { return q.values[present[j]]; },
+                       [&](size_t j) { return c[present[j]]; });
     const double distance = compute_distance(
         metric, present.size(), minkowski_p, [&](size_t j) { return q.values[present[j]]; },
         [&](size_t j) { return c[present[j]]; }, [&](size_t j) { return fields[present[j]].field_weight; },
         [&](size_t j) { return fields[present[j]].compare_func; },
         [&](size_t j) { return fields[present[j]].similarity_scale; });
-    if (present.size() == fields.size()) return distance;
-
-    switch (metric) {
-      case DistanceMetric::EUCLIDEAN:
-        return distance * std::sqrt(q.adjust);
-      case DistanceMetric::MINKOWSKI:
-        return distance * std::pow(q.adjust, 1.0 / minkowski_p);
-      default:
-        return distance * q.adjust;
-    }
+    return apply_adjust(metric, distance, q.adjust, minkowski_p);
   }
 
   // clusters is non-empty: the constructor refuses a model without one.
@@ -276,9 +264,12 @@ class ClusteringModel : public InternalModel {
     const Query q = build_query(sample);
     // compute_distance is uniformly a dissimilarity (similarity measures are
     // flipped to 1−s), so the closest cluster is always the minimum.
+    // An undefined measure against any cluster leaves the record unscored,
+    // as JPMML evaluates every cluster and throws on the first.
     Nearest best;
     for (size_t i = 0; i < clusters.size(); i++) {
       const double d = compute_distance_to(q, clusters[i].centroid);
+      if (std::isnan(d)) return Nearest{0, std::numeric_limits<double>::quiet_NaN(), false};
       if (d < best.distance) {
         best.distance = d;
         best.index = i;
@@ -287,8 +278,6 @@ class ClusteringModel : public InternalModel {
 
     return best;
   }
-
-  std::string find_cluster(const Sample& sample) const { return clusters[nearest_of(sample).index].id; }
 };
 
 #endif

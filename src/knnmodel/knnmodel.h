@@ -369,30 +369,12 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Query vector ---
 
-  // The query's values, and which KNNInputs have one. A missing entry's value
-  // is never read.
-  struct Query {
-    Eigen::VectorXd values;
-    std::vector<size_t> present;
-  };
-
+  // Every Qi is 1: a NearestNeighborModel has no MissingValueWeights.
   Query build_query(const Sample& sample) const {
-    Query query;
-    query.values = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(knn_inputs.size()));
-    for (size_t i = 0; i < knn_inputs.size(); i++) {
-      const Value& value = sample[knn_inputs[i].field_index].value;
-      if (value.missing) continue;
-      query.values[static_cast<Eigen::Index>(i)] = value.value;
-      query.present.push_back(i);
-    }
-
-    return query;
+    return ::build_query(sample, knn_inputs, [](size_t) { return 1.0; });
   }
 
-  bool is_binary_metric() const {
-    return metric == DistanceMetric::SIMPLE_MATCHING || metric == DistanceMetric::JACCARD ||
-           metric == DistanceMetric::TANIMOTO || metric == DistanceMetric::BINARY_SIMILARITY;
-  }
+  bool is_binary_metric() const { return ::is_binary_metric(metric); }
 
   // "The weights are proportional to the inverse of the distance", with the
   // model's threshold ("a very small positive number to be used for weighted
@@ -413,43 +395,31 @@ class NearestNeighborModel : public InternalModel {
   // --- Distance computation (uses shared math/distance.h) ---
 
   // SumNM over the present KNNInputs, then AdjustM (all Qi = 1) applied where
-  // each aggregation puts it: inside the root for euclidean and minkowski,
-  // outside for the rest. With no input missing AdjustM is 1 and this is the
-  // plain distance.
+  // each aggregation puts it (apply_adjust).
   //
-  // binarySimilarity is a similarity s with its own parameters; like the other
-  // binary measures it is ranked as the dissimilarity 1 - s. It is only
-  // reached with every input present (has_missing_input), and is NaN where s
-  // is undefined.
+  // The binary measures are similarities s, ranked as the dissimilarity 1 - s.
+  // They are only reached with every input present (has_missing_input), and
+  // are NaN where s is undefined (binary_measure_similarity).
   double compute_row_distance(const Query& query, Eigen::Index row) const {
     const Eigen::VectorXd train = training_features.row(row);
     const std::vector<size_t>& present = query.present;
-    if (metric == DistanceMetric::BINARY_SIMILARITY)
-      return 1.0 - binary_similarity(
-                       binary_params, present.size(), [&](size_t j) { return query.values[present[j]]; },
+    if (is_binary_metric())
+      return 1.0 - binary_measure_similarity(
+                       metric, binary_params, present.size(), [&](size_t j) { return query.values[present[j]]; },
                        [&](size_t j) { return train[present[j]]; });
     const double distance = compute_distance(
         metric, present.size(), minkowski_p, [&](size_t j) { return query.values[present[j]]; },
         [&](size_t j) { return train[present[j]]; }, [&](size_t j) { return knn_inputs[present[j]].field_weight; },
         [&](size_t j) { return knn_inputs[present[j]].compare_func; });
-    if (present.size() == knn_inputs.size()) return distance;
-
-    const double adjust = static_cast<double>(knn_inputs.size()) / static_cast<double>(present.size());
-    switch (metric) {
-      case DistanceMetric::EUCLIDEAN:
-        return distance * std::sqrt(adjust);
-      case DistanceMetric::MINKOWSKI:
-        return distance * std::pow(adjust, 1.0 / minkowski_p);
-      default:  // squaredEuclidean, cityBlock, chebychev
-        return distance * adjust;
-    }
+    return apply_adjust(metric, distance, query.adjust, minkowski_p);
   }
 
   // --- K-nearest neighbor search ---
 
   // False, leaving `neighbors` empty, when the distance to some training
-  // instance is undefined (NaN: a binarySimilarity denominator of 0), which
-  // is no prediction. A NaN would also break partial_sort's ordering.
+  // instance is undefined (NaN: a binary measure on a value other than 0/1 or
+  // with a zero denominator), which is no prediction. A NaN would also break
+  // partial_sort's ordering.
   bool find_k_nearest(const Query& query, std::vector<std::pair<double, int>>& neighbors) const {
     const int n = static_cast<int>(training_features.rows());
     std::vector<std::pair<double, int>> distances(n);
