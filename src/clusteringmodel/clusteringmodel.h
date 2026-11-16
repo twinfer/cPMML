@@ -185,8 +185,25 @@ class ClusteringModel : public InternalModel {
     // default: euclidean
   }
 
+  // Only center fields (isCenterField="true", the default) are components of
+  // the cluster centers: "Only center fields correspond to the entries in the
+  // center vectors in order" (ClusteringModel, 4.4.1). A field with
+  // isCenterField="false" is not part of the distance, so it is not kept;
+  // fields, MissingValueWeights and every Cluster Array are then indexed by
+  // center field. Every ClusteringField used to be kept, so a non-center field
+  // shifted the fields after it onto the wrong center entries and read past
+  // the end of the Array. JPMML 1.7.7 validates the Array and
+  // MissingValueWeights lengths against the center fields too, but then
+  // throws IndexOutOfBoundsException when scoring such a model.
   void parse_clustering_fields(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& cf : node.get_childs("ClusteringField")) {
+      if (cf.exists_attribute("isCenterField")) {
+        const std::string is_center = cf.get_attribute("isCenterField");
+        if (is_center == "false") continue;
+        if (is_center != "true")
+          throw cpmml::ParsingException("ClusteringModel: invalid isCenterField \"" + is_center +
+                                        "\" on ClusteringField \"" + cf.get_attribute("field") + "\"");
+      }
       ClusteringField f;
       f.field_name = cf.get_attribute("field");
       f.field_index = indexer->get_index(f.field_name);
@@ -195,9 +212,13 @@ class ClusteringModel : public InternalModel {
       f.similarity_scale = cf.exists_attribute("similarityScale") ? to_double(cf.get_attribute("similarityScale")) : 1.0;
       fields.push_back(std::move(f));
     }
+    // With no center field there is no distance: every cluster would tie at 0
+    // and the first would always win. JPMML 1.7.7 throws "Undefined result" on
+    // every record of such a model.
+    if (fields.empty()) throw cpmml::ParsingException("ClusteringModel: no center ClusteringField");
   }
 
-  // MissingValueWeights holds one Qi per ClusteringField. JPMML rejects an
+  // MissingValueWeights holds one Qi per center ClusteringField. JPMML rejects an
   // array of another length when it first needs it; this refuses it at load.
   void parse_missing_value_weights(const XmlNode& node) {
     if (!node.exists_child("MissingValueWeights")) return;
@@ -206,7 +227,7 @@ class ClusteringModel : public InternalModel {
     if (missing_value_weights.size() != fields.size())
       throw cpmml::ParsingException("ClusteringModel: MissingValueWeights has " +
                                     std::to_string(missing_value_weights.size()) + " values for " +
-                                    std::to_string(fields.size()) + " ClusteringFields");
+                                    std::to_string(fields.size()) + " center ClusteringFields");
   }
 
   double missing_value_weight(size_t i) const {
@@ -227,6 +248,13 @@ class ClusteringModel : public InternalModel {
       const std::vector<std::string> vals = parse_array(arr.value());
       c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
       for (size_t i = 0; i < vals.size(); i++) c.centroid[static_cast<Eigen::Index>(i)] = to_double(vals[i]);
+      // One entry per center ClusteringField, as JPMML 1.7.7 requires
+      // (InvalidElementException). A shorter Array used to be read past its
+      // end, a longer one had its extra entries ignored.
+      if (vals.size() != fields.size())
+        throw cpmml::ParsingException("ClusteringModel: Cluster \"" + c.id + "\" has " + std::to_string(vals.size()) +
+                                      " center values for " + std::to_string(fields.size()) +
+                                      " center ClusteringFields");
 
       clusters.push_back(std::move(c));
       idx++;
