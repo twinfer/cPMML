@@ -113,7 +113,12 @@ set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "")
 if(BUILD_TYPE MATCHES "Debug")
     set(VERBOSE ON)
 endif()
-set(CMAKE_EXPORT_COMPILE_COMMANDS ${VERBOSE})
+# Debug builds turn compile_commands.json on; nothing turns it off, so a
+# -DCMAKE_EXPORT_COMPILE_COMMANDS=ON from the user or an IDE still covers
+# cPMML's own sources and not only the dependencies declared above.
+if(VERBOSE)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
 set(CMAKE_VERBOSE_MAKEFILE ${VERBOSE})
 if (CMAKE_GENERATOR MATCHES "Makefiles")
     set_property(GLOBAL PROPERTY TARGET_MESSAGES ${VERBOSE})
