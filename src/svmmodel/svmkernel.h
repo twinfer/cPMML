@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <string>
+#include <utility>
 
 #include "core/xmlnode.h"
 #include "utils/utils.h"
@@ -24,33 +25,48 @@
 enum class SvmKernelType { LINEAR, POLYNOMIAL, RBF, SIGMOID };
 
 struct SvmKernel {
-  SvmKernelType type = SvmKernelType::RBF;
+  SvmKernelType type = SvmKernelType::LINEAR;
   double gamma = 1.0;
-  double coef0 = 0.0;
-  double degree = 3.0;
+  double coef0 = 1.0;
+  double degree = 1.0;
 
   SvmKernel() = default;
 
+  /**
+   * Reads the KERNEL-TYPE choice of a SupportVectorMachineModel. The element
+   * names are the PMML 4.4 ones (LinearKernelType, PolynomialKernelType,
+   * RadialBasisKernelType, SigmoidKernelType) and the attribute defaults are
+   * the schema's: gamma = 1, coef0 = 1, degree = 1. A model with no kernel, or
+   * with more than one, is rejected: scoring it with a guessed kernel would
+   * return plausible numbers that mean nothing.
+   */
   static SvmKernel from_node(const XmlNode& node) {
+    static const std::pair<const char*, SvmKernelType> kinds[] = {
+        {"LinearKernelType", SvmKernelType::LINEAR},
+        {"PolynomialKernelType", SvmKernelType::POLYNOMIAL},
+        {"RadialBasisKernelType", SvmKernelType::RBF},
+        {"SigmoidKernelType", SvmKernelType::SIGMOID},
+    };
+
     SvmKernel k;
-    if (node.exists_child("LinearKernel")) {
-      k.type = SvmKernelType::LINEAR;
-    } else if (node.exists_child("PolynomialKernel")) {
-      k.type = SvmKernelType::POLYNOMIAL;
-      const XmlNode n = node.get_child("PolynomialKernel");
-      if (n.exists_attribute("gamma")) k.gamma = to_double(n.get_attribute("gamma"));
-      if (n.exists_attribute("coef0")) k.coef0 = to_double(n.get_attribute("coef0"));
-      if (n.exists_attribute("degree")) k.degree = to_double(n.get_attribute("degree"));
-    } else if (node.exists_child("RadialBasisKernel")) {
-      k.type = SvmKernelType::RBF;
-      const XmlNode n = node.get_child("RadialBasisKernel");
-      if (n.exists_attribute("gamma")) k.gamma = to_double(n.get_attribute("gamma"));
-    } else if (node.exists_child("SigmoidKernel")) {
-      k.type = SvmKernelType::SIGMOID;
-      const XmlNode n = node.get_child("SigmoidKernel");
-      if (n.exists_attribute("gamma")) k.gamma = to_double(n.get_attribute("gamma"));
-      if (n.exists_attribute("coef0")) k.coef0 = to_double(n.get_attribute("coef0"));
+    const char* found = nullptr;
+    for (const auto& [element, type] : kinds) {
+      if (!node.exists_child(element)) continue;
+      if (found)
+        throw cpmml::ParsingException(std::string("SupportVectorMachineModel: more than one kernel (") + found +
+                                      ", " + element + ")");
+      found = element;
+      k.type = type;
     }
+    if (!found)
+      throw cpmml::ParsingException(
+          "SupportVectorMachineModel: missing or unsupported kernel, expected one of LinearKernelType, "
+          "PolynomialKernelType, RadialBasisKernelType, SigmoidKernelType");
+
+    const XmlNode n = node.get_child(found);
+    k.gamma = attribute_or(n, "gamma", 1.0);
+    k.coef0 = attribute_or(n, "coef0", 1.0);
+    k.degree = attribute_or(n, "degree", 1.0);
     return k;
   }
 
@@ -66,6 +82,12 @@ struct SvmKernel {
         return std::tanh(gamma * x.dot(sv) + coef0);
     }
     return 0.0;
+  }
+
+ private:
+  // Absent → the schema default; present but not a number → load error (to_double throws).
+  static double attribute_or(const XmlNode& n, const char* name, double default_value) {
+    return n.exists_attribute(name) ? to_double(n.get_attribute(name)) : default_value;
   }
 };
 

@@ -9,6 +9,7 @@
 
 #include <Eigen/Dense>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -33,7 +34,14 @@
  * - All four kernel types (linear, polynomial, RBF, sigmoid)
  * - Both SupportVectors and Coefficients representations
  * - Classification (OneAgainstAll, OneAgainstOne) and regression
- * - Sparse (REAL-SparseArray) and dense (REAL-Array) vector storage
+ * - Sparse (REAL-SparseArray) and dense (Array type="real") vector storage
+ * - VectorFields made of FieldRef and CategoricalPredictor entries
+ *
+ * Classification follows PMML 4.4. With maxWins="false" (the default) the LOWER
+ * value wins: a binary or one-against-one machine votes for targetCategory when
+ * its value is below the threshold and for alternateTargetCategory otherwise,
+ * and one-against-all predicts the targetCategory of the machine with the
+ * smallest value. maxWins="true" turns both comparisons around.
  */
 class SupportVectorMachineModel : public InternalModel {
  public:
@@ -42,7 +50,7 @@ class SupportVectorMachineModel : public InternalModel {
     std::string target_category;
     std::string alternate_category;
     double bias = 0.0;       // absoluteValue from Coefficients element
-    double threshold = 0.0;  // for OneAgainstOne voting
+    double threshold = 0.0;  // binary / OneAgainstOne discrimination boundary
 
     // SupportVectors representation: pairs of (αᵢ, xᵢ)
     std::vector<double> alphas;
@@ -65,10 +73,20 @@ class SupportVectorMachineModel : public InternalModel {
   SvmKernel kernel;
   bool use_support_vectors;  // false → Coefficients representation
   bool is_ovo;               // false → OneAgainstAll
+  bool max_wins;             // false (spec default) → the lower value wins
   double model_threshold;
 
-  // Ordered field indices: position i in the feature vector maps to sample slot
-  std::vector<size_t> field_indices;
+  // One entry of VectorFields. A FieldRef contributes the field's value; a
+  // CategoricalPredictor contributes 1 when the field equals `category` and 0
+  // otherwise (its coefficient is ignored in this model, per the spec).
+  struct VectorField {
+    size_t index;
+    bool is_indicator = false;
+    Value category;
+  };
+
+  // Ordered entries: position i in the feature vector is built from fields[i]
+  std::vector<VectorField> vector_fields;
 
   std::vector<SvmMachine> machines;
   std::vector<std::string> classes;
@@ -84,7 +102,13 @@ class SupportVectorMachineModel : public InternalModel {
         kernel(SvmKernel::from_node(node)),
         use_support_vectors(to_lower(node.get_attribute("svmRepresentation")) != "coefficients"),
         is_ovo(to_lower(node.get_attribute("classificationMethod")) == "oneagainstone"),
+        max_wins(node.get_bool_attribute("maxWins")),
         model_threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 0.0) {
+    // The Coefficients form is the hyperplane w.x + b, which only exists for the
+    // linear kernel; scoring it with any other declared kernel would ignore that kernel.
+    if (!use_support_vectors && kernel.type != SvmKernelType::LINEAR)
+      throw cpmml::ParsingException(
+          "SupportVectorMachineModel: svmRepresentation=\"Coefficients\" requires LinearKernelType");
     parse_vector_fields(node, indexer);
 
     // VectorDictionary is only present in SupportVectors representation
@@ -94,14 +118,37 @@ class SupportVectorMachineModel : public InternalModel {
 
     for (const auto& svm_node : node.get_childs("SupportVectorMachine"))
       machines.push_back(parse_machine(svm_node, vector_dict));
+    if (machines.empty()) throw cpmml::ParsingException("SupportVectorMachineModel: no SupportVectorMachine");
 
-    // Spec attribute for binary OVA: the category predicted when the decision
-    // value does not exceed the threshold. Must be resolved before collecting
-    // the class list below.
+    // alternateBinaryTargetCategory is not a PMML 4.4 attribute (JPMML reads it
+    // from its own schema); here it only supplies a missing alternateTargetCategory.
+    // Must be resolved before collecting the class list below.
     if (node.exists_attribute("alternateBinaryTargetCategory"))
       for (auto& m : machines)
         if (m.alternate_category == "null" || m.alternate_category.empty())
           m.alternate_category = node.get_attribute("alternateBinaryTargetCategory");
+
+    // Binary model without alternateTargetCategory: take the other value the
+    // target's DataDictionary declares. Must run before the class list below.
+    if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && machines.size() == 1 &&
+        machines[0].alternate_category == "null") {
+      auto it = data_dictionary.datafields.find(mining_schema.target.name);
+      if (it != data_dictionary.datafields.end()) {
+        const Predicate& c = it->second.constraints;
+        for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
+          if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
+            for (const auto& v : pred.values) {
+              std::string lbl = v.svalue;
+              if (!lbl.empty() && lbl != machines[0].target_category) {
+                machines[0].alternate_category = lbl;
+                break;
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
 
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
       // Collect the distinct classes in document order. alternateTargetCategory
@@ -120,24 +167,21 @@ class SupportVectorMachineModel : public InternalModel {
       classes.push_back(mining_schema.target.name);
     }
 
-    // Infer alternate_category for binary OVA when not specified in PMML
-    if (!is_ovo && machines.size() == 1 && machines[0].alternate_category == "null") {
-      auto it = data_dictionary.datafields.find(mining_schema.target.name);
-      if (it != data_dictionary.datafields.end()) {
-        const Predicate& c = it->second.constraints;
-        for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
-          if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
-            for (const auto& v : pred.values) {
-              std::string lbl = v.svalue;
-              if (!lbl.empty() && lbl != machines[0].target_category) {
-                machines[0].alternate_category = lbl;
-                break;
-              }
-            }
-            break;
-          }
-        }
+    // Every machine of a classifier names its targetCategory, and a binary or
+    // one-against-one machine its alternateTargetCategory too: without them the
+    // model would "predict" the string "null".
+    const auto absent = [](const std::string& v) { return v.empty() || v == "null"; };
+    if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
+      for (const auto& m : machines) {
+        if (absent(m.target_category))
+          throw cpmml::ParsingException("SupportVectorMachineModel: SupportVectorMachine has no targetCategory");
+        if (votes_by_threshold() && absent(m.alternate_category))
+          throw cpmml::ParsingException("SupportVectorMachineModel: SupportVectorMachine for targetCategory '" +
+                                        m.target_category + "' has no alternateTargetCategory");
       }
+    } else if (machines.size() != 1) {
+      throw cpmml::ParsingException("SupportVectorMachineModel: regression needs exactly one SupportVectorMachine, got " +
+                                    std::to_string(machines.size()));
     }
   }
 
@@ -151,13 +195,29 @@ class SupportVectorMachineModel : public InternalModel {
       return std::make_unique<RegressionScore>(double_to_string(val), val, classes, std::vector<double>{val});
     }
 
-    std::vector<double> scores;
-    scores.reserve(machines.size());
-    for (const auto& m : machines) scores.push_back(m.decision(x, kernel));
+    std::vector<double> values;
+    values.reserve(machines.size());
+    for (const auto& m : machines) values.push_back(m.decision(x, kernel));
 
-    std::string winner = is_ovo ? predict_ovo(x) : predict_ova(scores);
-    const double best = *std::max_element(scores.begin(), scores.end());
-    return std::make_unique<RegressionScore>(winner, best, classes, scores);
+    // Per-class figures, aligned with `classes` (RegressionScore indexes the two
+    // vectors together): the machine value for one-against-all, the share of
+    // votes for binary and one-against-one.
+    std::vector<double> per_class(classes.size(), 0.0);
+    std::string winner;
+    double winner_value = 0.0;
+    if (votes_by_threshold()) {
+      std::vector<size_t> vote_order;
+      const std::vector<int> votes = count_votes(values, vote_order);
+      winner = classes[most_voted(votes, vote_order)];
+      for (size_t c = 0; c < classes.size(); c++) per_class[c] = double(votes[c]) / double(machines.size());
+      winner_value = per_class[class_index(winner)];
+    } else {
+      const size_t best = best_machine(values);
+      winner = machines[best].target_category;
+      winner_value = values[best];
+      for (size_t i = 0; i < machines.size(); i++) per_class[class_index(machines[i].target_category)] = values[i];
+    }
+    return std::make_unique<RegressionScore>(winner, winner_value, classes, per_class);
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
@@ -166,25 +226,47 @@ class SupportVectorMachineModel : public InternalModel {
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION)
       return double_to_string(machines[0].decision(x, kernel));
 
-    return is_ovo ? predict_ovo(x) : predict_ova_str(x);
+    std::vector<double> values;
+    values.reserve(machines.size());
+    for (const auto& m : machines) values.push_back(m.decision(x, kernel));
+
+    if (votes_by_threshold()) {
+      std::vector<size_t> vote_order;
+      const std::vector<int> votes = count_votes(values, vote_order);
+      return classes[most_voted(votes, vote_order)];
+    }
+    return machines[best_machine(values)].target_category;
   }
 
  private:
   // --- Feature vector construction ---
 
+  // VectorFields is a sequence of FieldRef and CategoricalPredictor in any
+  // order; the order is the order of the vector entries.
   void parse_vector_fields(const XmlNode& model_node, const std::shared_ptr<Indexer>& indexer) {
     if (!model_node.exists_child("VectorDictionary")) return;
     const XmlNode vf = model_node.get_child("VectorDictionary").get_child("VectorFields");
-    for (const auto& fr : vf.get_childs("FieldRef"))
-      field_indices.push_back(indexer->get_index(fr.get_attribute("field")));
+    for (const auto& child : vf.get_childs()) {
+      const std::string kind = child.name();
+      if (kind == "FieldRef") {
+        vector_fields.push_back({indexer->get_index(child.get_attribute("field")), false, Value()});
+      } else if (kind == "CategoricalPredictor") {
+        const std::string field = child.get_attribute("name");
+        vector_fields.push_back(
+            {indexer->get_index(field), true, Value(child.get_attribute("value"), indexer->get_type(field))});
+      } else if (kind != "Extension" && !kind.empty()) {
+        throw cpmml::ParsingException("SupportVectorMachineModel: unexpected element " + kind + " in VectorFields");
+      }
+    }
   }
 
   Eigen::VectorXd sample_to_vector(const Sample& sample) const {
-    Eigen::VectorXd x(static_cast<Eigen::Index>(field_indices.size()));
-    for (size_t i = 0; i < field_indices.size(); i++) {
-      const Value& v = sample[field_indices[i]].value;
+    Eigen::VectorXd x(static_cast<Eigen::Index>(vector_fields.size()));
+    for (size_t i = 0; i < vector_fields.size(); i++) {
+      const VectorField& f = vector_fields[i];
+      const Value& v = sample[f.index].value;
       if (v.missing) throw cpmml::MissingValueException("missing value for SVM vector field");
-      x[static_cast<Eigen::Index>(i)] = v.value;
+      x[static_cast<Eigen::Index>(i)] = f.is_indicator ? (v == f.category ? 1.0 : 0.0) : v.value;
     }
     return x;
   }
@@ -193,7 +275,7 @@ class SupportVectorMachineModel : public InternalModel {
 
   std::unordered_map<std::string, Eigen::VectorXd> parse_vector_dictionary(const XmlNode& dict_node) const {
     std::unordered_map<std::string, Eigen::VectorXd> result;
-    const size_t n_fields = field_indices.size();
+    const size_t n_fields = vector_fields.size();
 
     for (const auto& vi : dict_node.get_childs("VectorInstance")) {
       const std::string id = vi.get_attribute("id");
@@ -202,28 +284,54 @@ class SupportVectorMachineModel : public InternalModel {
     return result;
   }
 
-  // Parse a VectorInstance element — handles both REAL-SparseArray and REAL-Array
+  // Parse a VectorInstance element. PMML 4.4 allows exactly one of
+  // REAL-SparseArray or the REAL-ARRAY group, i.e. <Array type="real">.
   static Eigen::VectorXd parse_vector_instance(const XmlNode& vi, size_t n) {
-    Eigen::VectorXd vec = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(n));
+    const std::string id = vi.get_attribute("id");
+    const auto fail = [&id](const std::string& what) {
+      return cpmml::ParsingException("SupportVectorMachineModel: VectorInstance '" + id + "': " + what);
+    };
 
     if (vi.exists_child("REAL-SparseArray")) {
       const XmlNode sa = vi.get_child("REAL-SparseArray");
-      if (sa.exists_child("Indices") && sa.exists_child("REAL-Entries")) {
-        const std::vector<std::string> raw_indices = parse_array(sa.get_child("Indices").value());
-        const std::vector<std::string> entries = parse_array(sa.get_child("REAL-Entries").value());
-        for (size_t k = 0; k < raw_indices.size() && k < entries.size(); k++) {
-          if (raw_indices[k].empty()) continue;
-          // PMML sparse array indices are 1-based
-          const size_t idx = static_cast<size_t>(std::stoul(raw_indices[k])) - 1;
-          if (idx < n) vec[static_cast<Eigen::Index>(idx)] = to_double(entries[k]);
-        }
+      // Entries not listed take defaultValue (schema default 0).
+      const double fill = sa.exists_attribute("defaultValue") ? to_double(sa.get_attribute("defaultValue")) : 0.0;
+      Eigen::VectorXd vec = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(n), fill);
+      if (sa.exists_attribute("n") && to_double(sa.get_attribute("n")) != double(n))
+        throw fail("REAL-SparseArray n=" + sa.get_attribute("n") + " but VectorFields has " + std::to_string(n));
+
+      const std::vector<std::string> raw_indices =
+          sa.exists_child("Indices") ? parse_array(sa.get_child("Indices").value()) : std::vector<std::string>{};
+      const std::vector<std::string> entries =
+          sa.exists_child("REAL-Entries") ? parse_array(sa.get_child("REAL-Entries").value()) : std::vector<std::string>{};
+      if (raw_indices.size() != entries.size())
+        throw fail(std::to_string(raw_indices.size()) + " Indices but " + std::to_string(entries.size()) +
+                   " REAL-Entries");
+      for (size_t k = 0; k < raw_indices.size(); k++) {
+        // PMML sparse array indices are 1-based
+        const double pos = to_double(raw_indices[k]);
+        if (pos < 1 || pos > double(n) || pos != std::floor(pos)) throw fail("index " + raw_indices[k] + " out of range");
+        vec[static_cast<Eigen::Index>(pos) - 1] = to_double(entries[k]);
       }
-    } else if (vi.exists_child("REAL-Array")) {
-      const std::vector<std::string> entries = parse_array(vi.get_child("REAL-Array").value());
-      for (size_t k = 0; k < entries.size() && k < n; k++) vec[static_cast<Eigen::Index>(k)] = to_double(entries[k]);
+      return vec;
     }
 
-    return vec;
+    if (vi.exists_child("Array")) {
+      const XmlNode arr = vi.get_child("Array");
+      // REAL-ARRAY is an Array of type "real"; its optional n must match its entries.
+      if (arr.get_attribute("type") != "real") throw fail("Array type must be \"real\", got \"" + arr.get_attribute("type") + "\"");
+      const std::vector<std::string> entries = parse_array(arr.value());
+      if (arr.exists_attribute("n") && to_double(arr.get_attribute("n")) != double(entries.size()))
+        throw fail("Array n=" + arr.get_attribute("n") + " but it has " + std::to_string(entries.size()) + " entries");
+      if (entries.size() != n)
+        throw fail("Array has " + std::to_string(entries.size()) + " entries but VectorFields has " +
+                   std::to_string(n));
+      Eigen::VectorXd vec(static_cast<Eigen::Index>(n));
+      for (size_t k = 0; k < n; k++) vec[static_cast<Eigen::Index>(k)] = to_double(entries[k]);
+      return vec;
+    }
+
+    throw fail("expected REAL-SparseArray or Array");
   }
 
   // --- SupportVectorMachine parsing ---
@@ -246,21 +354,29 @@ class SupportVectorMachineModel : public InternalModel {
       m.alphas.reserve(sv_refs.size());
       m.support_vectors.reserve(sv_refs.size());
 
-      for (size_t i = 0; i < sv_refs.size() && i < coeff_refs.size(); i++) {
+      if (sv_refs.size() != coeff_refs.size())
+        throw cpmml::ParsingException("SupportVectorMachineModel: " + std::to_string(sv_refs.size()) +
+                                      " SupportVector but " + std::to_string(coeff_refs.size()) + " Coefficient");
+
+      for (size_t i = 0; i < sv_refs.size(); i++) {
         const std::string vid = sv_refs[i].get_attribute("vectorId");
         const auto it = vector_dict.find(vid);
-        if (it != vector_dict.end()) {
-          m.alphas.push_back(to_double(coeff_refs[i].get_attribute("value")));
-          m.support_vectors.push_back(it->second);
-        }
+        if (it == vector_dict.end())
+          throw cpmml::ParsingException("SupportVectorMachineModel: SupportVector references unknown vectorId '" +
+                                        vid + "'");
+        m.alphas.push_back(coeff_refs[i].get_double_attribute("value", 0.0));
+        m.support_vectors.push_back(it->second);
       }
     } else {
       // Coefficients representation: one weight per feature
       m.is_weight_vector = true;
       const std::vector<XmlNode> coeff_refs = coeff_node.get_childs("Coefficient");
       m.weight_vector = Eigen::VectorXd(static_cast<Eigen::Index>(coeff_refs.size()));
+      if (coeff_refs.size() != vector_fields.size())
+        throw cpmml::ParsingException("SupportVectorMachineModel: " + std::to_string(coeff_refs.size()) +
+                                      " Coefficient but " + std::to_string(vector_fields.size()) + " VectorFields");
       for (size_t i = 0; i < coeff_refs.size(); i++)
-        m.weight_vector[static_cast<Eigen::Index>(i)] = to_double(coeff_refs[i].get_attribute("value"));
+        m.weight_vector[static_cast<Eigen::Index>(i)] = coeff_refs[i].get_double_attribute("value", 0.0);
     }
 
     return m;
@@ -268,53 +384,55 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- Classification methods ---
 
-  std::string predict_ova(const std::vector<double>& scores) const {
-    if (machines.size() == 1)
-      return scores[0] > machines[0].threshold ? machines[0].target_category : machines[0].alternate_category;
+  // Binary (a single machine) and one-against-one both decide by comparing each
+  // machine's value with its threshold; one-against-all compares the machines'
+  // values with each other.
+  bool votes_by_threshold() const { return is_ovo || machines.size() == 1; }
+
+  // PMML 4.4: "If maxWins is true and the prediction is larger than the
+  // threshold or maxWins is false and the prediction is smaller than the
+  // threshold, the class label is the targetCategory attribute, otherwise, it is
+  // the alternateTargetCategory attribute." Equality goes to the alternate.
+  bool votes_for_target(const SvmMachine& m, double value) const {
+    return max_wins ? value > m.threshold : value < m.threshold;
+  }
+
+  size_t class_index(const std::string& cls) const {
+    return static_cast<size_t>(std::find(classes.begin(), classes.end(), cls) - classes.begin());
+  }
+
+  // Votes per class (aligned with `classes`). `order` receives the class
+  // indices in the order in which each class got its first vote.
+  std::vector<int> count_votes(const std::vector<double>& values, std::vector<size_t>& order) const {
+    std::vector<int> votes(classes.size(), 0);
+    order.clear();
+    for (size_t i = 0; i < machines.size(); i++) {
+      const SvmMachine& m = machines[i];
+      const size_t c = class_index(votes_for_target(m, values[i]) ? m.target_category : m.alternate_category);
+      if (votes[c]++ == 0) order.push_back(c);
+    }
+    return votes;
+  }
+
+  // "In case of a tie, the predicted class label is the first category with
+  // maximal number of votes". The spec does not say first in which order;
+  // JPMML 1.7.7 takes the tied class that received a vote first (machines in
+  // document order), and so does this.
+  static size_t most_voted(const std::vector<int>& votes, const std::vector<size_t>& order) {
+    size_t best = order.front();
+    for (const size_t c : order)
+      if (votes[c] > votes[best]) best = c;
+    return best;
+  }
+
+  // One-against-all: "Depending on the model attribute maxWins, the SVM with
+  // the largest or the smallest value determines the predicted class label."
+  // Ties go to the first machine.
+  size_t best_machine(const std::vector<double>& values) const {
     size_t best = 0;
-    for (size_t i = 1; i < scores.size(); i++)
-      if (scores[i] > scores[best]) best = i;
-    return machines[best].target_category;
-  }
-
-  std::string predict_ova_str(const Eigen::VectorXd& x) const {
-    if (machines.size() == 1) {
-      const double score = machines[0].decision(x, kernel);
-      return score > machines[0].threshold ? machines[0].target_category : machines[0].alternate_category;
-    }
-    double best_score = -std::numeric_limits<double>::max();
-    std::string best_class;
-    for (const auto& m : machines) {
-      const double score = m.decision(x, kernel);
-      if (score > best_score) {
-        best_score = score;
-        best_class = m.target_category;
-      }
-    }
-    return best_class;
-  }
-
-  std::string predict_ovo(const Eigen::VectorXd& x) const {
-    std::unordered_map<std::string, int> votes;
-    for (const auto& cls : classes) votes[cls] = 0;
-
-    for (const auto& m : machines) {
-      if (m.decision(x, kernel) > m.threshold)
-        votes[m.target_category]++;
-      else
-        votes[m.alternate_category]++;
-    }
-
-    // Class with most votes; tie breaks to first in document order
-    int max_votes = -1;
-    std::string winner;
-    for (const auto& cls : classes) {
-      if (votes.at(cls) > max_votes) {
-        max_votes = votes.at(cls);
-        winner = cls;
-      }
-    }
-    return winner;
+    for (size_t i = 1; i < values.size(); i++)
+      if (max_wins ? values[i] > values[best] : values[i] < values[best]) best = i;
+    return best;
   }
 };
 
