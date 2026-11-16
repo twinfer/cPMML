@@ -187,7 +187,25 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- Scoring ---
 
+  // A FieldRef in VectorFields whose value is missing makes the whole model
+  // yield no prediction: score_raw returns an empty score and predict_raw "".
+  // The SupportVectorMachineModel page says nothing about missing inputs;
+  // JPMML 1.7.7 throws MissingFieldValueException, and cPMML gives no
+  // prediction instead, as RegressionModel does for a missing NumericPredictor
+  // ("the result evaluates to a missing value"). A missing CategoricalPredictor
+  // field is not missing here: the spec takes CategoricalPredictor from the
+  // Regression model, where "if the input value is missing then
+  // variable_name(v) yields 0 for any v", so every indicator of that field is
+  // 0 (JPMML throws there too). missingValueReplacement still applies first,
+  // in MiningSchema.
+  inline bool has_missing_input(const Sample& sample) const {
+    for (const auto& f : vector_fields)
+      if (!f.is_indicator && sample[f.index].value.missing) return true;
+    return false;
+  }
+
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return std::make_unique<InternalScore>();
     const Eigen::VectorXd x = sample_to_vector(sample);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
@@ -221,6 +239,7 @@ class SupportVectorMachineModel : public InternalModel {
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
+    if (has_missing_input(sample)) return "";
     const Eigen::VectorXd x = sample_to_vector(sample);
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION)
@@ -260,13 +279,19 @@ class SupportVectorMachineModel : public InternalModel {
     }
   }
 
+  // Callers check has_missing_input first; the throw is a backstop. A missing
+  // CategoricalPredictor field gives 0 for each of its indicators.
   Eigen::VectorXd sample_to_vector(const Sample& sample) const {
     Eigen::VectorXd x(static_cast<Eigen::Index>(vector_fields.size()));
     for (size_t i = 0; i < vector_fields.size(); i++) {
       const VectorField& f = vector_fields[i];
       const Value& v = sample[f.index].value;
+      if (f.is_indicator) {
+        x[static_cast<Eigen::Index>(i)] = !v.missing && v == f.category ? 1.0 : 0.0;
+        continue;
+      }
       if (v.missing) throw cpmml::MissingValueException("missing value for SVM vector field");
-      x[static_cast<Eigen::Index>(i)] = f.is_indicator ? (v == f.category ? 1.0 : 0.0) : v.value;
+      x[static_cast<Eigen::Index>(i)] = v.value;
     }
     return x;
   }
