@@ -16,6 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # Both library types: the static branch has its own install(EXPORT)
+        # and its own way of carrying pugixml and miniz, and nothing else
+        # would build it.
+        shared: [ON, OFF]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +35,7 @@ jobs:
       - name: Configure
         env:
           CPM_SOURCE_CACHE: ~/.cache/CPM
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPMML_SHARED=${{ matrix.shared }}
 
       - name: Build
         run: cmake --build build --parallel
@@ -43,7 +47,9 @@ jobs:
 
       # A consumer must be able to find_package(cPMML) and catch its exceptions
       # across the shared-library boundary, which the hidden-visibility build
-      # only guarantees if the public API is exported.
+      # only guarantees if the public API is exported. For the static archive
+      # this is what proves the installed libcPMML.a links on its own, with no
+      # pugixml or miniz installed beside it.
       - name: Install and consume
         run: |
           cmake --install build --prefix "$PWD/_prefix"

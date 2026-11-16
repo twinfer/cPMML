@@ -21,6 +21,19 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
+# Emscripten compiles catch handlers away unless exception support is asked
+# for, and cPMML relies on catching in places -- InternalScore catches the
+# ParsingException from to_double to mean "this score is not a number". Without
+# this the wasm build succeeds and then misbehaves at runtime, with an exception
+# the library would normally swallow escaping to the caller instead. Not a
+# tuning knob. Set before the dependencies are declared: add_compile_options
+# only reaches directories added after it, and an exception unwinding through a
+# pugixml or miniz frame built without it aborts instead of reaching the catch.
+if(EMSCRIPTEN)
+    add_compile_options(-fexceptions)
+    add_link_options(-fexceptions)
+endif()
+
 include(cmake/CPM.cmake)
 
 # DEPENDENCIES
@@ -65,9 +78,14 @@ endif()
 # No -ffast-math: this is a numerical scoring library whose results are compared
 # against a reference implementation (JPMML), and -ffast-math both perturbs those
 # results and makes NaN/inf handling undefined.
-set(RELEASE_FLAGS "-Wall -O3 -flto")
+#
+# No -flto here either. In a static archive -flto leaves compiler IR rather than
+# machine code in the objects, which only the exact compiler that wrote it can
+# link, and CMake archives it with plain ar rather than gcc-ar/llvm-ar. LTO is
+# enabled per target below, through CheckIPOSupported, for the shared library
+# only, where it is resolved at link time and nothing but machine code ships.
+set(RELEASE_FLAGS "-Wall -O3")
 set(DEBUG_FLAGS "-Wall -g -Og")
-set(LINK_FLAGS_RELEASE "-flto")
 set(VERBOSE OFF)
 
 # SANITIZE=thread|address|undefined|address,undefined. Off by default; the
@@ -81,26 +99,15 @@ if(SANITIZE)
     add_link_options(-fsanitize=${SANITIZE})
 endif()
 
-# Emscripten compiles catch handlers away unless exception support is asked
-# for, and cPMML relies on catching in places -- InternalScore catches the
-# ParsingException from to_double to mean "this score is not a number". Without
-# this the wasm build succeeds and then misbehaves at runtime, with an exception
-# the library would normally swallow escaping to the caller instead. Not a
-# tuning knob.
-if(EMSCRIPTEN)
-    add_compile_options(-fexceptions)
-    add_link_options(-fexceptions)
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE ${BUILD_TYPE})
 set(CMAKE_CXX_FLAGS_RELEASE ${RELEASE_FLAGS})
 set(CMAKE_CXX_FLAGS_DEBUG ${DEBUG_FLAGS})
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE ${LINK_FLAGS_RELEASE})
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE "")
 set(CMAKE_EXE_LINKER_FLAGS_DEBUG "")
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE ${LINK_FLAGS_RELEASE})
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "")
 set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "")
 
 if(BUILD_TYPE MATCHES "Debug")
@@ -113,6 +120,7 @@ if (CMAKE_GENERATOR MATCHES "Makefiles")
 endif ()
 
 set(ADDITIONAL_LINK_LIBRARIES "")
+set(CPMML_USES_OPENMP OFF)
 
 # DEBUG OUTPUT (enables field name storage and to_string() in Feature/Sample)
 option(CPMML_DEBUG "Enable verbose debug output" OFF)
@@ -121,8 +129,19 @@ if(CPMML_DEBUG)
 endif()
 
 # MULTITHREADING
+#
+# Under Emscripten the default is 1. Emscripten ships an OpenMP runtime, so
+# find_package(OpenMP) succeeds there, but that runtime is built on wasm
+# threads: it links with shared memory, which needs every object compiled with
+# atomics, and a threaded wasm module only runs where SharedArrayBuffer is
+# available (cross-origin isolated pages). Asking for THREADS > 1 explicitly
+# still works; the dependencies are then compiled with -pthread as well, below.
 if(NOT DEFINED THREADS)
-    set(THREADS 4)
+    if(EMSCRIPTEN)
+        set(THREADS 1)
+    else()
+        set(THREADS 4)
+    endif()
 endif()
 find_package(OpenMP 4.0)
 if(THREADS AND THREADS GREATER 1)
@@ -132,6 +151,20 @@ if(THREADS AND THREADS GREATER 1)
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
         add_definitions(-DMULTITHREADING)
         add_definitions(-DNUM_THREADS=${THREADS})
+        # Link the runtime too, not only the compile flags: a static archive
+        # passes it on to the consumer (cPMMLConfig.cmake finds it there), and
+        # a shared object built without it leaves the GOMP/omp symbols for the
+        # executable to resolve.
+        set(CPMML_USES_OPENMP ON)
+        # The OpenMP flags above reach only targets declared from here on.
+        # pugixml and miniz were declared earlier, and under Emscripten an
+        # object compiled without atomics makes wasm-ld refuse the
+        # shared-memory link that the threaded runtime needs.
+        if(EMSCRIPTEN)
+            get_target_property(CPMML_PUGIXML_IMPL pugixml INTERFACE_LINK_LIBRARIES)
+            target_compile_options(${CPMML_PUGIXML_IMPL} PRIVATE -pthread)
+            target_compile_options(miniz PRIVATE -pthread)
+        endif()
     else()
         message("OpenMP is needed to enable multithreading.")
     endif()
@@ -151,7 +184,14 @@ add_definitions(-DCPMML_VERSION=\"${PROJECT_VERSION}\")
 # turns three vendored build-tree targets into runtime dependencies a consumer
 # has to find. The dependencies stay static and get absorbed either way; this
 # switch is about cPMML alone.
-option(CPMML_SHARED "Build cPMML as a shared library rather than a static archive" ON)
+#
+# Defaults to static under Emscripten, where shared is the case that fails.
+if(EMSCRIPTEN)
+    set(CPMML_SHARED_DEFAULT OFF)
+else()
+    set(CPMML_SHARED_DEFAULT ON)
+endif()
+option(CPMML_SHARED "Build cPMML as a shared library rather than a static archive" ${CPMML_SHARED_DEFAULT})
 if(CPMML_SHARED)
     set(CPMML_LIBRARY_TYPE SHARED)
 else()
@@ -283,28 +323,47 @@ target_include_directories(${PROJECT_NAME} PRIVATE third_party)
 # miniz's and Eigen's include directories and link requirements onto every
 # consumer, and made an Eigen version mismatch in the consumer's own build a
 # cPMML problem.
-# PRIVATE either way: cPMML.h includes nothing but standard headers, so none of
-# these three is part of the interface. Linking them PUBLIC put their include
-# directories and link requirements onto every consumer, and made an Eigen
-# version mismatch in the consumer's own build a cPMML problem.
 #
-# The two cases differ in what install(EXPORT) will accept. A shared library
-# embeds its private dependencies and CMake drops them from the exported
-# interface. A static archive does not embed anything, so CMake keeps them and
-# then refuses to export a target that needs three vendored targets which exist
-# only in this build tree. Wrapping in BUILD_INTERFACE says exactly that: they
-# are needed to build, and are not part of what gets installed. A static
-# consumer links the sibling archives from the same build, which is what an
-# Emscripten or single-binary build does anyway.
+# BUILD_INTERFACE because install(EXPORT) refuses to export a static archive
+# whose link interface names targets that exist only in this build tree. It
+# changes nothing for the shared library, whose private dependencies are not
+# part of the exported interface in the first place.
+target_link_libraries(
+        ${PROJECT_NAME} PRIVATE
+        $<BUILD_INTERFACE:pugixml::pugixml>
+        $<BUILD_INTERFACE:miniz>
+        $<BUILD_INTERFACE:Eigen3::Eigen>
+        ${ADDITIONAL_LINK_LIBRARIES}
+)
+if(CPMML_USES_OPENMP)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 if(CPMML_SHARED)
-    target_link_libraries(${PROJECT_NAME} PRIVATE pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+    # The shared object absorbs the static pugixml and miniz archives at link
+    # time, with their symbols hidden, so it is self-contained already.
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT CPMML_IPO_SUPPORTED OUTPUT CPMML_IPO_OUTPUT LANGUAGES CXX)
+    if(CPMML_IPO_SUPPORTED)
+        set_property(TARGET ${PROJECT_NAME} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    else()
+        message(STATUS "cPMML: LTO not supported, building without it: ${CPMML_IPO_OUTPUT}")
+    endif()
 else()
-    target_link_libraries(
+    # A static archive absorbs nothing: left alone, the installed libcPMML.a
+    # would need pugixml's and miniz's archives, which are build-tree targets
+    # and are never installed. Fold their object files into it instead, so the
+    # installed archive is self-contained just as the shared object is. Eigen
+    # is header-only and needs nothing. pugixml::pugixml is an INTERFACE target
+    # in front of the real library, which is resolved here.
+    if(CMAKE_VERSION VERSION_LESS 3.15)
+        message(FATAL_ERROR "CPMML_SHARED=OFF needs CMake 3.15 or newer ($<TARGET_OBJECTS> on a static library)")
+    endif()
+    get_target_property(CPMML_PUGIXML_TARGET pugixml INTERFACE_LINK_LIBRARIES)
+    target_sources(
             ${PROJECT_NAME} PRIVATE
-            $<BUILD_INTERFACE:pugixml::pugixml>
-            $<BUILD_INTERFACE:miniz>
-            $<BUILD_INTERFACE:Eigen3::Eigen>
-            ${ADDITIONAL_LINK_LIBRARIES}
+            $<TARGET_OBJECTS:${CPMML_PUGIXML_TARGET}>
+            $<TARGET_OBJECTS:miniz>
     )
 endif()
 
@@ -320,9 +379,17 @@ install(
 )
 
 # Consumers had no way to say find_package(cPMML) -- the install dropped a
-# library and a header and nothing that describes them. The dependencies are
-# linked PRIVATE and built into the shared object, so the config needs no
-# find_dependency calls.
+# library and a header and nothing that describes them. pugixml and miniz are
+# built into the library either way -- linked into the shared object, or folded
+# into the static archive as object files -- and Eigen is header-only, so the
+# config needs no find_dependency for any of them. The one exception is the
+# OpenMP runtime, which a static archive cannot carry: cPMMLConfig.cmake finds
+# it when CPMML_FIND_OPENMP says the archive was built against it.
+if(CPMML_USES_OPENMP AND NOT CPMML_SHARED)
+    set(CPMML_FIND_OPENMP ON)
+else()
+    set(CPMML_FIND_OPENMP OFF)
+endif()
 install(
         EXPORT ${PROJECT_NAME}Targets
         FILE ${PROJECT_NAME}Targets.cmake
