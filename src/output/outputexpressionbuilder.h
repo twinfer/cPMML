@@ -36,7 +36,9 @@ class OutputExpressionBuilder {
                                                         const std::string& model_target) {
     switch (OutputExpressionType::read(node).value) {
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
-        return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
+        return std::make_shared<PredictedValue>(
+            model_target, indexer, output_index, output_type,
+            indexer->contains(model_target) ? indexer->get_type(model_target) : DataType::DataTypeValue::STRING);
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE:
         return std::make_shared<PredictedDisplayValue>(model_target, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE:

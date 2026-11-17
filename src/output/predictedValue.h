@@ -28,11 +28,16 @@ class PredictedValue : public OutputExpression {
 
   PredictedValue() : index(std::numeric_limits<size_t>::max()) {}
 
+  // The target's dataType: a boolean prediction is a value of it, true or
+  // false, and not the text "true" or "false".
+  DataType target_type;
+
   PredictedValue(const std::string& field_name, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
-                 const DataType& output_type)
+                 const DataType& output_type, const DataType& target_type)
       : OutputExpression(output_index, output_type, indexer),
         field_name(field_name),
-        index(indexer->get_or_set(field_name)) {}
+        index(indexer->get_or_set(field_name)),
+        target_type(target_type) {}
 
   inline Value eval(const Sample& sample) const override { return sample[index].value; }
 
@@ -48,10 +53,37 @@ class PredictedValue : public OutputExpression {
   // displayValue, gave a numeric predictedValue no value whenever a
   // TargetValue renamed the class (JPMML 1.7.7: class 1 shown as "one" is
   // predictedValue 1 as integer and 1.0 as double).
+  //
+  // A boolean is held as 1 or 0 (Value). PMML's dataTypes are XML Schema's
+  // (DataDictionary: "The dataType reuses names and semantics of atomic types
+  // in XML Schema"), whose boolean is written true, false, 1 or 0:
+  //  - the prediction of a boolean target is that value, whatever dataType
+  //    the OutputField has: 1 or 0 as an integer or a double (the spec gives
+  //    no boolean-to-number cast; this is JPMML 1.7.7's, and XPath's);
+  //  - into a boolean OutputField, a prediction of another type that is no
+  //    number is read as a boolean literal, so the string class "true" is
+  //    true. A text that is no boolean literal ("yes") has no value; a text
+  //    that is neither a number nor a boolean has no number either ("true"
+  //    of a string target as an integer).
+  // These used to read the text as a number only, and "true" is none: a
+  // boolean prediction had no value as a boolean, integer or double
+  // OutputField, nor did a transformedValue reading it.
   inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
-    return score.raw_score.empty() || score.raw_score == score.score ? score.double_score
-                                                                     : InternalScore::value_of(score.raw_score);
+    const std::string& value = score.raw_score.empty() ? score.score : score.raw_score;
+    if (target_type.value == DataType::DataTypeValue::BOOLEAN) return boolean_of(value);
+    const double number = score.raw_score.empty() || score.raw_score == score.score
+                              ? score.double_score
+                              : InternalScore::value_of(score.raw_score);
+    if (is_double_min(number) && output_type.value == DataType::DataTypeValue::BOOLEAN) return boolean_of(value);
+    return number;
   };
+
+ private:
+  // 1 or 0 for an XSD boolean literal (true, false, 1, 0), else no value.
+  static double boolean_of(const std::string& text) {
+    bool parsed = false;
+    return lexical::parse_boolean(text, parsed) ? (parsed ? 1 : 0) : double_min();
+  }
 };
 
 /**

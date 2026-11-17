@@ -121,7 +121,14 @@ static bool check_other_outputs(const cpmml::Result& result,
                     << "  sample: " << to_string(row) << std::endl;
           return false;
         }
-      } catch (const cpmml::ParsingException&) {}
+      } catch (const cpmml::ParsingException&) {
+        // A boolean OutputField is held as 1 or 0 and written true/false.
+        if ((expected_val == "true" || expected_val == "false") && (nit->second != 0) != (expected_val == "true")) {
+          std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: " << expected_val
+                    << "  sample: " << to_string(row) << std::endl;
+          return false;
+        }
+      }
       continue;
     }
 
