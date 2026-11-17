@@ -9,6 +9,7 @@
 #ifndef CPMML_SRC_EXPRESSION_TRANSFORMED_VALUE_H_
 #define CPMML_SRC_EXPRESSION_TRANSFORMED_VALUE_H_
 
+#include "core/builtinfunctions.h"
 #include "expression/fieldref.h"
 #include "outputexpression.h"
 
@@ -48,86 +49,12 @@ class TransformedValue : public OutputExpression {
     value_kind = child.is_empty() ? std::nullopt : kind_of(child.xml());
   }
 
-  // The type of the value an expression gives, as JPMML 1.7.7 types it, read
-  // from the document at load: nullopt for a string, else the Java type its
-  // number is written as when a string OutputField holds it. Value carries no
-  // type of its own, which is why this is worked out here.
-  //   FieldRef        the dataType of the DataField, DerivedField or
-  //                   OutputField it names;
-  //   Constant        its dataType; without one, integer if the text is an
-  //                   XSD integer, double if a double, else string ("7" is
-  //                   written "7", "7.50" is "7.5");
-  //   NormContinuous, NormDiscrete  double;
-  //   Discretize, MapValues  their dataType, string by default;
-  //   Apply           boolean for the predicates (equal ... isNotIn,
-  //                   isMissing, matches), the common type of the arguments
-  //                   (integer < float < double) for + - * / min max sum abs,
-  //                   integer for round ceil floor, integer for
-  //                   stringLength, string for the string functions, the
-  //                   type of the second argument for if, double otherwise.
-  // Arithmetic is still done in double: n / 2 of an integer n=3 is 1.5 in
-  // cPMML and 1 in JPMML, written "1.5" here (a value, not a format, gap).
+  // The type of the value an expression gives, read from the document at
+  // load: nullopt for a string, else the type its number is written as when a
+  // string OutputField holds it. Value carries no type of its own; the rules,
+  // shared with Apply, are BuiltInFunction::expression_kind's.
   static std::optional<java::Kind> kind_of(const pugi::xml_node& expression) {
-    const std::string element = expression.name();
-    if (element == "FieldRef") return field_kind(expression, expression.attribute("field").value());
-    if (element == "Constant") {
-      if (expression.attribute("dataType")) return declared_kind(expression.attribute("dataType").value());
-      const std::string text = expression.child_value();
-      long whole = 0;
-      double number = 0;
-      if (lexical::parse_long(text, whole)) return java::Kind::INTEGER;
-      if (lexical::parse_double(text, number)) return java::Kind::DOUBLE;
-      return std::nullopt;
-    }
-    if (element == "NormContinuous" || element == "NormDiscrete") return java::Kind::DOUBLE;
-    if (element == "Discretize" || element == "MapValues")
-      return declared_kind(expression.attribute("dataType") ? expression.attribute("dataType").value() : "string");
-    if (element != "Apply") return java::Kind::DOUBLE;
-
-    static const std::unordered_set<std::string> predicates{
-        "equal",       "notEqual", "lessThan",  "lessOrEqual", "greaterThan", "greaterOrEqual", "and", "or",
-        "not",         "isIn",     "isNotIn",   "isMissing",   "isNotMissing", "isValid",       "isNotValid",
-        "matches"};
-    static const std::unordered_set<std::string> common{"+", "-", "*", "/", "min", "max", "sum", "abs"};
-    static const std::unordered_set<std::string> whole{"round", "ceil", "floor", "stringLength"};
-    static const std::unordered_set<std::string> strings{"concat",    "substring", "uppercase",
-                                                         "lowercase", "trimBlanks", "replace", "formatNumber",
-                                                         "formatDatetime"};
-    const std::string function = expression.attribute("function").value();
-    if (predicates.count(function)) return java::Kind::BOOLEAN;
-    if (whole.count(function)) return java::Kind::INTEGER;
-    if (strings.count(function)) return std::nullopt;
-    std::vector<pugi::xml_node> arguments;
-    for (const auto& child : expression.children())
-      if (expression_names.count(child.name())) arguments.push_back(child);
-    if (function == "if") return arguments.size() > 1 ? kind_of(arguments[1]) : std::nullopt;
-    if (!common.count(function)) return java::Kind::DOUBLE;
-    java::Kind result = java::Kind::INTEGER;
-    for (const auto& argument : arguments) {
-      const auto kind = kind_of(argument);
-      if (!kind || *kind == java::Kind::DOUBLE || *kind == java::Kind::BOOLEAN) return java::Kind::DOUBLE;
-      if (*kind == java::Kind::FLOAT) result = java::Kind::FLOAT;
-    }
-    return result;
-  }
-
-  static std::optional<java::Kind> declared_kind(const std::string& datatype) {
-    if (datatype == "string") return std::nullopt;
-    if (datatype == "integer") return java::Kind::INTEGER;
-    if (datatype == "float") return java::Kind::FLOAT;
-    if (datatype == "boolean") return java::Kind::BOOLEAN;
-    return java::Kind::DOUBLE;
-  }
-
-  // The dataType of the field `name` as the document declares it: the
-  // nearest DerivedField or OutputField of that name, else the DataField.
-  static std::optional<java::Kind> field_kind(const pugi::xml_node& from, const std::string& name) {
-    const pugi::xml_node root = from.root().child("PMML");
-    for (const char* element : {"DerivedField", "OutputField", "DataField"})
-      for (const auto& found : root.select_nodes((std::string("//") + element).c_str()))
-        if (name == found.node().attribute("name").value() && found.node().attribute("dataType"))
-          return declared_kind(found.node().attribute("dataType").value());
-    return java::Kind::DOUBLE;
+    return BuiltInFunction::expression_kind(expression);
   }
 
   inline Value eval(const Sample& sample) const override {

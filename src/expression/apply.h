@@ -44,7 +44,7 @@ class Apply : public Expression {
   Apply(const XmlNode& node, const size_t& output_index, const DataType& output_type,
         const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
-        function(BuiltInFunction(node.get_attribute("function"))),
+        function(BuiltInFunction(node)),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
@@ -103,14 +103,11 @@ class Apply : public Expression {
 
     // isMissing/isNotMissing/if must receive their missing arguments; for any
     // other function a missing argument makes the result missing, with
-    // mapMissingTo (then defaultValue) taking over when given.
+    // mapMissingTo (then defaultValue) taking over when given. The aggregates
+    // skip missing arguments unless mapMissingTo is given.
     if (missing_input && !function.handles_missing()) {
-      if (exist_missingreplacement)
-        return mapmissing_to;
-      else if (exist_defaultvalue)
-        return defaultValue;
-      else
-        return Value();
+      if (exist_missingreplacement) return mapmissing_to;
+      if (!function.ignores_missing()) return exist_defaultvalue ? defaultValue : Value();
     }
 
     Value result;
