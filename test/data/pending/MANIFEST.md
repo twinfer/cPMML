@@ -78,7 +78,7 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_output_integer_nonintegral | P6.7 (after P4.7) | **yes: rows 4-6, 8** (note 6) | FAIL `output 'ti': predicted: 3.5  expected: no value` | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
 | fix_output_integer_chain | P7b.4 | **yes: rows 2, 5** (note 6) | FAIL `predicted: 103.5  expected: no prediction` | rows 1, 3, 4 agree; rows 2, 5 refused (TypeCheckException) |
 | fix_builtin_text_if | P4.3 | no | FAIL `output 'if_full': predicted: E  expected: no value` | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
-| fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': model declares it but produced no value  expected: 2-2000` | load error (`Field "pv" is not defined`): spec-derived throughout |
+| fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': model declares it but produced no value  expected: 2-2000` | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `output 'f_pct': model declares it but produced no value  expected: rate 0.5%` | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
 
 ### Notes
@@ -165,7 +165,14 @@ JPMML gives up on the whole file at the first row it refuses.
    Java text (`2.0`, `2000.0`, `1.0E-4`) and states D17 in the header. The
    integer and boolean cells are the same under both rules. The spec's own
    example, `c_spec` = concat(month, "-", year) giving `2-2000`, is already
-   a column. The fixture also has a transformedValue OutputField (`chain`)
-   that reads the predictedValue OutputField `pv`, which JPMML refuses at
-   load (`Field "pv" is not defined`). Every value in the fixture is
-   therefore spec-derived.
+   a column. JPMML 1.7.7 loads the model and scores rows 1-5 and 7-9; there
+   it differs from the fixture only in number text, Java against XQuery
+   (`c_k` `2000|2.0|0.1|true`, `c_x` `1.0E-4|` and `1234567.0|`, `chain`
+   `1.0|0.75`, and `y`/`pred`/`pv`/`tv1` values such as `1.000000025E7`,
+   `2.0E7`, `3.0E-7`). That Java text is what D17 asks for, so JPMML is a
+   usable oracle for those 8 rows when P4.6 re-derives them (score row by
+   row; the whole-file run stops at row 6). Row 6, every input missing, is
+   refused at evaluation: the transformedValue OutputField `chain` reads
+   the predictedValue OutputField `pv`, which has no value, and JPMML
+   throws MissingFieldException (`Field "pv" is not defined`). Only row 6
+   is spec-derived.
