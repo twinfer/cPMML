@@ -40,6 +40,16 @@ target_link_libraries(enum_reader.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIE
 add_dependencies(unit_tests enum_reader.exe)
 add_test(enum_reader enum_reader.exe)
 
+# The Java-compatible formatter against Double.toString/Float.toString, from
+# tables written by tools/java-format/JavaNumbers.java.
+add_executable(java_format.exe java_format.cc)
+target_include_directories(java_format.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(java_format.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(java_format.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(java_format.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests java_format.exe)
+add_test(java_format java_format.exe)
+
 # Concurrent scoring: a data race does not fail a single-threaded fixture, so
 # nothing else in the suite would notice if R3 regressed. Two models, one with
 # categorical string inputs (the string-interning path) and one ensemble (the

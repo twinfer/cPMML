@@ -226,11 +226,7 @@ class Target {
           score.empty = false;
           score.raw_score = best->value;
           score.score = display ? best->label() : best->value;
-          try {
-            score.double_score = to_double(score.score);
-          } catch (const cpmml::ParsingException& e) {
-            score.double_score = double_min();
-          }
+          score.double_score = InternalScore::value_of(score.score);
           break;
         }
 
@@ -240,11 +236,7 @@ class Target {
             // predictedValue OutputFields.
             if (score.raw_score.empty()) score.raw_score = score.score;
             score.score = shown->display_value;
-            try {
-              score.double_score = to_double(score.score);
-            } catch (const cpmml::ParsingException& e) {
-              score.double_score = double_min();
-            }
+            score.double_score = InternalScore::value_of(score.score);
           }
           for (const auto& target_value : target_values) {
             // The model may spell a numeric class differently ("4" for "4.0").
@@ -272,7 +264,7 @@ class Target {
           score.double_score = transform(score.double_score);
         }
         // score string representation must be updated accordingly
-        score.score = double_to_string(score.double_score);
+        score.score = java::double_text(score.double_score);
         break;
 
       default:
@@ -297,16 +289,30 @@ class Target {
         // throws, which made the defaultValue branch unreachable.
         if (predicted.empty()) {
           const TargetValue* default_value = find_default_value();
-          return default_value == nullptr ? predicted : double_to_string(transform(default_value->default_value));
+          return default_value == nullptr ? predicted : java::double_text(transform(default_value->default_value));
         }
         // score string representation must be updated accordingly
-        return double_to_string(transform(to_double(predicted)));
+        {
+          double value = 0;
+          if (!java::parse(predicted, value))
+            throw cpmml::ParsingException("\"" + predicted + "\" is not a valid double");
+          return java::double_text(transform(value));
+        }
 
       default:
         break;
     }
 
     return predicted;
+  }
+
+  // Whether `text`, a classification prediction after this Target, is a
+  // displayValue it put there (display) rather than a class value.
+  inline bool is_display_value(const std::string& text, const bool display) const {
+    if (!display || mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) return false;
+    for (const auto& target_value : target_values)
+      if (target_value.has_display_value && target_value.display_value == text) return true;
+    return false;
   }
 
   // The first TargetValue whose displayValue names the class `predicted` of a

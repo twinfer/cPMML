@@ -83,6 +83,13 @@ class OutputField {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING: {
         std::string sv = expression->eval_str(sample, score);
+        // A string OutputField over a number (a probability, a
+        // transformedValue over a numeric expression): the number as JPMML
+        // writes its type.
+        if (sv.empty() && expression->value_kind) {
+          const double v = expression->eval_double(sample, score);
+          if (!is_double_min(v)) sv = java::text({v, *expression->value_kind});
+        }
         if (!sv.empty()) score.str_outputs[name] = sv;
         break;
       }

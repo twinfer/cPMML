@@ -129,7 +129,7 @@ class NeuralNetworkModel : public InternalModel {
       return std::make_unique<RegressionScore>(classes[best], scores[best], classes, scores);
     }
 
-    return std::make_unique<RegressionScore>(double_to_string(scores[0]), scores[0], classes, scores);
+    return std::make_unique<RegressionScore>(java::double_text(scores[0]), scores[0], classes, scores);
   }
 
   inline std::string predict_raw(const Sample& sample) const override {
@@ -143,7 +143,7 @@ class NeuralNetworkModel : public InternalModel {
       return classes[best];
     }
 
-    return double_to_string(scores[0]);
+    return java::double_text(scores[0]);
   }
 
  private:

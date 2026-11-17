@@ -87,7 +87,7 @@ class RegressionModel : public InternalModel {
     if (has_missing_input(sample)) return "";
     switch (mining_function.value) {
       case MiningFunction::MiningFunctionType::REGRESSION:
-        return double_to_string(regression_normalization(regression_tables[0].score(sample)));
+        return java::double_text(regression_normalization(regression_tables[0].score(sample)));
       case MiningFunction::MiningFunctionType::CLASSIFICATION:
         return get_class(classification_normalization(get_scores(sample)));
       default:

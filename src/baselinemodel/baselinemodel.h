@@ -93,7 +93,7 @@ class BaselineModel : public InternalModel {
     // into an infinity halfway through a batch.
     if (!(baseline.variance > 0.0))
       throw cpmml::ParsingException("BaselineModel: baseline variance must be positive, got " +
-                                    double_to_string(baseline.variance));
+                                    java::double_text(baseline.variance));
   }
 
   // --- Scoring ---
@@ -102,7 +102,7 @@ class BaselineModel : public InternalModel {
     return std::make_unique<InternalScore>(compute(sample));
   }
 
-  inline std::string predict_raw(const Sample& sample) const override { return double_to_string(compute(sample)); }
+  inline std::string predict_raw(const Sample& sample) const override { return java::double_text(compute(sample)); }
 
  private:
   /**

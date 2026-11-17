@@ -11,9 +11,15 @@
  *
  * --locale installs a host locale before scoring: results must be identical
  * under a comma-decimal locale. Exits 77 (ctest SKIP) if it is unavailable.
+ *
+ * pmml_tester.exe <model.zip> <inputs.csv> --dump <out.csv> writes the
+ * predicted value and every OutputField as text instead of checking a fixture
+ * (see run_dump; used by tools/cross-validate-text.py).
  *******************************************************************************/
 
+#include <algorithm>
 #include <clocale>
+#include <fstream>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -149,9 +155,23 @@ static std::unordered_set<std::string> segment_output_names(const std::string& m
   return names;
 }
 
+// Whether the model element of the document predicts a number:
+// functionName="regression", which an AnomalyDetectionModel has too (its
+// mining_function() says CLASSIFICATION). Its predicted value is compared
+// within tolerance; any other prediction is text.
+static bool predicts_number(const std::string& model_zip) {
+  const std::vector<char> document = read_file(model_zip, true);
+  pugi::xml_document xml;
+  if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
+  for (const auto& child : xml.child("PMML").children())
+    if (child.attribute("functionName")) return std::string(child.attribute("functionName").value()) == "regression";
+  return false;
+}
+
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row,
                      const std::string& model_zip) {
   const std::string out_col = model.output_name();
+  const bool numeric_prediction = predicts_number(model_zip);
   const auto names = model.output_names();
   std::unordered_set<std::string> declared_outputs(names.cbegin(), names.cend());
   for (const auto& name : segment_output_names(model_zip)) declared_outputs.insert(name);
@@ -184,22 +204,24 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
     cpmml::Result result = model.evaluate(to_input(row));
 
+    // The predicted value is compared as a number, within tolerance, only
+    // where it is one: the prediction of a regression model, or an output
+    // column that is a numeric OutputField (a probability named as the
+    // output). Everything else -- a class label, a cluster id, a
+    // selectAll collection, a string OutputField -- is text, and the text
+    // must be the oracle's exactly: "1.0" for the class value="1" of a double
+    // target, as JPMML writes it, is not "1".
     bool ok = (result.as_string() == expected);
-    if (!ok && !is_double_min(result.as_double())) {
+    const auto nout = result.num_outputs();
+    const auto nit = nout.find(out_col);
+    if (!ok && nit != nout.end()) {
+      try {
+        ok = within_tolerance(nit->second, expected_double(expected));
+      } catch (const cpmml::ParsingException&) {}
+    } else if (!ok && numeric_prediction && !is_double_min(result.as_double())) {
       try {
         ok = within_tolerance(result.as_double(), expected_double(expected));
       } catch (const cpmml::ParsingException&) {}
-    }
-
-    // Also check named output fields (handles probability/confidence output columns)
-    if (!ok) {
-      const auto nout = result.num_outputs();
-      auto nit = nout.find(out_col);
-      if (nit != nout.end()) {
-        try {
-          ok = within_tolerance(nit->second, expected_double(expected));
-        } catch (const cpmml::ParsingException&) {}
-      }
     }
     if (!ok) {
       const auto sout = result.str_outputs();
@@ -400,9 +422,117 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
 
 // ---- entry point ------------------------------------------------------------
 
+// ---- dump mode --------------------------------------------------------------
+//
+// pmml_tester.exe model.zip inputs.csv --dump out.csv scores every row of
+// inputs.csv (input columns only, "N/A" or an empty cell for a missing value)
+// and writes, per row, the predicted value and every OutputField as text, in
+// the layout of JPMML's EvaluationExample output: the target field's column,
+// then the OutputFields, "N/A" for no value. tools/cross-validate-text.py
+// compares that with JPMML's own output, text for text.
+//
+// A string result is written as cPMML gives it; a numeric OutputField
+// (num_outputs) through cPMML's formatter as its dataType says: the
+// OutputField's own dataType, else double for probability-like features and
+// the target's dataType for the others.
+
+static std::string csv_cell(const std::string& text) {
+  if (text.find_first_of(",\"\n") == std::string::npos) return text;
+  std::string quoted = "\"";
+  for (const char c : text) quoted += c == '"' ? std::string("\"\"") : std::string(1, c);
+  return quoted + "\"";
+}
+
+static java::Kind kind_of_type(const std::string& datatype) {
+  if (datatype == "integer") return java::Kind::INTEGER;
+  if (datatype == "float") return java::Kind::FLOAT;
+  if (datatype == "boolean") return java::Kind::BOOLEAN;
+  return java::Kind::DOUBLE;
+}
+
+static int run_dump(cpmml::Model& model, const std::string& model_zip, const std::string& inputs,
+                    const std::string& out_path) {
+  const std::vector<char> document = read_file(model_zip, true);
+  pugi::xml_document xml;
+  if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
+  const pugi::xml_node pmml = xml.child("PMML");
+  pugi::xml_node top;
+  for (const auto& child : pmml.children())
+    if (child.attribute("functionName")) {
+      top = child;
+      break;
+    }
+  std::unordered_map<std::string, std::string> types;
+  for (const auto& field : pmml.child("DataDictionary").children("DataField"))
+    types[field.attribute("name").value()] = field.attribute("dataType").value();
+  std::string target;
+  for (const auto& field : top.child("MiningSchema").children("MiningField")) {
+    const std::string usage = field.attribute("usageType").value();
+    if (usage == "target" || usage == "predicted") {
+      target = field.attribute("name").value();
+      break;
+    }
+  }
+  // No target field (clustering, say): JPMML names the predicted column "".
+
+  std::vector<std::string> columns{target};
+  std::unordered_map<std::string, java::Kind> kinds;
+  for (const auto& node : pmml.select_nodes("//Output/OutputField")) {
+    const pugi::xml_node of = node.node();
+    const std::string name = of.attribute("name").value();
+    const std::string feature = of.attribute("feature") ? of.attribute("feature").value() : "predictedValue";
+    if (of.attribute("dataType"))
+      kinds[name] = kind_of_type(of.attribute("dataType").value());
+    else if (feature == "predictedValue" || feature == "predictedDisplayValue" || feature == "transformedValue")
+      kinds[name] = kind_of_type(types[target]);
+    else
+      kinds[name] = java::Kind::DOUBLE;
+    if (of.parent().parent() == top && std::find(columns.begin(), columns.end(), name) == columns.end())
+      columns.push_back(name);
+  }
+  for (const auto& name : segment_output_names(model_zip))
+    if (std::find(columns.begin(), columns.end(), name) == columns.end()) columns.push_back(name);
+
+  std::ofstream out(out_path);
+  for (size_t i = 0; i < columns.size(); i++) out << (i ? "," : "") << csv_cell(columns[i]);
+  out << "\n";
+
+  CSVReader reader(inputs);
+  for (auto row = reader.read(); !row.empty(); row = reader.read()) {
+    cpmml::Input input;
+    for (const auto& [k, v] : row)
+      if (!v.empty() && v != "N/A") input[k] = v;
+    std::vector<std::string> cells;
+    try {
+      const cpmml::Result result = model.evaluate(input);
+      const auto sout = result.str_outputs();
+      const auto nout = result.num_outputs();
+      for (const auto& column : columns) {
+        if (column == target) {
+          cells.push_back(result.empty() || result.as_string().empty() ? "N/A" : result.as_string());
+          continue;
+        }
+        const auto s = sout.find(column);
+        const auto n = nout.find(column);
+        if (s != sout.end() && !s->second.empty())
+          cells.push_back(s->second);
+        else if (n != nout.end())
+          cells.push_back(java::text({n->second, kinds.count(column) ? kinds[column] : java::Kind::DOUBLE}));
+        else
+          cells.push_back("N/A");
+      }
+    } catch (const std::exception& e) {
+      cells.assign(columns.size(), std::string("ERROR: ") + e.what());
+    }
+    for (size_t i = 0; i < cells.size(); i++) out << (i ? "," : "") << csv_cell(cells[i]);
+    out << "\n";
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::cerr << "usage: pmml_tester.exe model.zip fixture.csv [--locale <name>]\n";
+    std::cerr << "usage: pmml_tester.exe model.zip fixture.csv [--locale <name> | --dump <out.csv>]\n";
     return -1;
   }
 
@@ -422,6 +552,7 @@ int main(int argc, char** argv) {
 
   try {
     cpmml::Model model(argv[1], true);
+    if (argc >= 5 && std::string(argv[3]) == "--dump") return run_dump(model, argv[1], argv[2], argv[4]);
     CSVReader reader(argv[2]);
 
     auto first = reader.read();

@@ -9,6 +9,8 @@
 #ifndef CPMML_SRC_EXPRESSION_OUTPUTEXPRESSION_H_
 #define CPMML_SRC_EXPRESSION_OUTPUTEXPRESSION_H_
 
+#include <optional>
+
 #include "core/internal_score.h"
 #include "core/miningschema.h"
 #include "core/sample.h"
@@ -26,6 +28,11 @@
  */
 class OutputExpression : public Expression {
  public:
+  // The Java type of the number eval_double gives, for a string OutputField
+  // over it (OutputField::add_output); nullopt when the value is text and
+  // eval_double is not its number (a transformedValue over a string).
+  std::optional<java::Kind> value_kind = java::Kind::DOUBLE;
+
   OutputExpression() {}
 
   OutputExpression(const size_t& output_index, const DataType& output_type, const std::shared_ptr<Indexer>& indexer)

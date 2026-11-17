@@ -207,4 +207,32 @@ class Value {
   }
 };
 
+// A Value as text, as JPMML writes it (utils/java_format.h): nothing for a
+// missing value, the text of a string, Double.toString of a number. Value
+// carries no type, so an integer, float or boolean value is written as a
+// double here; a caller that knows the type writes java::Number{v.value, kind}
+// instead (OutputField does, from the expression's type).
+inline std::string java_text(const Value& value) {
+  if (value.missing) return std::string();
+  if (!value.svalue.empty()) return value.svalue;
+  return java::double_text(value.value);
+}
+
+#if defined(__cpp_lib_format)
+// std::format("{}", value): java_text(value).
+template <>
+struct std::formatter<Value, char> {
+  constexpr auto parse(std::format_parse_context& ctx) {
+    auto it = ctx.begin();
+    if (it != ctx.end() && *it != '}') throw std::format_error("Value takes no format spec");
+    return it;
+  }
+  template <class FormatContext>
+  auto format(const Value& value, FormatContext& ctx) const {
+    const std::string text = java_text(value);
+    return std::copy(text.begin(), text.end(), ctx.out());
+  }
+};
+#endif
+
 #endif  // CPMML_VALUE_H

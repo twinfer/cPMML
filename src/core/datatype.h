@@ -10,6 +10,7 @@
 #include <string>
 
 #include "enum_parser.h"
+#include "utils/java_format.h"
 
 /**
  * @class DataType
@@ -81,5 +82,24 @@ class DataType {
     return enum_display(value, TABLE, "MISSING");
   }
 };
+
+// The Java type a number of this dataType is written as (java_format.h):
+// integer (`integer`, which DataType carries as DOUBLE) as a long, float as a
+// float, boolean as true/false, every other numeric type -- the date and time
+// types included, which cPMML carries as doubles -- as a double. A string has
+// no number form; it is DOUBLE here and the caller writes its text instead.
+inline java::Kind java_kind(const DataType& datatype, const bool integer) {
+  if (integer) return java::Kind::INTEGER;
+  switch (datatype.value) {
+    case DataType::DataTypeValue::INTEGER:
+      return java::Kind::INTEGER;
+    case DataType::DataTypeValue::FLOAT:
+      return java::Kind::FLOAT;
+    case DataType::DataTypeValue::BOOLEAN:
+      return java::Kind::BOOLEAN;
+    default:
+      return java::Kind::DOUBLE;
+  }
+}
 
 #endif

@@ -152,6 +152,37 @@ git clone https://github.com/AmadeusITGroup/cPMML.git && cd cPMML && install.bat
 - CMake >= 3.5.1
 - MinGW-W64 with C++20 support
 
+## Changelog
+
+### Breaking: values are written as Java writes them
+
+Every value cPMML turns into text -- `Result::as_string()`, string
+`str_outputs()`, selectAll collections, the class labels of a numeric target --
+is now written the way JPMML writes it, which is the way Java writes the
+value's type (`src/utils/java_format.h`):
+
+| value | before | now |
+|---|---|---|
+| double prediction 1.5 | `1.500000` | `1.5` |
+| double 2 | `2.000000` | `2.0` |
+| double 1e7, 1e-4 | `10000000.000000`, `0.000100` | `1.0E7`, `1.0E-4` |
+| double 1e-7 | `0.000000` | `1.0E-7` |
+| infinite, NaN | `INF`, `-INF`, `NaN` | `Infinity`, `-Infinity`, `NaN` |
+| float target 0.1 | `0.100000` | `0.1` (Float.toString) |
+| integer target 7 | `7.000000` | `7` |
+| class value="1" of a double target | `1` | `1.0` |
+| class value="1" of a boolean target | `1` | `true` |
+| selectAll entry without a prediction | `[1.5, ]` | `[1.5, null]` |
+| string OutputField over a number | no value | the number's text (`3`, `0.1`, `true`) |
+
+Doubles are the shortest decimal that reads back as the same double (Java's
+`Double.toString`), plain between 10^-3 and 10^7 and in scientific notation
+outside. Code that parsed `as_string()` with `std::stod` keeps working, except
+for `Infinity`; code that compared it with a six-decimal string must change.
+`as_double()`, `num_outputs()` and `distribution()` values are unchanged.
+`tools/cross-validate-text.py` checks the text against JPMML 1.7.7 over the
+whole fixture suite.
+
 ## Documentation
 
 Please refer to the [official documentation](https://amadeusitgroup.github.io/cPMML/) for further details.

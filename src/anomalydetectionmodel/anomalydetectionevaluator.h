@@ -98,12 +98,12 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
       case Algorithm::IFOREST: {
         const std::string avg_path = inner->predict(flat);
         if (avg_path.empty()) return std::make_unique<InternalScore>();
-        return std::make_unique<InternalScore>(iforest_score(to_double(avg_path)));
+        return std::make_unique<InternalScore>(iforest_score(from_java_text(avg_path)));
       }
       case Algorithm::OCSVM: {
         const std::string decision = inner->predict(flat);
         if (decision.empty()) return std::make_unique<InternalScore>();
-        return std::make_unique<InternalScore>(to_double(decision));
+        return std::make_unique<InternalScore>(from_java_text(decision));
       }
     }
 
@@ -163,7 +163,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     for (const double d : mean_cluster_distances)
       if (d < 0.0)
         throw cpmml::ParsingException("AnomalyDetectionModel: MeanClusterDistances must be non-negative, got " +
-                                      double_to_string(d));
+                                      java::double_text(d));
   }
 
   /**

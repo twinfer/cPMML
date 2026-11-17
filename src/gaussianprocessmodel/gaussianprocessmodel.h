@@ -108,7 +108,7 @@ class GaussianProcessModel : public InternalModel {
 
   inline std::string predict_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return "";
-    return double_to_string(compute_k_star(sample).dot(alpha));
+    return java::double_text(compute_k_star(sample).dot(alpha));
   }
 
  private:

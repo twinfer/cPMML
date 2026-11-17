@@ -167,7 +167,7 @@ class GeneralRegressionModel : public InternalModel {
       auto [winner, scores] = predict_ordinal(sample);
       return winner;
     }
-    return double_to_string(predict_continuous(sample));
+    return java::double_text(predict_continuous(sample));
   }
 
  private:

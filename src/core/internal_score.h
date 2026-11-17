@@ -60,26 +60,22 @@ class InternalScore {
 
   InternalScore() = default;
 
-  explicit InternalScore(const double& score) : empty(false), score(double_to_string(score)), double_score(score) {}
+  explicit InternalScore(const double& score) : empty(false), score(java::double_text(score)), double_score(score) {}
 
-  explicit InternalScore(const std::string& score) : empty(false), score(score) {
-    try {
-      double_score = ::to_double(score);
-    } catch (const cpmml::ParsingException& exception) {
-      double_score = double_min();
-    }
-  }
+  explicit InternalScore(const std::string& score) : empty(false), score(score), double_score(value_of(score)) {}
 
   InternalScore(const double& score, const std::unordered_map<std::string, double>& probabilities)
-      : empty(false), score(double_to_string(score)), double_score(score), probabilities(probabilities) {}
+      : empty(false), score(java::double_text(score)), double_score(score), probabilities(probabilities) {}
 
   InternalScore(const std::string& score, const std::unordered_map<std::string, double>& probabilities)
-      : empty(false), score(score), probabilities(probabilities) {
-    try {
-      double_score = ::to_double(score);
-    } catch (const cpmml::ParsingException& exception) {
-      double_score = double_min();
-    }
+      : empty(false), score(score), double_score(value_of(score)), probabilities(probabilities) {}
+
+  // The number a prediction's text stands for, or double_min() when it is
+  // not one (a class label). The text is cPMML's own (java_format.h) or the
+  // document's, so java::parse, which also reads "Infinity".
+  static double value_of(const std::string& text) {
+    double parsed = 0;
+    return java::parse(text, parsed) ? parsed : double_min();
   }
 
   InternalScore(const InternalScore&) = default;

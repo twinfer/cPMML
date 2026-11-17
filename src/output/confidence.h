@@ -33,7 +33,7 @@ class Confidence : public OutputExpression {
 
   inline std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     const double value = eval_double(sample, score);
-    return is_double_min(value) ? "" : double_to_string(value);
+    return is_double_min(value) ? "" : java::double_text(value);
   };
 };
 

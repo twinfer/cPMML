@@ -172,7 +172,7 @@ class NearestNeighborModel : public InternalModel {
     }
 
     if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) {
-      const double val = to_double(regress(neighbors));
+      const double val = from_java_text(regress(neighbors));
       return std::make_unique<InternalScore>(val);
     }
 
@@ -490,7 +490,7 @@ class NearestNeighborModel : public InternalModel {
       std::sort(vals.begin(), vals.end());
       const size_t mid = vals.size() / 2;
       const double med = (vals.size() % 2 == 0) ? (vals[mid - 1] + vals[mid]) / 2.0 : vals[mid];
-      return double_to_string(med);
+      return java::double_text(med);
     }
 
     const bool weighted = (continuous_method == ContinuousScoring::WEIGHTED_AVERAGE);
@@ -500,7 +500,7 @@ class NearestNeighborModel : public InternalModel {
       sum += w * to_double(training_targets[idx]);
       weight_sum += w;
     }
-    return double_to_string(weight_sum > 0.0 ? sum / weight_sum : 0.0);
+    return java::double_text(weight_sum > 0.0 ? sum / weight_sum : 0.0);
   }
 };
 

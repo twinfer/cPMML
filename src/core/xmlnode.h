@@ -151,6 +151,10 @@ class XmlNode {
 
   bool is_empty() const { return node.empty(); }
 
+  // The underlying pugixml node, for load-time lookups across the document
+  // (TransformedValue::kind_of finds the dataType a FieldRef names).
+  pugi::xml_node xml() const { return node; }
+
  private:
   pugi::xml_node node;
 

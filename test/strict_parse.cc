@@ -380,19 +380,22 @@ static void invalid_inputs() {
 }
 
 // The writer whose text the reader takes back: predictions travel between
-// evaluators as double_to_string text (ensemble combination, Targets, KNN),
-// read with the strict ::to_double, so every double -- non-finite included --
-// must come out in a form the reader accepts.
+// evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
+// read with from_java_text, so every double -- non-finite included -- must
+// come out in a form that reader accepts. The input reader stays XSD-strict:
+// Java's "Infinity" is not an input value.
 static void writer_round_trip() {
   const double inf = std::numeric_limits<double>::infinity();
-  CHECK(double_to_string(inf) == "INF");
-  CHECK(double_to_string(-inf) == "-INF");
-  CHECK(double_to_string(std::numeric_limits<double>::quiet_NaN()) == "NaN");
-  CHECK(double_to_string(-std::numeric_limits<double>::quiet_NaN()) == "NaN");
-  CHECK(double_to_string(2.5) == "2.500000");
-  for (const double value : {inf, -inf, 0.0, -1.25, 1e300, std::numeric_limits<double>::max()})
-    CHECK(::to_double(double_to_string(value)) == value);
-  CHECK(std::isnan(::to_double(double_to_string(std::numeric_limits<double>::quiet_NaN()))));
+  CHECK(java::double_text(inf) == "Infinity");
+  CHECK(java::double_text(-inf) == "-Infinity");
+  CHECK(java::double_text(std::numeric_limits<double>::quiet_NaN()) == "NaN");
+  CHECK(java::double_text(-std::numeric_limits<double>::quiet_NaN()) == "NaN");
+  CHECK(java::double_text(2.5) == "2.5");
+  for (const double value : {inf, -inf, 0.0, -1.25, 1e300, 0.1, std::numeric_limits<double>::max(),
+                             std::numeric_limits<double>::denorm_min()})
+    CHECK(from_java_text(java::double_text(value)) == value);
+  CHECK(std::isnan(from_java_text(java::double_text(std::numeric_limits<double>::quiet_NaN()))));
+  CHECK(throws<cpmml::ParsingException>([] { ::to_double("Infinity"); }));
 }
 
 int main() {

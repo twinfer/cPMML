@@ -8,6 +8,10 @@
 #   tools/cross-validate.sh [--cpmml-exe PATH] [--output-dir DIR]
 #
 # Requires: java (11+), git (2.25+)
+#
+# This compares numbers within a tolerance on JPMML's own test models. To
+# compare cPMML's fixture suite with JPMML as exact text (the predicted value
+# and every OutputField), use tools/cross-validate-text.py.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

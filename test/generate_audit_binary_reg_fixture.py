@@ -9,8 +9,14 @@ functionName="classification", normalizationMethod="softmax").
 Scoring:
   raw_1 = intercept_1 + Σ(numeric_coefs) + Σ(categorical_coefs)
   raw_0 = 0   (second RegressionTable has intercept=0, no predictors)
-  predicted = "1" if raw_1 > raw_0  (i.e. raw_1 > 0)
-            = "0" otherwise
+  predicted = "1.0" if raw_1 > raw_0  (i.e. raw_1 > 0)
+            = "0.0" otherwise
+
+TARGET_Adjusted is dataType="double", so the class value="1" is the double 1,
+which JPMML (Java's Double.toString) and cPMML 2.1 write as "1.0". JPMML 1.7.7
+itself refuses this document (a classification target with
+optype="continuous"), so the expected labels follow the spec and cPMML's
+formatter (src/utils/java_format.h).
 
 Run:
     python test/generate_audit_binary_reg_fixture.py
@@ -140,9 +146,10 @@ def _raw_score(s: Sample) -> float:
 def predict(s: Sample) -> str:
     """
     Binary softmax: raw_0 = 0 (empty second table).
-    Predicted class = '1' if raw_1 > 0, else '0'.
+    Predicted class = '1.0' if raw_1 > 0, else '0.0' (the double class
+    values as Java writes them).
     """
-    return "1" if _raw_score(s) > 0 else "0"
+    return "1.0" if _raw_score(s) > 0 else "0.0"
 
 def probability_1(s: Sample) -> float:
     """P(class=1) under softmax, for reference."""

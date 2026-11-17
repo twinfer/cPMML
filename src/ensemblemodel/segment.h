@@ -56,7 +56,7 @@ class Segment {
   inline std::unique_ptr<InternalScore> score(const Sample& sample) const {
     return model->in_segment_scope(sample, [this](const Sample& s) {
       std::unique_ptr<InternalScore> result = model->score_raw(s);
-      model->target(*result, false);
+      model->finish(*result, false);
       return result;
     });
   }
@@ -67,7 +67,7 @@ class Segment {
   inline std::unique_ptr<InternalScore> result(const Sample& sample) const {
     return model->in_segment_scope(sample, [this](const Sample& s) {
       std::unique_ptr<InternalScore> result = model->score_raw(s);
-      model->target(*result, false);
+      model->finish(*result, false);
       model->add_outputs(s, *result);
       return result;
     });
@@ -75,7 +75,7 @@ class Segment {
 
   inline std::string predict(const Sample& sample) const {
     return model->in_segment_scope(sample,
-                                   [this](const Sample& s) { return model->target(model->predict_raw(s), false); });
+                                   [this](const Sample& s) { return model->finish(model->predict_raw(s), false); });
   }
 };
 

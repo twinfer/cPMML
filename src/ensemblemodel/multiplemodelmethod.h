@@ -407,63 +407,13 @@ class MultipleModelMethod {
     std::vector<ResultField> fields;
   };
 
-  // A number as Java's Double.toString (Float.toString when single) writes it,
-  // which is how JPMML writes the entries of a collection: the shortest
-  // decimal that reads back as the same value, plain between 10^-3 and 10^7,
-  // computerized scientific notation ("1.0E7", "5.0E-5") outside.
-  static std::string java_number(const double number, const bool single) {
-    const double value = single ? static_cast<double>(static_cast<float>(number)) : number;
-    if (std::isnan(value)) return "NaN";
-    if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
-    if (value == 0) return std::signbit(value) ? "-0.0" : "0.0";
-
-    std::array<char, 64> buffer{};
-    const auto converted =
-        single ? std::to_chars(buffer.data(), buffer.data() + buffer.size(), static_cast<float>(value),
-                               std::chars_format::scientific)
-               : std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::scientific);
-    const std::string scientific(buffer.data(), converted.ptr);  // e.g. "-1.25e-04"
-
-    const bool negative = scientific[0] == '-';
-    const size_t e = scientific.find('e');
-    const int exponent = std::stoi(scientific.substr(e + 1));
-    std::string digits;
-    for (size_t i = negative ? 1 : 0; i < e; i++)
-      if (scientific[i] != '.') digits += scientific[i];
-
-    std::string text = negative ? "-" : "";
-    const double magnitude = std::abs(value);
-    if (magnitude >= 1e-3 && magnitude < 1e7) {
-      if (exponent >= 0) {
-        const size_t integer_digits = static_cast<size_t>(exponent) + 1;
-        if (digits.size() < integer_digits) digits.append(integer_digits - digits.size(), '0');
-        text += digits.substr(0, integer_digits) + ".";
-        text += digits.size() > integer_digits ? digits.substr(integer_digits) : "0";
-      } else {
-        text += "0." + std::string(static_cast<size_t>(-exponent - 1), '0') + digits;
-      }
-    } else {
-      text += digits.substr(0, 1) + "." + (digits.size() > 1 ? digits.substr(1) : "0") + "E" + std::to_string(exponent);
-    }
-    return text;
-  }
-
   // A numeric OutputField value as JPMML writes it in a collection, by the
-  // field's dataType: 7 for an integer, true/false for a boolean, Java's
-  // float and double notation otherwise. The date and time types are carried
-  // as doubles (see DataType) and are written as such; so is the value of an
-  // OutputField without a dataType attribute, whatever its target's type.
+  // field's dataType (java_kind): 7 for an integer, true/false for a boolean,
+  // Java's float and double notation otherwise. The date and time types are
+  // carried as doubles (see DataType) and are written as such; so is the value
+  // of an OutputField without a dataType attribute, whatever its target's type.
   static std::string collection_entry(const double value, const OutputField& field) {
-    if (field.integer && std::trunc(value) == value && std::abs(value) < 9.2e18)
-      return std::to_string(static_cast<long long>(value));
-    switch (field.datatype.value) {
-      case DataType::DataTypeValue::BOOLEAN:
-        return value != 0 ? "true" : "false";
-      case DataType::DataTypeValue::FLOAT:
-        return java_number(value, true);
-      default:
-        return java_number(value, false);
-    }
+    return java::text({value, java_kind(field.datatype, field.integer)});
   }
 
   // The fields a segment model's result returns: its own OutputFields, then
@@ -613,7 +563,7 @@ class MultipleModelMethod {
     double total = 0;
     for (const auto& r : usable.results) {
       const double w = weighted ? r.segment->weight : 1.0;
-      score += weighted ? to_double(r.result) * w : to_double(r.result);
+      score += weighted ? from_java_text(r.result) * w : from_java_text(r.result);
       total += w;
     }
 
@@ -624,7 +574,7 @@ class MultipleModelMethod {
   static std::vector<double> values_of(const std::vector<Selected<std::string>>& results) {
     std::vector<double> values;
     values.reserve(results.size());
-    for (const auto& r : results) values.push_back(to_double(r.result));
+    for (const auto& r : results) values.push_back(from_java_text(r.result));
     return values;
   }
 
@@ -826,9 +776,10 @@ class MultipleModelMethod {
   }
 
   // selectAll: collect every active segment's prediction and format as PMML
-  // Collection string "[pred1, pred2, ...]". A segment without a prediction
-  // leaves an empty entry (JPMML writes null), or under returnMissing voids the
-  // result. skipSegment, which JPMML refuses here, acts as continue. The
+  // Collection string "[pred1, pred2, ...]", each as the segment writes it
+  // (java_format.h). A segment without a prediction is written null, as JPMML
+  // writes a missing entry (it was left empty, "[, ]"), or under returnMissing
+  // voids the result. skipSegment, which JPMML refuses here, acts as continue. The
   // segments' OutputFields are returned as collections (add_collections); a
   // segment is scored for them, on top of its prediction, only when it has any.
   inline static std::unique_ptr<InternalScore> select_all(const Sample& sample, const std::vector<Segment>& ensemble,
@@ -843,7 +794,7 @@ class MultipleModelMethod {
         if (prediction.empty() && mp.treatment == MissingPredictionTreatment::RETURN_MISSING)
           return std::make_unique<InternalScore>();
         if (!first) result += ", ";
-        result += prediction;
+        result += prediction.empty() ? "null" : prediction;
         first = false;
         if (segment.has_outputs) {
           with_fields = true;

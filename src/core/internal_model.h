@@ -61,6 +61,17 @@ class InternalModel {
   // derivedfields_dag in score().
   std::vector<std::string> segment_dag;
 
+  // How the predicted value is written (utils/java_format.h), fixed at load by
+  // the target field. A regression prediction is a number of the target's
+  // dataType: Double.toString for double ("1.5"), Float.toString for float,
+  // "7" for integer. A classification prediction of a non-string target is a
+  // label written as JPMML writes that type: "1.0" for the class value="1" of
+  // a double target, "true" for value="1" of a boolean one. String targets,
+  // clustering and association results are text and stay as they are.
+  enum class Shown : unsigned char { AS_IS, NUMBER, LABEL };
+  Shown shown = Shown::AS_IS;
+  java::Kind shown_kind = java::Kind::DOUBLE;
+
   InternalModel() = default;
 
   // There was a second constructor here taking no TransformationDictionary. It
@@ -83,7 +94,138 @@ class InternalModel {
         base_sample(create_basesample(indexer)),
         derivedfields_dag(DagBuilder::build(mining_schema, this->transformation_dictionary)),
         local_derivedfields(get_local_derivedfields(node)),
-        is_scorable(check_scorable(node)) {}
+        is_scorable(check_scorable(node)) {
+    set_shown();
+  }
+
+  void set_shown() {
+    shown_kind = java_kind(target_field.datatype, target_field.integer);
+    const bool text = target_field.datatype.value == DataType::DataTypeValue::STRING;
+    // A double target is rewritten too: most models already compute a double
+    // and write it with Double.toString, but a TreeModel's prediction is the
+    // Node@score text, which is "10" or "1e7" in the document and 10.0 or
+    // 1.0E7 to JPMML.
+    if (mining_function.value == MiningFunction::MiningFunctionType::REGRESSION && !text)
+      shown = Shown::NUMBER;
+    else if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && !text)
+      shown = Shown::LABEL;
+    else
+      shown = Shown::AS_IS;
+  }
+
+  // The class `label` of a non-string target as JPMML writes it; `label`
+  // itself when it is not a value of the target's type. A model names its
+  // classes with a handful of texts, so the answer is remembered per thread
+  // (it depends on the text and shown_kind only): rewriting "1" as "1.0" on
+  // every record cost AuditBinaryReg 15% before.
+  inline const std::string& label_text(const std::string& label) const {
+    thread_local std::unordered_map<std::string, std::string> known[4];
+    auto& cache = known[static_cast<size_t>(shown_kind)];
+    const auto it = cache.find(label);
+    if (it != cache.end()) return it->second;
+    if (cache.size() > 4096) cache.clear();  // labels are few; this bounds a pathological model
+    return cache.emplace(label, compute_label_text(label)).first->second;
+  }
+
+  inline std::string compute_label_text(const std::string& label) const {
+    if (shown_kind == java::Kind::BOOLEAN) {
+      bool parsed = false;
+      return lexical::parse_boolean(label, parsed) ? java::boolean_text(parsed) : label;
+    }
+    if (shown_kind == java::Kind::INTEGER && is_long_text(label)) return label;  // already "7"
+    double parsed = 0;
+    return java::parse(label, parsed) ? java::text({parsed, shown_kind}) : label;
+  }
+
+  // "0", or an optional '-' and digits without a leading zero: Long.toString
+  // of itself.
+  static bool is_long_text(const std::string& text) {
+    size_t i = !text.empty() && text[0] == '-' ? 1 : 0;
+    if (i >= text.size() || (text[i] == '0' && (text.size() > i + 1 || i == 1))) return false;
+    if (text.size() - i > 18) return false;
+    for (; i < text.size(); i++)
+      if (text[i] < '0' || text[i] > '9') return false;
+    return true;
+  }
+
+  // The prediction `score`, after the Target, written as `shown` says. A
+  // displayValue is text and is left alone: the score is a displayValue when
+  // the Target set raw_score to something else.
+  inline void present(InternalScore& score) const {
+    if (shown == Shown::AS_IS || score.empty) return;
+    if (shown == Shown::NUMBER) {
+      if (is_double_min(score.double_score)) return;  // not a number: nothing to rewrite
+      score.score = java::text({score.double_score, shown_kind});
+      double raw = 0;
+      if (!score.raw_score.empty() && java::parse(score.raw_score, raw))
+        score.raw_score = java::text({raw, shown_kind});
+      return;
+    }
+    if (score.raw_score.empty() || score.raw_score == score.score) {
+      score.score = label_text(score.score);
+      if (!score.raw_score.empty()) score.raw_score = score.score;
+    } else {
+      score.raw_score = label_text(score.raw_score);  // score is a displayValue
+    }
+    // Rename the classes of the distribution in place: the nodes are moved,
+    // not reallocated. Two spellings of one class ("1", "1.0") add up.
+    using Node = std::unordered_map<std::string, double>::node_type;
+    auto& probabilities = score.probabilities;
+    std::array<Node, 8> few;
+    std::vector<Node> many;
+    size_t renamed = 0;
+    for (auto it = probabilities.begin(); it != probabilities.end();) {
+      const auto next = std::next(it);
+      const std::string& shown_label = label_text(it->first);
+      if (shown_label != it->first) {
+        Node node = probabilities.extract(it);
+        node.key() = shown_label;
+        if (renamed < few.size())
+          few[renamed] = std::move(node);
+        else
+          many.push_back(std::move(node));
+        renamed++;
+      }
+      it = next;
+    }
+    const auto put_back = [&probabilities](Node& node) {
+      auto inserted = probabilities.insert(std::move(node));
+      if (!inserted.inserted) inserted.position->second += inserted.node.mapped();
+    };
+    for (size_t i = 0; i < std::min(renamed, few.size()); i++) put_back(few[i]);
+    for (auto& node : many) put_back(node);
+  }
+
+  // The Target, then the text of the prediction (present).
+  inline void finish(InternalScore& score, const bool display = true) const {
+    target(score, display);
+    present(score);
+  }
+
+  // The same for a prediction carried as text (predict_raw). A label is
+  // rewritten before the Target, which matches classes by value and may
+  // rename it to a displayValue; a number after it, as the Target rescales
+  // the number.
+  inline std::string finish(const std::string& predicted, const bool display = true) const {
+    switch (shown) {
+      case Shown::LABEL: {
+        const std::string shown_text = target(predicted.empty() ? predicted : label_text(predicted), display);
+        // A prior (no prediction) is the document's text: rewrite it too
+        // unless it is a displayValue.
+        if (predicted.empty() && !shown_text.empty() && !target.is_display_value(shown_text, display))
+          return label_text(shown_text);
+        return shown_text;
+      }
+      case Shown::NUMBER: {
+        const std::string number = target(predicted, display);
+        double value = 0;
+        return !number.empty() && java::parse(number, value) ? java::text({value, shown_kind}) : number;
+      }
+      case Shown::AS_IS:
+        break;
+    }
+    return target(predicted, display);
+  }
 
   std::string output_name() const {
     if (!output.empty) {
@@ -200,12 +342,19 @@ class InternalModel {
   inline bool augment(Sample& sample) const {
     ChainScope scope(*this, sample);
     std::unique_ptr<InternalScore> score = score_raw(sample);
-    target(*score, false);
+    finish(*score, false);
     if (score->empty) {
       sample.change_value(indexer->get_index(target_field.name), Value());
       return false;
     }
-    sample.change_value(indexer->get_index(target_field.name), Value(score->score, target_field.datatype));
+    // A number goes in as the number: its text may be Java's "Infinity",
+    // which the document reader refuses.
+    const bool numeric = target_field.datatype.value != DataType::DataTypeValue::STRING &&
+                         target_field.datatype.value != DataType::DataTypeValue::BOOLEAN &&
+                         !is_double_min(score->double_score);
+    sample.change_value(indexer->get_index(target_field.name),
+                        numeric ? Value(score->double_score, target_field.datatype)
+                                : Value(score->score, target_field.datatype));
     _write_outputs_to_sample(sample, *score);
     return true;
   };
@@ -218,7 +367,7 @@ class InternalModel {
   inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {
     ChainScope scope(*this, sample);
     std::unique_ptr<InternalScore> score = score_raw(sample);
-    target(*score, false);
+    finish(*score, false);
     add_outputs(sample, *score);
 
     return score;
@@ -337,7 +486,7 @@ class InternalModel {
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
     // Preserve the pre-Target prediction, unless the model recorded one itself.
     if (score->raw_score.empty()) score->raw_score = score->score;
-    target(*score);
+    finish(*score);
     output.add_output(internal_sample, *score);
 
     return score;
@@ -370,7 +519,7 @@ class InternalModel {
     if (!mining_schema.validate(internal_sample))
       throw cpmml::InvalidValueException("Sample: " + to_string(sample) + "didn't pass input validation");
 
-    return target(predict_raw(internal_sample));
+    return finish(predict_raw(internal_sample));
   };
 
   static inline Target get_target(const XmlNode& node, const MiningSchema& mining_schema,

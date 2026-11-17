@@ -163,11 +163,11 @@ class AssociationOutput : public OutputExpression {
       case RuleFeature::RULE:
         return "{" + mr.antecedent + "}->{" + mr.consequent + "}";
       case RuleFeature::SUPPORT:
-        return double_to_string(mr.support);
+        return java::double_text(mr.support);
       case RuleFeature::CONFIDENCE:
-        return double_to_string(mr.confidence);
+        return java::double_text(mr.confidence);
       case RuleFeature::LIFT:
-        return double_to_string(mr.lift);
+        return java::double_text(mr.lift);
     }
     return "";
   }

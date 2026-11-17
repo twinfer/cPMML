@@ -164,7 +164,7 @@ class AssociationModel : public InternalModel {
     auto active = build_active_items_from_basket(basket);
     auto result = score_from_active(active);
     result->raw_score = result->score;
-    target(*result);
+    finish(*result);
     output.add_output(internal_sample, *result);
     return result;
   }

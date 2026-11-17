@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "cPMML.h"
+#include "java_format.h"
 #include "lexical.h"
 #include "miniz.h"
 
@@ -57,24 +58,23 @@ inline double to_double(const std::string_view value) {
   return parsed;
 }
 
-/**
- * Locale-independent equivalent of `std::to_string(double)`, which formats
- * through `sprintf("%f")` and therefore honours LC_NUMERIC. Same output as
- * `std::to_string` under the classic locale for a finite value: fixed
- * notation, six decimals. A non-finite value is written in its XSD form --
- * INF, -INF, NaN -- not as to_chars' "inf"/"-nan": predictions travel between
- * evaluators as this text (ensemble combination, Targets, KNN, anomaly
- * detection) and are read back with the strict ::to_double, which takes only
- * the XSD spellings.
- */
-inline std::string double_to_string(const double value) {
-  if (std::isnan(value)) return "NaN";
-  if (std::isinf(value)) return value > 0 ? "INF" : "-INF";
-  std::array<char, 512> buffer{};
-  const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::fixed, 6);
-  if (result.ec != std::errc()) return std::to_string(value);  // unreachable for finite doubles
+// Numbers become text through utils/java_format.h only: java::double_text,
+// java::float_text, java::text(java::Number) or std::format("{}", ...). The
+// fixed six-decimal double_to_string is gone (see the changelog).
 
-  return std::string(buffer.data(), result.ptr);
+/**
+ * A prediction cPMML wrote as text, read back as a number: a segment's
+ * prediction combined by its MiningModel, a KNN or anomaly-detection
+ * intermediate. The text is java_format.h's, so "Infinity" reads, which the
+ * XSD reader (::to_double) refuses. Throws ParsingException for text that is
+ * not a number.
+ */
+inline double from_java_text(const std::string_view text) {
+  double parsed = 0.0;
+  if (!java::parse(text, parsed))
+    throw cpmml::ParsingException("\"" + std::string(text) + "\" is not a number");
+
+  return parsed;
 }
 
 template <class T>
@@ -339,48 +339,15 @@ static inline std::vector<char> read_file(const std::string& filepath, const boo
   return read_xml(filepath);
 }
 
-template <class T>
-inline std::string format_num(const T& value) {
-  std::stringstream sstr_value;
-  std::string str_value;
-  std::stringstream res;
-  sstr_value.precision(std::numeric_limits<T>::max_digits10);
-  sstr_value << value;
-  str_value = sstr_value.str();
-  if (str_value.find("e") != std::string::npos) return str_value;
-  std::vector<std::string> parts = split(str_value, ".");
-
-  std::reverse(parts[0].begin(), parts[0].end());
-  for (auto i = 0u; i < parts[0].size(); i++) {
-    if (i != 0 && i % 3 == 0) res << ",";
-
-    res << parts[0][i];
-  }
-
-  std::string res_str = res.str();
-  std::reverse(res_str.begin(), res_str.end());
-  return res_str + (parts.size() > 1 ? "." + (parts[1].size() > 3 ? parts[1].substr(0, 3) : parts[1]) : "");
-}
-
+// Thousands separators for a count in a report ("1,234,567"; the benchmark's
+// records per second). Not a value of a model: those are written by
+// java_format.h.
 inline std::string format_int(const int& value) {
-  std::stringstream sstr_value;
-  std::string str_value;
-  std::stringstream res;
-  sstr_value.precision(std::numeric_limits<int>::max_digits10);
-  sstr_value << value;
-  str_value = sstr_value.str();
-  if (str_value.find("e") != std::string::npos) return str_value;
+  std::string digits = std::to_string(value);
+  const size_t first = digits[0] == '-' ? 1 : 0;
+  for (size_t i = digits.size(); i > first + 3; i -= 3) digits.insert(i - 3, ",");
 
-  std::reverse(str_value.begin(), str_value.end());
-  for (auto i = 0u; i < str_value.size(); i++) {
-    if (i != 0 && i % 3 == 0) res << ",";
-
-    res << str_value[i];
-  }
-
-  std::string res_str = res.str();
-  std::reverse(res_str.begin(), res_str.end());
-  return res_str;
+  return digits;
 }
 
 //}@

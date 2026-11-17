@@ -100,7 +100,7 @@ class ScorecardModel : public InternalModel {
 
   inline std::string predict_raw(const Sample& sample) const override {
     const Scored scored = compute(sample);
-    return scored.valid ? double_to_string(scored.total) : "";
+    return scored.valid ? java::double_text(scored.total) : "";
   }
 
  private:

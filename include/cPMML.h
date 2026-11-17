@@ -196,6 +196,17 @@ class CPMML_API Result {
 
   /**
    * @brief It returns the predicted value as a string.
+   *
+   * The text is the value as JPMML writes it, that is as Java writes the
+   * target's type: a double by Double.toString ("1.5", "2.0", "1.0E7",
+   * "1.0E-4", "Infinity", "NaN"), a float by Float.toString, an integer as
+   * "7", a boolean as "true"/"false". A class label of a numeric target is
+   * written the same way ("1.0" for the class value="1" of a double target);
+   * a string class, a displayValue, a cluster id are returned as the document
+   * spells them.
+   *
+   * Breaking change in 2.1: a number used to be written with six fixed
+   * decimals ("1.500000") and an infinity as "INF".
    */
   std::string as_string() const;
 
@@ -218,6 +229,10 @@ class CPMML_API Result {
 
   /**
    * @brief Returns categorical (string) output fields.
+   *
+   * An OutputField with dataType="string" over a number holds the number's
+   * text, written as as_string() writes it ("0.1", "3", "true"); a selectAll
+   * collection is "[entry, entry]" with a missing entry written null.
    */
   std::unordered_map<std::string, std::string> str_outputs() const;
 
