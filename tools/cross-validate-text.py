@@ -33,6 +33,8 @@ Usage:
 
 Exit status: 0 when no fixture has a mismatch (JPMML errors and skips do not
 count), 1 otherwise. Requires python3 (standard library only) and java.
+The text helpers (classify, same_number, the CSV reader) live in
+tools/pmmltext.py, shared with tools/fuzz/compare.py.
 """
 
 from __future__ import annotations
@@ -40,91 +42,17 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import csv
-import math
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-JPMML_MISSING = "N/A"
-
-
-def local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
-def model_info(pmml_path: Path):
-    """(functionName, target, set of DataField names, set of OutputField names)."""
-    text = pmml_path.read_bytes()
-    if text.startswith(b"\xef\xbb\xbf"):
-        text = text[3:]
-    root = ET.fromstring(text.strip())
-    data_fields = set()
-    outputs = set()
-    function, target = None, None
-    for el in root.iter():
-        name = local(el.tag)
-        if name == "DataField":
-            data_fields.add(el.get("name"))
-        elif name == "OutputField":
-            outputs.add(el.get("name"))
-    for child in root:
-        if child.get("functionName"):
-            function = child.get("functionName")
-            for schema in child:
-                if local(schema.tag) != "MiningSchema":
-                    continue
-                for mf in schema:
-                    if mf.get("usageType") in ("target", "predicted"):
-                        target = mf.get("name")
-                        break
-            break
-    return function, target, data_fields, outputs
-
-
-def as_number(text: str):
-    spelled = {"Infinity": math.inf, "-Infinity": -math.inf, "NaN": math.nan}
-    if text in spelled:
-        return spelled[text]
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def same_number(a: str, b: str) -> bool:
-    x, y = as_number(a), as_number(b)
-    if x is None or y is None:
-        return False
-    if math.isnan(x) or math.isnan(y):
-        return math.isnan(x) and math.isnan(y)
-    if math.isinf(x) or math.isinf(y):
-        return x == y
-    return abs(x - y) <= 1e-12 * max(abs(x), abs(y), 1e-300)
-
-
-def classify(jpmml: str, cpmml: str) -> str:
-    """FORMAT: the same number written differently ("1" for "1.0", "1.500000"
-    for "1.5"); ROUNDING: numbers within 1e-12 relative, the last bits of a
-    computation done in a different order; VALUE: anything else, -0.0 against
-    0.0 included."""
-    x, y = as_number(jpmml), as_number(cpmml)
-    if x is not None and y is not None:
-        if (x == y and math.copysign(1, x) == math.copysign(1, y)) or (math.isnan(x) and math.isnan(y)):
-            return "FORMAT"
-        if same_number(jpmml, cpmml) and math.copysign(1, x) == math.copysign(1, y):
-            return "ROUNDING"
-    return "VALUE"
-
-
-def read_csv(path: Path):
-    with open(path, newline="") as f:
-        return list(csv.reader(f))
+sys.path.insert(0, str(REPO / "tools"))
+from pmmltext import JPMML_MISSING, classify, model_info, read_csv  # noqa: E402
 
 
 def check(name: str, args) -> dict:

@@ -1,0 +1,455 @@
+{
+  "version": 0,
+  "about": "Known departures of cPMML (as docs/design/typed-core.md designs it) from JPMML 1.7.7, D1..D22 of §8.5, read by tools/fuzz/compare.py. 'spec': true marks a departure from the PMML 4.4.1 specification itself; every other entry follows the spec where JPMML does not, or is a choice where the spec is silent. A rule matches a non-identical cell: 'kinds' (its class), 'tags_all' / 'tags_any' / 'tags_none' (fnmatch patterns over the case's tags from tools/fuzz/gen.py), 'jpmml' / 'cpmml' / 'column' (regular expressions searched in the cell text or column name), 'cpmml_x' (searched in cPMML's string text of x in the same row: JPMML fails a record as a whole, so a rule about x is checked on x, and covers the other columns of that record), 'unreferenced_field' (a regex whose group 1 is a field name taken from cPMML's cell; the rule matches only if the case never reads that field), 'row' (field -> full-match regex on the input row, N/A for missing) and 'row_any' (full-match regex on any input cell). A rule encodes the value cPMML is DESIGNED to give, so a cell where today's cPMML still has a known bug (B1..B34) does not match and is reported as a finding. v0 rules key on the case's tags, not on the sub-expression that produced the cell; P11's shrinker narrows them. 'measured' records what P0 observed with tools/fuzz/JpmmlOracle.java.",
+  "departures": [
+    {
+      "id": "D1",
+      "cpmml": "numeric mixed-type comparisons in the promoted type, either order",
+      "jpmml": "converts to the left operand's type: equal(f, double 0.1) is true (double narrowed to float); equal(i, double 3.5) throws TypeCheckException",
+      "basis": "Functions.html least-restrictive precedence",
+      "match": [
+        {
+          "kinds": [
+            "VALUE"
+          ],
+          "tags_any": [
+            "sig:equal(float,double)",
+            "sig:notEqual(float,double)",
+            "sig:less*(float,double)",
+            "sig:greater*(float,double)"
+          ],
+          "jpmml": "^(true|false)$",
+          "cpmml": "^(true|false)$"
+        },
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_any": [
+            "sig:equal(integer,double)",
+            "sig:notEqual(integer,double)",
+            "sig:less*(integer,double)",
+            "sig:greater*(integer,double)",
+            "sig:equal(integer,float)",
+            "sig:notEqual(integer,float)",
+            "sig:less*(integer,float)",
+            "sig:greater*(integer,float)"
+          ],
+          "jpmml": "TypeCheckException",
+          "cpmml_x": "^(true|false|N/A)$"
+        }
+      ]
+    },
+    {
+      "id": "D2",
+      "cpmml": "string x number equality compared as text, either order",
+      "jpmml": "parses the string when the number is the left operand (NumberFormatException on unparsable text)",
+      "basis": "Functions.html least-restrictive precedence",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_any": [
+            "sig:equal(integer,string)",
+            "sig:equal(float,string)",
+            "sig:equal(double,string)",
+            "sig:notEqual(integer,string)",
+            "sig:notEqual(float,string)",
+            "sig:notEqual(double,string)"
+          ],
+          "jpmml": "NumberFormatException",
+          "cpmml_x": "^(true|false)$"
+        }
+      ]
+    },
+    {
+      "id": "D3",
+      "cpmml": "if with a missing condition gives missing (then mapMissingTo/defaultValue)",
+      "jpmml": "MissingArgumentException: Function \"if\" cannot accept missing value at position 0 (measured)",
+      "basis": "BuiltinFunctions.html: \"Except as noted below, any missing inputs to a built-in function will result in a missing value being returned.\"",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "fn:if"
+          ],
+          "tags_none": [
+            "mapMissingTo",
+            "defaultValue"
+          ],
+          "jpmml": "MissingArgumentException: Function \"\"?if\"\"? cannot accept missing value at position 0",
+          "cpmml_x": "^N/A$"
+        }
+      ]
+    },
+    {
+      "id": "D4",
+      "cpmml": "integers are int64; overflow invalid",
+      "jpmml": "32-bit: an integer input 2147483648 or 9007199254740993 fails the record (ValueCheckException under returnInvalid, IllegalArgumentException under asIs; measured); refuses 1e10",
+      "basis": "XSD integer is unbounded; int64 is the representable subset (Q10)",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "jpmml": "(IllegalArgumentException: |ValueCheckException: Field \"i\" cannot accept invalid value \")(2147483648|9007199254740993)",
+          "row": {
+            "i": "2147483648|9007199254740993"
+          }
+        }
+      ]
+    },
+    {
+      "id": "D5",
+      "cpmml": "rint, expm1, ln1p, hypot return double",
+      "jpmml": "rint(3) is 3",
+      "basis": "BuiltinFunctions.html pseudo-declarations: <DefineFunction name=\"rint\" optype=\"continuous\" dataType=\"double\"> (and the same for expm1, ln1p, hypot)",
+      "match": [
+        {
+          "kinds": [
+            "FORMAT"
+          ],
+          "tags_any": [
+            "fn:rint",
+            "fn:expm1",
+            "fn:ln1p",
+            "fn:hypot"
+          ],
+          "jpmml": "^-?\\d+$",
+          "cpmml": "^-?\\d+\\.0$"
+        }
+      ]
+    },
+    {
+      "id": "D6",
+      "cpmml": "an aggregate's type comes from the declared argument types even when one is skipped (max(int, double missing) is -7.0)",
+      "jpmml": "-7",
+      "basis": "\"the least restrictive dataType will be inherited\"",
+      "match": [
+        {
+          "kinds": [
+            "FORMAT"
+          ],
+          "tags_any": [
+            "sig:min(*double*)",
+            "sig:max(*double*)",
+            "sig:sum(*double*)",
+            "sig:product(*double*)",
+            "sig:min(*float*)",
+            "sig:max(*float*)",
+            "sig:sum(*float*)",
+            "sig:product(*float*)"
+          ],
+          "jpmml": "^-?\\d+$",
+          "cpmml": "^-?\\d+\\.0$"
+        }
+      ]
+    },
+    {
+      "id": "D7",
+      "cpmml": "if has the common type of THEN and ELSE",
+      "jpmml": "type of the branch taken",
+      "basis": "static typing; spec silent",
+      "match": [
+        {
+          "kinds": [
+            "FORMAT"
+          ],
+          "tags_any": [
+            "sig:if(boolean,integer,double)",
+            "sig:if(boolean,double,integer)",
+            "sig:if(boolean,integer,float)",
+            "sig:if(boolean,float,integer)"
+          ],
+          "jpmml": "^-?\\d+$",
+          "cpmml": "^-?\\d+\\.0$"
+        }
+      ]
+    },
+    {
+      "id": "D8",
+      "cpmml": "pow of integers with a negative exponent is invalid and follows invalidValueTreatment",
+      "jpmml": "InvalidArgumentException: Function \"pow\" cannot accept \"exponent\" value of -1 regardless of invalidValueTreatment (measured)",
+      "basis": "Apply output table (invalidValueTreatment)",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "fn:pow"
+          ],
+          "tags_any": [
+            "ivt:asMissing"
+          ],
+          "jpmml": "Function \"\"?pow\"\"? cannot accept \"\"?exponent",
+          "cpmml_x": "^N/A$"
+        }
+      ]
+    },
+    {
+      "id": "D9",
+      "cpmml": "+-INF against the same INF gives missing; NaN in comparisons gives missing (extrapolation)",
+      "jpmml": "equal(INF, INF) and equal(NaN, NaN) are both true (measured: Java Double.compare semantics, not IEEE)",
+      "basis": "BuiltinFunctions.html lessThan: \"By definition, INF is taken as greater than any finite number or -INF and -INF is taken as less than any finite number or INF. But any attempt to either with itself is indeterminate and will result in a missing value being returned.\" For NaN the spec says only \"All arithmetic expressions involving NaN will evaluate to NaN\" (Transformations.html): the NaN rule is the design's extrapolation",
+      "match": [
+        {
+          "kinds": [
+            "VALUE"
+          ],
+          "tags_any": [
+            "fn:equal",
+            "fn:notEqual",
+            "fn:less*",
+            "fn:greater*"
+          ],
+          "jpmml": "^(true|false)$",
+          "cpmml": "^N/A$",
+          "row_any": "NaN|INF|-INF|3\\.4e39"
+        }
+      ]
+    },
+    {
+      "id": "D10",
+      "cpmml": "an untyped Constant NaN/INF/-INF is a string",
+      "jpmml": "a number: <Constant>NaN</Constant> in a string DerivedField gives NaN, INF gives Infinity, -INF gives -Infinity (measured)",
+      "basis": "Transformations.html Constant: \"The presence of any non-numeric characters (other than e, E, -, + in scientific notation expressions ) will result in the Constant being treated as a string\"; the INF/NaN values are \"case insensitive and only meaningful as floating point values ( datatype equal to \"float\" or \"double\")\"",
+      "match": [
+        {
+          "kinds": [
+            "VALUE"
+          ],
+          "tags_any": [
+            "const:NaN",
+            "const:inf",
+            "const:INF",
+            "const:-INF"
+          ],
+          "jpmml": "^(NaN|-?Infinity)$",
+          "cpmml": "^(NaN|-?INF|-?inf)$"
+        }
+      ]
+    },
+    {
+      "id": "D11",
+      "spec": true,
+      "cpmml": "inputs, attributes and Array members use the strict, case-sensitive XSD lexical forms (TRUE, inf, 1d, 1.0 for an integer are invalid); only Constant text accepts INF/NaN in any case",
+      "jpmml": "lenient: accepts TRUE for a boolean and 1.0 for an integer (measured)",
+      "basis": "DataDictionary.html dataTypes are XML Schema Part 2 types; the case-insensitivity sentence of Transformations.html is about Constants (§2.6)",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_CPMML_ONLY"
+          ],
+          "cpmml": "Invalid value for field \\w+: \"\"?[^\"]*\"\"? is not a valid (boolean|integer|double|float)"
+        },
+        {
+          "kinds": [
+            "LOAD_CPMML_ONLY"
+          ],
+          "cpmml": "\"[^\"]*\" is not a valid (boolean|integer|double|float)"
+        }
+      ]
+    },
+    {
+      "id": "D12",
+      "cpmml": "forward-referenced OutputFields and DerivedFields accepted, ordered by dependency",
+      "jpmml": "refuses forward OutputField references",
+      "basis": "leniency on invalid PMML (Q4)",
+      "match": [
+        {
+          "kinds": [
+            "LOAD_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "output-forward-ref"
+          ]
+        }
+      ],
+      "note": "v0 generates forward DerivedField references only (ctx2), which both evaluators accept; no case is tagged output-forward-ref yet"
+    },
+    {
+      "id": "D13",
+      "cpmml": "a FieldRef to a missing predictedValue applies mapMissingTo",
+      "jpmml": "fails the record",
+      "basis": "Transformations.html FieldRef: \"The optional attribute mapMissingTo may be used to map a missing result to the value specified by the attribute.\"",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "fieldref-predicted-mapmissing"
+          ]
+        }
+      ],
+      "note": "not generated in v0"
+    },
+    {
+      "id": "D14",
+      "cpmml": "number -> boolean only for 0 and 1",
+      "jpmml": "measured in P0: a boolean DerivedField over integer 0/1 and over double 0.0/-0.0/1.0 gives false/true, any other value TypeCheckException -- the same rule; §8.5's 'refuses integers' does not hold for a FieldRef",
+      "basis": "XSD boolean lexical space {true, false, 1, 0}",
+      "match": [],
+      "note": "no disagreement expected from JPMML; cPMML giving true for 2, INF or NaN is B24"
+    },
+    {
+      "id": "D15",
+      "cpmml": "binary similarity measures read strings 1/0 as booleans",
+      "jpmml": "only true/false",
+      "basis": "XSD boolean lexical space",
+      "match": [],
+      "note": "v0 generates no clustering or KNN model"
+    },
+    {
+      "id": "D16",
+      "cpmml": "median implemented",
+      "jpmml": "ApplyException: Function \"median\" is not defined (measured, at evaluation)",
+      "basis": "BuiltinFunctions.html lists median among the aggregate functions",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "fn:median"
+          ],
+          "jpmml": "Function \"\"?median\"\"? is not defined"
+        },
+        {
+          "kinds": [
+            "LOAD_JPMML_ONLY"
+          ],
+          "tags_all": [
+            "fn:median"
+          ],
+          "jpmml": "median"
+        }
+      ]
+    },
+    {
+      "id": "D17",
+      "spec": true,
+      "cpmml": "(Q1) number -> string text inside expressions is Java text, including in concat",
+      "jpmml": "Java text",
+      "basis": "concat points to XQuery fn:concat, whose casts write a whole double as 2; one text rule for the whole library is preferred (Q1)",
+      "match": [],
+      "note": "a departure from the spec, not from JPMML: no disagreement expected"
+    },
+    {
+      "id": "D18",
+      "cpmml": "input -0 stays -0.0",
+      "jpmml": "0.0 (measured in P0: a double or float FieldRef of input -0 is 0.0)",
+      "basis": "XSD double has -0",
+      "match": [
+        {
+          "kinds": [
+            "VALUE"
+          ],
+          "jpmml": "^0\\.0$",
+          "cpmml": "^-0\\.0$",
+          "row_any": "-0"
+        }
+      ]
+    },
+    {
+      "id": "D19",
+      "cpmml": "ordering over a categorical or Values-less ordinal string operand evaluates with a warning",
+      "jpmml": "EvaluationException: Categorical value cannot be used in comparison operations (measured, for Apply and for a TreeModel SimplePredicate)",
+      "basis": "Q6",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_any": [
+            "fn:less*",
+            "fn:greater*",
+            "tree-op:less*",
+            "tree-op:greater*"
+          ],
+          "jpmml": "Categorical value cannot be used in comparison operations"
+        }
+      ]
+    },
+    {
+      "id": "D20",
+      "spec": true,
+      "cpmml": "integer x/0 (x != 0) is invalid, not INF",
+      "jpmml": "invalid (N/A under asMissing)",
+      "basis": "BuiltinFunctions.html \"If a positive number is divided by zero, INF will be returned.\" meets \"Since INF and -INF can only be floating point numbers, they will cause floor, ceil, round, and modulo to return an invalid value.\"; XQuery raises err:FOAR0001 for integer division by zero",
+      "match": [],
+      "note": "a departure from the spec, not from JPMML: no disagreement expected; cPMML giving Infinity is B21"
+    },
+    {
+      "id": "D21",
+      "cpmml": "Discretize/MapValues without dataType take the nearest enclosing declared type",
+      "jpmml": "same",
+      "basis": "spec and XSD silent; JPMML and today's cPMML",
+      "match": []
+    },
+    {
+      "id": "D22",
+      "spec": true,
+      "cpmml": "integer-field document text with a decimal point (33.0) is a double and the field is widened to compare; a replacement or clamp bound that is not an integer widens the slot",
+      "jpmml": "scores",
+      "basis": "Functions.html implicit casts only toward less restriction (§3.4)",
+      "match": [],
+      "note": "no disagreement expected from JPMML"
+    }
+  ],
+  "proposed": [
+    {
+      "id": "P0-NaN-result",
+      "cpmml": "an arithmetic result NaN is NaN",
+      "jpmml": "EvaluationException: Function \"+\" returned invalid value (measured: d = NaN in +(d, INF)); the record fails",
+      "basis": "Transformations.html: \"All arithmetic expressions involving NaN will evaluate to NaN.\" Not in §8.5; proposed as D23",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "jpmml": "Function \"[^\"]+\" returned invalid value",
+          "cpmml_x": "^NaN$"
+        }
+      ]
+    },
+    {
+      "id": "P0-missing-argument",
+      "cpmml": "a missing argument of a built-in function gives missing (then mapMissingTo/defaultValue), for every function the spec does not except",
+      "jpmml": "MissingArgumentException: Function \"abs\" cannot accept missing value at position 0 (measured for abs, equal, threshold, floor, ceil, round, sqrt, uppercase, substring, replace, ...); + and - give missing. D3 is the case of if",
+      "basis": "BuiltinFunctions.html: \"Except as noted below, any missing inputs to a built-in function will result in a missing value being returned.\" Not in §8.5 beyond if (D3); proposed as a generalisation of D3",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_JPMML_ONLY"
+          ],
+          "tags_none": [
+            "mapMissingTo",
+            "defaultValue"
+          ],
+          "jpmml": "MissingArgumentException",
+          "cpmml_x": "^N/A$"
+        }
+      ]
+    },
+    {
+      "id": "P0-unread-invalid-input",
+      "cpmml": "an invalid value in any MiningField with invalidValueTreatment returnInvalid makes the record invalid, whether or not the model reads the field",
+      "jpmml": "validates a field only when the model reads it: an invalid value in a field the expression never reads is ignored (measured)",
+      "basis": "MiningSchema.html: \"returnInvalid is the default and specifies that, when an invalid input is encountered, the model should return a value indicating an invalid result has been returned.\" Not in §8.5; proposed",
+      "match": [
+        {
+          "kinds": [
+            "ERROR_CPMML_ONLY"
+          ],
+          "unreferenced_field": "Invalid value for field:? (\\w+)"
+        }
+      ],
+      "note": "cPMML's other message for the same rule, 'Sample: {...} didn't pass input validation', does not name the field, so v0 cannot match it"
+    }
+  ]
+}

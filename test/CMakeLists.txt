@@ -63,6 +63,14 @@ find_package(Threads REQUIRED)
 target_link_libraries(concurrency.exe Threads::Threads)
 add_dependencies(unit_tests concurrency.exe)
 
+# The cPMML side of the differential fuzzer (tools/fuzz/, docs/design/typed-core.md
+# §8). Built on request only (`--target fuzz_runner.exe`); not a test.
+add_executable(fuzz_runner.exe EXCLUDE_FROM_ALL fuzz_runner.cc)
+target_include_directories(fuzz_runner.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(fuzz_runner.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(fuzz_runner.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(fuzz_runner.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+
 add_test(concurrency_tree concurrency.exe
     "data/model/AuditTree.zip" "data/dataset/AuditTree.csv" "Employment")
 add_test(concurrency_forest concurrency.exe
