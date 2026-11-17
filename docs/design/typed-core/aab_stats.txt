@@ -1,0 +1,26 @@
+model                       n   A med    B/A          95% CI spread%  OMP med  OMP/A
+AuditBinaryReg             15    1.21  1.008 [0.983,1.025]    77.7     1.22   1.01
+AuditRandomForest          15   77.57  1.016 [0.905,1.089]    25.1    44.46   0.57
+AuditTree                  15    1.03  1.010 [0.990,1.049]    13.6     1.01   0.98
+ensemble_audit_dectree     15    1.53  1.000 [0.968,1.020]     6.5     1.92   1.25
+ensemble_iris_dectree      15    1.13  1.000 [0.957,1.053]    23.0     3.46   3.06
+IrisLinearReg              15    0.56  0.964 [0.930,1.036]    17.9     0.56   1.00
+IrisMultinomReg            15    1.17  0.983 [0.934,1.052]    20.5     1.19   1.02
+IrisRandomForest           15    8.79  0.972 [0.952,1.006]     9.4    18.47   2.10
+IrisTree                   15    0.83  0.952 [0.928,1.013]    19.3     0.77   0.93
+single_audit_dectree       15    1.01  1.000 [0.971,1.031]    11.9     0.98   0.97
+single_iris_dectree        15    0.57  1.035 [0.933,1.070]    28.1     0.55   0.96
+HousingGBTlassifier        15   13.99  1.014 [0.990,1.026]     5.6    24.61   1.76
+HousingRFClassifier        15    4.05  0.983 [0.952,1.023]    14.1     4.42   1.09
+HousingLRClassifier        15    1.64  0.994 [0.976,1.012]    12.2     1.63   0.99
+HousingGBTlassifier_PCA    15   18.01  0.996 [0.980,1.006]     6.7    26.27   1.46
+HousingRFClassifier_PCA    15    8.01  1.004 [0.967,1.018]    10.4     8.56   1.07
+HousingLRClassifier_PCA    15    5.22  1.000 [0.979,1.015]    13.6     5.27   1.01
+HousingGBTRegressor        15   12.68  0.986 [0.964,1.016]    12.3    22.08   1.74
+HousingRFRegressor         15    4.85  0.975 [0.957,1.034]    18.4     5.15   1.06
+HousingLinearRegressor     15    1.44  0.993 [0.972,1.014]     8.3     1.40   0.97
+HousingGBTRegressor_PCA    15   16.72  0.995 [0.985,1.016]     6.1    27.46   1.64
+HousingRFRegressor_PCA     15    9.31  1.012 [0.985,1.056]    16.0     9.74   1.05
+HousingLinearRegressor_PCA 15    5.08  0.974 [0.950,1.012]    21.5     5.08   1.00
+A/A: old gate (median delta>3%) fired on 1/23; CI-lower-bound gate fired on 0/23; geomean B/A = 0.9939
+max |B/A-1| = 0.048

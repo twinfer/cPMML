@@ -1,0 +1,36 @@
+== clang
+sizeof(Value)=16 alignof=8 alternatives=7 sizeof(StringRep)=32
+ns/compare: old Value 0.51 | bound fast path 0.64 | generic std::visit 6.78
+all assertions passed
+neg_missing_case: rejected as expected (error: static assertion failed due to requirement 'is_invocable_v<Incomplete, const pmml::String &>': `std::vi)
+neg_uncategorised: rejected as expected (error: static assertion failed due to requirement 'pmml::all_categorised(static_cast<std::variant<pmml::Missin)
+== clang with the P8 temporal alternatives
+sizeof(Value)=16 alignof=8 alternatives=19 sizeof(StringRep)=32
+all assertions passed
+== gcc
+In file included from docs/design/typed-core/sketch/typed_value_test.cc:11:
+src/utils/java_format.h: In function 'char* java::detail::write(char*, F) [with F = double]':
+src/utils/java_format.h:175:22: warning: 'digits' may be used uninitialized [-Wmaybe-uninitialized]
+  175 |     *out++ = digits[0];
+      |              ~~~~~~~~^
+src/utils/java_format.h:151:8: note: 'digits' declared here
+  151 |   char digits[24];
+      |        ^~~~~~
+src/utils/java_format.h: In function 'char* java::detail::write(char*, F) [with F = float]':
+src/utils/java_format.h:175:22: warning: 'digits' may be used uninitialized [-Wmaybe-uninitialized]
+  175 |     *out++ = digits[0];
+      |              ~~~~~~~~^
+src/utils/java_format.h:151:8: note: 'digits' declared here
+  151 |   char digits[24];
+      |        ^~~~~~
+sizeof(Value)=16 alignof=8 alternatives=7 sizeof(StringRep)=32
+ns/compare: old Value 0.68 | bound fast path 0.57 | generic std::visit 3.35
+all assertions passed
+neg_missing_case: rejected as expected (error: no type named 'type' in 'struct std::invoke_result<Incomplete, const pmml::String&>')
+neg_uncategorised: rejected as expected (error: static assertion failed)
+== emcc
+sizeof(Value)=16 alignof=8 alternatives=7 sizeof(StringRep)=16
+ns/compare: old Value 0.52 | bound fast path 1.40 | generic std::visit 22.91
+all assertions passed
+neg_missing_case: rejected as expected (error: no matching function for call to '__invoke')
+neg_uncategorised: rejected as expected (error: static assertion failed due to requirement 'pmml::all_categorised(static_cast<std::variant<pmml::Missin)

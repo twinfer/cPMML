@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+<DataDictionary>
+<DataField name="s" optype="categorical" dataType="string"/>
+<DataField name="f" optype="continuous" dataType="float"/>
+<DataField name="i" optype="continuous" dataType="integer"/>
+<DataField name="d" optype="continuous" dataType="double"/>
+<DataField name="b" optype="categorical" dataType="boolean"/>
+<DataField name="s2" optype="categorical" dataType="string"/>
+<DataField name="y" optype="continuous" dataType="double"/>
+</DataDictionary>
+<TransformationDictionary>
+<DerivedField name="di" optype="continuous" dataType="integer"><Apply function="*"><FieldRef field="d"/><Constant dataType="double">1</Constant></Apply></DerivedField>
+<DerivedField name="nd_early" optype="continuous" dataType="double"><NormDiscrete field="late" value="a"/></DerivedField>
+<DerivedField name="late" optype="categorical" dataType="string"><FieldRef field="s"/></DerivedField>
+<DerivedField name="late_nd" optype="continuous" dataType="double"><FieldRef field="nd_early"/></DerivedField></TransformationDictionary>
+<RegressionModel functionName="regression">
+<MiningSchema><MiningField name="s"/><MiningField name="f"/><MiningField name="i"/><MiningField name="d"/><MiningField name="b"/><MiningField name="s2"/><MiningField name="y" usageType="target"/></MiningSchema>
+<Output><OutputField name="concat_num" optype="categorical" dataType="string" feature="transformedValue"><Apply function="concat"><FieldRef field="d"/><Constant dataType="string">|</Constant></Apply></OutputField></Output>
+<RegressionTable intercept="0"/>
+</RegressionModel></PMML>

@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+<DataDictionary>
+<DataField name="s" optype="categorical" dataType="string"/>
+<DataField name="f" optype="continuous" dataType="float"/>
+<DataField name="i" optype="continuous" dataType="integer"/>
+<DataField name="d" optype="continuous" dataType="double"/>
+<DataField name="b" optype="categorical" dataType="boolean"/>
+<DataField name="y" optype="continuous" dataType="double"/>
+</DataDictionary>
+<TransformationDictionary>
+<DerivedField name="di" optype="continuous" dataType="integer"><Apply function="*"><FieldRef field="d"/><Constant dataType="double">1</Constant></Apply></DerivedField>
+</TransformationDictionary>
+<RegressionModel functionName="regression">
+<MiningSchema><MiningField name="s"/><MiningField name="f"/><MiningField name="i"/><MiningField name="d"/><MiningField name="b"/><MiningField name="y" usageType="target"/></MiningSchema>
+<Output><OutputField name="le_f_d" optype="categorical" dataType="string" feature="transformedValue"><Apply function="lessOrEqual" invalidValueTreatment="asMissing"><FieldRef field="f"/><Constant dataType="double">0.1</Constant></Apply></OutputField></Output>
+<RegressionTable intercept="0"/>
+</RegressionModel></PMML>
