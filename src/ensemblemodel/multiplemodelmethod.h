@@ -14,6 +14,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -76,7 +77,7 @@ class MultipleModelMethod {
     Category category;  // for a numeric target "1" and "1.0" are one category
   };
 
-  using Function = std::function<std::unique_ptr<InternalScore>(const Sample&, const std::vector<Segment>&)>;
+  using Function = std::function<std::unique_ptr<InternalScore>(const Sample&, const Segments&)>;
 
   MultipleModelMethodType value = MultipleModelMethodType::MAJORITY_VOTE;
   MissingPrediction missing_prediction;
@@ -141,33 +142,33 @@ class MultipleModelMethod {
     // is treated as under continue (select_all, model_chain).
     switch (method) {
       case MultipleModelMethodType::MAJORITY_VOTE:
-        return [mp, classes](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, false, classes); };
+        return [mp, classes](const Sample& s, const Segments& e) { return vote(s, e, mp, false, classes); };
       case MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE:
-        return [mp, classes](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, true, classes); };
+        return [mp, classes](const Sample& s, const Segments& e) { return vote(s, e, mp, true, classes); };
       case MultipleModelMethodType::AVERAGE:
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::CLASSIFICATION:
-            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+            return [mp, classes](const Sample& s, const Segments& e) {
               return classification_average(s, e, mp, false, classes);
             };
           case MiningFunction::MiningFunctionType::REGRESSION:
-            return [mp](const Sample& s, const std::vector<Segment>& e) { return regression_average(s, e, mp, false); };
+            return [mp](const Sample& s, const Segments& e) { return regression_average(s, e, mp, false); };
           default:
             throw cpmml::ParsingException("average not supported for this mining function");
         }
       case MultipleModelMethodType::WEIGHTED_AVERAGE:
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::CLASSIFICATION:
-            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+            return [mp, classes](const Sample& s, const Segments& e) {
               return classification_average(s, e, mp, true, classes);
             };
           case MiningFunction::MiningFunctionType::REGRESSION:
-            return [mp](const Sample& s, const std::vector<Segment>& e) { return regression_average(s, e, mp, true); };
+            return [mp](const Sample& s, const Segments& e) { return regression_average(s, e, mp, true); };
           default:
             throw cpmml::ParsingException("weightedAverage not supported for this mining function");
         }
       case MultipleModelMethodType::MEDIAN:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return median(s, e, mp); };
+        return [mp](const Sample& s, const Segments& e) { return median(s, e, mp); };
       case MultipleModelMethodType::WEIGHTED_MEDIAN:
         // The spec also allows weightedMedian for classification, on the
         // segments' probabilities; JPMML 1.7.7 refuses to load it there, as for
@@ -175,7 +176,7 @@ class MultipleModelMethod {
         // =weightedMedian is not valid"). cPMML implements it for regression only.
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::REGRESSION:
-            return [mp](const Sample& s, const std::vector<Segment>& e) { return weighted_median(s, e, mp); };
+            return [mp](const Sample& s, const Segments& e) { return weighted_median(s, e, mp); };
           default:
             throw cpmml::ParsingException("weightedMedian not supported for this mining function");
         }
@@ -186,30 +187,30 @@ class MultipleModelMethod {
         // selectAll are applicable"), and JPMML 1.7.7 refuses to score it there.
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::CLASSIFICATION:
-            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+            return [mp, classes](const Sample& s, const Segments& e) {
               return classification_max(s, e, mp, classes);
             };
           default:
             throw cpmml::ParsingException("max not supported for this mining function");
         }
       case MultipleModelMethodType::SUM:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return sum(s, e, mp); };
+        return [mp](const Sample& s, const Segments& e) { return sum(s, e, mp); };
       case MultipleModelMethodType::WEIGHTED_SUM:
         // "For classification models all the combination methods, except for sum
         // and weightedSum, can be used", and clustering lists neither. JPMML
         // 1.7.7 refuses weightedSum for every function but regression.
         switch (mining_function.value) {
           case MiningFunction::MiningFunctionType::REGRESSION:
-            return [mp](const Sample& s, const std::vector<Segment>& e) { return weighted_sum(s, e, mp); };
+            return [mp](const Sample& s, const Segments& e) { return weighted_sum(s, e, mp); };
           default:
             throw cpmml::ParsingException("weightedSum not supported for this mining function");
         }
       case MultipleModelMethodType::SELECT_FIRST:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return select_first(s, e, mp); };
+        return [mp](const Sample& s, const Segments& e) { return select_first(s, e, mp); };
       case MultipleModelMethodType::SELECT_ALL:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return select_all(s, e, mp); };
+        return [mp](const Sample& s, const Segments& e) { return select_all(s, e, mp); };
       case MultipleModelMethodType::MODEL_CHAIN:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return model_chain(s, e, mp); };
+        return [mp](const Sample& s, const Segments& e) { return model_chain(s, e, mp); };
     }
 
     throw cpmml::ParsingException("multipleModelMethod " + enum_display(method, TABLE, "?") + " not supported");
@@ -285,37 +286,59 @@ class MultipleModelMethod {
   };
 
   // Every selected segment's result, in document order.
+  //
+  // A MULTITHREADING build scores the segments of an ensemble that
+  // EnsembleModel marked parallel (Segments::parallel) in an OpenMP loop, and
+  // every other ensemble -- and every ensemble nested inside a parallel one --
+  // in the same plain loop as a sequential build, with no OpenMP region and no
+  // per-segment allocation. Both loops give the same result: each segment is
+  // scored on its own, the results are collected in document order, and a
+  // failure is the one of the first segment, in document order, that fails.
   template <class R, class Eval>
-  static std::vector<Selected<R>> evaluate_selected(const Sample& sample, const std::vector<Segment>& ensemble,
-                                                    Eval eval) {
+  static std::vector<Selected<R>> evaluate_selected(const Sample& sample, const Segments& ensemble, Eval eval) {
+#ifdef MULTITHREADING
+    if (ensemble.parallel && !omp_in_parallel()) return evaluate_parallel<R>(sample, ensemble, eval);
+#endif
     std::vector<Selected<R>> selected;
-#ifndef MULTITHREADING
     for (const auto& segment : ensemble)
       if (segment.predicate(sample)) selected.push_back({&segment, eval(segment, sample)});
-#else
-    std::vector<std::unique_ptr<R>> slots(ensemble.size());
-    std::exception_ptr worker_error = nullptr;
-#pragma omp parallel for if (ensemble.size() > 25) default(shared) num_threads(NUM_THREADS)
-    for (auto i = 0u; i < ensemble.size(); i++) {
+    return selected;
+  }
+
+#ifdef MULTITHREADING
+  template <class R, class Eval>
+  static std::vector<Selected<R>> evaluate_parallel(const Sample& sample, const Segments& ensemble, Eval eval) {
+    const long n = static_cast<long>(ensemble.size());
+    std::vector<std::optional<R>> slots(ensemble.size());  // one allocation for the whole ensemble
+    std::exception_ptr error = nullptr;
+    long error_at = n;
+#pragma omp parallel for default(shared) num_threads(NUM_THREADS)
+    for (long i = 0; i < n; i++) {
       try {
         // OMP worker threads have their own thread-local active_indexer;
         // without this scope string values would be interned in the wrong map.
         Value::ScopedIndexer _scope(ensemble[i].model->indexer.get());
-        if (ensemble[i].predicate(sample)) slots[i] = std::make_unique<R>(eval(ensemble[i], sample));
+        if (ensemble[i].predicate(sample)) slots[i].emplace(eval(ensemble[i], sample));
       } catch (...) {
-        // Exceptions may not escape an OMP region (std::terminate); capture
-        // the first one and rethrow after the barrier.
-#pragma omp critical
-        if (!worker_error) worker_error = std::current_exception();
+        // Exceptions may not escape an OMP region (std::terminate). Keep the
+        // one of the first failing segment, which is the one the sequential
+        // loop would have thrown, and rethrow it after the barrier.
+#pragma omp critical(cpmml_segment_error)
+        if (i < error_at) {
+          error_at = i;
+          error = std::current_exception();
+        }
       }
     }
-    if (worker_error) std::rethrow_exception(worker_error);
+    if (error) std::rethrow_exception(error);
 
-    for (auto i = 0u; i < ensemble.size(); i++)
+    std::vector<Selected<R>> selected;
+    selected.reserve(ensemble.size());
+    for (long i = 0; i < n; i++)
       if (slots[i]) selected.push_back({&ensemble[i], std::move(*slots[i])});
-#endif
     return selected;
   }
+#endif
 
   template <class R>
   struct Usable {
@@ -501,7 +524,7 @@ class MultipleModelMethod {
 
   // ---- methods --------------------------------------------------------------
 
-  inline static std::unique_ptr<InternalScore> vote(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> vote(const Sample& sample, const Segments& ensemble,
                                                     const MissingPrediction& mp, const bool weighted,
                                                     const Classes& classes) {
     auto usable =
@@ -529,7 +552,7 @@ class MultipleModelMethod {
   }
 
   inline static std::unique_ptr<InternalScore> classification_average(const Sample& sample,
-                                                                      const std::vector<Segment>& ensemble,
+                                                                      const Segments& ensemble,
                                                                       const MissingPrediction& mp,
                                                                       const bool weighted,
                                                                       const Classes& classes) {
@@ -553,7 +576,7 @@ class MultipleModelMethod {
   }
 
   inline static std::unique_ptr<InternalScore> regression_average(const Sample& sample,
-                                                                  const std::vector<Segment>& ensemble,
+                                                                  const Segments& ensemble,
                                                                   const MissingPrediction& mp, const bool weighted) {
     auto usable =
         apply_missing_prediction(evaluate_selected<std::string>(sample, ensemble, predict), mp, false, weighted);
@@ -578,7 +601,7 @@ class MultipleModelMethod {
     return values;
   }
 
-  inline static std::unique_ptr<InternalScore> median(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> median(const Sample& sample, const Segments& ensemble,
                                                       const MissingPrediction& mp) {
     auto usable = apply_missing_prediction(evaluate_selected<std::string>(sample, ensemble, predict), mp, false, false);
     if (usable.missing || usable.results.empty()) return std::make_unique<InternalScore>();
@@ -613,7 +636,7 @@ class MultipleModelMethod {
   // throws "Undefined result"). A negative Segment@weight is refused at load
   // (EnsembleModel).
   inline static std::unique_ptr<InternalScore> weighted_median(const Sample& sample,
-                                                               const std::vector<Segment>& ensemble,
+                                                               const Segments& ensemble,
                                                                const MissingPrediction& mp) {
     auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
                                            mp, false, true);
@@ -687,7 +710,7 @@ class MultipleModelMethod {
   // declared categories JPMML breaks every tie in that model order, cPMML by
   // name.
   inline static std::unique_ptr<InternalScore> classification_max(const Sample& sample,
-                                                                  const std::vector<Segment>& ensemble,
+                                                                  const Segments& ensemble,
                                                                   const MissingPrediction& mp, const Classes& classes) {
     auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
                                            mp, false, false);
@@ -727,7 +750,7 @@ class MultipleModelMethod {
 
   // A sum over no selected segment is no prediction. A sum whose selected
   // segments were all skipped (skipSegment) is 0, as in JPMML.
-  inline static std::unique_ptr<InternalScore> sum(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> sum(const Sample& sample, const Segments& ensemble,
                                                    const MissingPrediction& mp) {
     auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
                                            mp, false, false);
@@ -743,7 +766,7 @@ class MultipleModelMethod {
   // without a prediction is handled as by sum, missingThreshold weighing by
   // Segment@weight; every segment skipped gives 0, as in JPMML. A negative
   // Segment@weight is refused at load (EnsembleModel).
-  inline static std::unique_ptr<InternalScore> weighted_sum(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> weighted_sum(const Sample& sample, const Segments& ensemble,
                                                             const MissingPrediction& mp) {
     auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
                                            mp, false, true);
@@ -757,7 +780,7 @@ class MultipleModelMethod {
   // The first selected segment's result stands, even when it has none; only
   // skipSegment moves on to the next selected segment. Its OutputFields come
   // with it, also when it has no prediction (see "segment OutputFields").
-  inline static std::unique_ptr<InternalScore> select_first(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> select_first(const Sample& sample, const Segments& ensemble,
                                                             const MissingPrediction& mp) {
     for (const auto& segment : ensemble) {
       if (!segment.predicate(sample)) continue;
@@ -782,7 +805,7 @@ class MultipleModelMethod {
   // voids the result. skipSegment, which JPMML refuses here, acts as continue. The
   // segments' OutputFields are returned as collections (add_collections); a
   // segment is scored for them, on top of its prediction, only when it has any.
-  inline static std::unique_ptr<InternalScore> select_all(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> select_all(const Sample& sample, const Segments& ensemble,
                                                           const MissingPrediction& mp) {
     std::string result = "[";
     bool first = true;
@@ -839,7 +862,7 @@ class MultipleModelMethod {
   // skipSegment, which JPMML refuses here, acts as continue. JPMML also throws
   // when such a segment declares an OutputField; the spec's "processing should
   // continue normally" is followed instead.
-  inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const std::vector<Segment>& ensemble,
+  inline static std::unique_ptr<InternalScore> model_chain(const Sample& sample, const Segments& ensemble,
                                                            const MissingPrediction& mp) {
     Sample tmp_sample = sample;
     Sample before_last;                // tmp_sample as it was before `last` ran

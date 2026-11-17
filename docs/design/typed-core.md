@@ -1719,6 +1719,30 @@ every ensemble benchmark but AuditRandomForest (§5.2). *Recommendation: open a
 separate item to move the per-segment allocation out of the parallel branch
 and choose the parallel threshold by measured work rather than segment count;
 until then the gate compares OpenMP base vs OpenMP head only.*
+**Resolved.** An ensemble that is not worth a parallel loop now runs the same
+plain loop as the sequential build, with no OpenMP region and no allocation
+per segment; the parallel loop keeps its results in one
+`std::vector<std::optional<R>>` and rethrows the error of the first failing
+segment in document order, as the sequential loop does; a nested ensemble
+inside a parallel one runs sequentially (`omp_in_parallel()`). The decision
+is taken once at load (`EnsembleModel::parallel_worth_it`) from an estimate
+of one record's work: per segment 1 plus the mean leaf depth of a TreeModel,
+the recursive sum of a nested MiningModel, or the element count of any other
+model; parallel at 1500 units or more (`-DCPMML_PARALLEL_WORK=N` overrides
+it; `0` forces every ensemble parallel). Calibration
+(`benchmark/omp/forced.txt`): the parallel loop costs about 10 µs a record
+with libomp and 4 threads, and was faster only on AuditRandomForest
+(estimate 2439, 70 µs sequential) — slower on IrisRandomForest (1037, 8 µs),
+HousingGBT* (400, 12 µs), HousingRF* (95–118, 4–9 µs) and the dectree
+ensembles (22–32). Measured with this document's method, 31 interleaved
+rounds of base/head × sequential/OpenMP (`benchmark/omp/ab.sh`,
+`ab_stats.txt`): OpenMP head vs sequential head fires the gate on 0 of 23
+models, geomean 0.977, AuditRandomForest 0.521; sequential head vs base 0 of
+23, geomean 0.999; OpenMP head vs base 0.32–0.97 on every ensemble. Every
+fixture dumps byte-identical under sequential, OpenMP and forced-parallel
+builds. The OpenMP build can therefore join the base-vs-head gate (§6.4
+item 6). The threshold is tuned on one machine (Apple M-series, Homebrew
+libomp); libgomp on Linux should be re-measured when P7 records both builds.
 
 ---
 

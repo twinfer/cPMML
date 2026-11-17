@@ -8,6 +8,7 @@
 #define CPMML_SEGMENT_H
 
 #include <memory>
+#include <vector>
 
 #include "core/internal_model.h"
 #include "core/predicatebuilder.h"
@@ -77,6 +78,16 @@ class Segment {
     return model->in_segment_scope(sample,
                                    [this](const Sample& s) { return model->finish(model->predict_raw(s), false); });
   }
+};
+
+/**
+ * The Segments of a Segmentation, in document order, and whether a
+ * MULTITHREADING build scores them in parallel. EnsembleModel decides that
+ * once, at load, from an estimate of the work one record costs (see
+ * EnsembleModel::parallel_worth_it); a sequential build ignores it.
+ */
+struct Segments : std::vector<Segment> {
+  bool parallel = false;
 };
 
 #endif

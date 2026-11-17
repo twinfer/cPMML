@@ -1,0 +1,46 @@
+# Q12 calibration, one model per line per round (5 rounds), evaluate time in us.
+# seq: base sequential build. ompseq / omppar: the new OpenMP build with every
+# ensemble forced sequential / parallel (today: -DCPMML_PARALLEL_WORK=1e300 / =0).
+# work= is the load-time estimate as first drafted, with 4 units per segment;
+# the committed estimate counts 1 per segment (AuditRandomForest 2439,
+# IrisRandomForest 1037, HousingGBT* 400, HousingRF* 95-118, ensemble_*_dectree 22-32).
+AuditRandomForest seq=69.54 ompseq=72.92 omppar=39.79  work=3038.8 segs=200 
+AuditRandomForest seq=70.31 ompseq=75.00 omppar=39.39  work=3038.8 segs=200 
+AuditRandomForest seq=72.69 ompseq=72.92 omppar=39.58  work=3038.8 segs=200 
+AuditRandomForest seq=72.90 ompseq=72.83 omppar=42.29  work=3038.8 segs=200 
+AuditRandomForest seq=73.54 ompseq=75.98 omppar=43.67  work=3038.8 segs=200 
+ensemble_audit_dectree seq=1.41 ompseq=1.41 omppar=8.77  work=62.1 segs=10 
+ensemble_audit_dectree seq=1.48 ompseq=1.44 omppar=8.86  work=62.1 segs=10 
+ensemble_audit_dectree seq=1.48 ompseq=1.50 omppar=9.17  work=62.1 segs=10 
+ensemble_audit_dectree seq=1.49 ompseq=1.45 omppar=9.04  work=62.1 segs=10 
+ensemble_audit_dectree seq=1.84 ompseq=1.68 omppar=9.43  work=62.1 segs=10 
+ensemble_iris_dectree seq=1.10 ompseq=1.07 omppar=13.97  work=52.0 segs=10 
+ensemble_iris_dectree seq=1.14 ompseq=1.04 omppar=14.00  work=52.0 segs=10 
+ensemble_iris_dectree seq=1.14 ompseq=1.05 omppar=14.38  work=52.0 segs=10 
+ensemble_iris_dectree seq=1.15 ompseq=1.02 omppar=13.55  work=52.0 segs=10 
+ensemble_iris_dectree seq=1.56 ompseq=3.91 omppar=38.09  work=52.0 segs=10 
+HousingGBTlassifier seq=13.31 ompseq=13.47 omppar=20.08  work=700.0 segs=100 work=717.0 segs=2 
+HousingGBTlassifier seq=13.75 ompseq=13.59 omppar=19.93  work=700.0 segs=100 work=717.0 segs=2 
+HousingGBTlassifier seq=13.85 ompseq=13.39 omppar=20.07  work=700.0 segs=100 work=717.0 segs=2 
+HousingGBTlassifier seq=13.95 ompseq=14.47 omppar=22.51  work=700.0 segs=100 work=717.0 segs=2 
+HousingGBTlassifier seq=13.98 ompseq=13.80 omppar=20.09  work=700.0 segs=100 work=717.0 segs=2 
+HousingGBTRegressor seq=11.85 ompseq=12.50 omppar=18.80  work=700.0 segs=100 
+HousingGBTRegressor seq=11.99 ompseq=12.50 omppar=18.56  work=700.0 segs=100 
+HousingGBTRegressor seq=12.27 ompseq=12.09 omppar=18.49  work=700.0 segs=100 
+HousingGBTRegressor seq=12.45 ompseq=12.80 omppar=18.46  work=700.0 segs=100 
+HousingGBTRegressor seq=12.60 ompseq=12.58 omppar=18.56  work=700.0 segs=100 
+HousingRFClassifier seq=3.93 ompseq=3.92 omppar=13.92  work=124.8 segs=10 
+HousingRFClassifier seq=3.94 ompseq=3.77 omppar=14.13  work=124.8 segs=10 
+HousingRFClassifier seq=3.98 ompseq=4.10 omppar=14.10  work=124.8 segs=10 
+HousingRFClassifier seq=4.00 ompseq=3.94 omppar=13.84  work=124.8 segs=10 
+HousingRFClassifier seq=4.02 ompseq=3.99 omppar=14.17  work=124.8 segs=10 
+HousingRFRegressor seq=4.48 ompseq=4.68 omppar=13.97  work=142.1 segs=10 
+HousingRFRegressor seq=4.50 ompseq=4.50 omppar=13.88  work=142.1 segs=10 
+HousingRFRegressor seq=4.51 ompseq=4.50 omppar=13.71  work=142.1 segs=10 
+HousingRFRegressor seq=4.55 ompseq=4.55 omppar=13.81  work=142.1 segs=10 
+HousingRFRegressor seq=4.68 ompseq=4.90 omppar=14.10  work=142.1 segs=10 
+IrisRandomForest seq=10.20 ompseq=8.22 omppar=16.45  work=1636.7 segs=200 
+IrisRandomForest seq=8.15 ompseq=8.26 omppar=14.69  work=1636.7 segs=200 
+IrisRandomForest seq=8.30 ompseq=8.45 omppar=20.13  work=1636.7 segs=200 
+IrisRandomForest seq=8.30 ompseq=8.81 omppar=14.77  work=1636.7 segs=200 
+IrisRandomForest seq=9.42 ompseq=8.60 omppar=20.44  work=1636.7 segs=200 

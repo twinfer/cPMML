@@ -8,6 +8,7 @@
 #define CPMML_ENSEMBLEMODEL_H
 
 #include <memory>
+#include <string>
 
 #include "associationmodel/associationmodel.h"
 #include "baselinemodel/baselinemodel.h"
@@ -39,7 +40,7 @@ class EnsembleModel : public InternalModel {
  public:
   Predicate predicate;
   MultipleModelMethod multiplemodelmethod;
-  std::vector<Segment> ensemble;
+  Segments ensemble;
   std::function<std::unique_ptr<InternalScore>(const Sample&)> score_ensemble;
 
   EnsembleModel() = default;
@@ -71,9 +72,97 @@ class EnsembleModel : public InternalModel {
         if (segment.weight < 0)
           throw cpmml::ParsingException("Segment@weight is negative under " + multiplemodelmethod.to_string());
 
+    ensemble.parallel = parallel_worth_it(node.get_child("Segmentation"));
     score_ensemble = std::bind(multiplemodelmethod.function, std::placeholders::_1, ensemble);
     base_sample = create_basesample(indexer);
   };
+
+  // ---- MULTITHREADING ---------------------------------------------------------
+  //
+  // Whether an OpenMP build scores this ensemble's segments in parallel. A
+  // parallel loop costs a fork and a join on every record -- about 10 us with
+  // Homebrew libomp and 4 threads on the machine the benchmarks ran on -- so
+  // it pays only when one record's segments take several times that. The work
+  // is estimated once, at load, from the document (estimated_work), in units
+  // of one tree-node test. On the benchmark models a unit costs 8-50 ns, and
+  // the parallel loop was faster only on AuditRandomForest (estimated 2439,
+  // 70 us sequential) and slower on every other ensemble (IrisRandomForest
+  // 1037, 8 us; HousingGBT* 400, 12 us; HousingRF* 95-118, 4-9 us;
+  // ensemble_*_dectree 22-32, 1.5 us).
+  // PARALLEL_WORK sits between them, on the sequential side: a wrong
+  // "parallel" costs the fork and join on every record, a wrong "sequential"
+  // only the speed-up. See docs/design/typed-core.md, Q12.
+  static bool parallel_worth_it(const XmlNode& segmentation) {
+#ifdef MULTITHREADING
+    return estimated_work(segmentation.xml()) >= PARALLEL_WORK;
+#else
+    (void)segmentation;
+    return false;
+#endif
+  }
+
+  // CPMML_PARALLEL_WORK overrides the threshold at build time; 0 scores every
+  // ensemble in parallel, which is how the parallel loop is tested on every
+  // fixture.
+  static constexpr double SEGMENT_WORK = 1;  // a segment's own cost: its predicate
+#ifdef CPMML_PARALLEL_WORK
+  static constexpr double PARALLEL_WORK = CPMML_PARALLEL_WORK;
+#else
+  static constexpr double PARALLEL_WORK = 1500;
+#endif
+
+  // The estimated work of scoring one record with `model` (a model element)
+  // or with every segment of `model` (a Segmentation).
+  static double estimated_work(const pugi::xml_node& model) {
+    const std::string name = model.name();
+    if (name == "Segmentation") {
+      double work = 0;
+      for (const auto& segment : model.children("Segment")) {
+        work += SEGMENT_WORK;
+        for (const auto& child : segment.children())
+          if (is_model_element(child.name())) work += estimated_work(child);
+      }
+      return work;
+    }
+    if (name == "MiningModel") return estimated_work(model.child("Segmentation"));
+    if (name == "TreeModel") {
+      // A record walks one path: the mean depth of the leaves.
+      double depth_sum = 0, leaves = 0;
+      leaf_depths(model.child("Node"), 1, depth_sum, leaves);
+      return leaves > 0 ? depth_sum / leaves : 0;
+    }
+    // Every other model reads all of its parameters on every record: count them.
+    double elements = 0;
+    for (const auto& child : model.children()) elements += count_elements(child);
+    return elements;
+  }
+
+  static bool is_model_element(const std::string& name) {
+    return name == "MiningModel" || name == "TreeModel" || name == "RegressionModel" || name == "NeuralNetwork" ||
+           name == "SupportVectorMachineModel" || name == "NearestNeighborModel" ||
+           name == "GeneralRegressionModel" || name == "NaiveBayesModel" || name == "ClusteringModel" ||
+           name == "Scorecard" || name == "RuleSetModel" || name == "BaselineModel" ||
+           name == "GaussianProcessModel" || name == "AssociationModel";
+  }
+
+  static void leaf_depths(const pugi::xml_node& node, const double depth, double& depth_sum, double& leaves) {
+    bool leaf = true;
+    for (const auto& child : node.children("Node")) {
+      leaf = false;
+      leaf_depths(child, depth + 1, depth_sum, leaves);
+    }
+    if (leaf) {
+      depth_sum += depth;
+      leaves += 1;
+    }
+  }
+
+  static double count_elements(const pugi::xml_node& node) {
+    if (node.type() != pugi::node_element) return 0;
+    double n = 1;
+    for (const auto& child : node.children()) n += count_elements(child);
+    return n;
+  }
 
   // The method's result may carry segment OutputFields (see
   // MultipleModelMethod, "segment OutputFields"); this MiningModel's own
