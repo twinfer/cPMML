@@ -176,7 +176,18 @@ class MultipleModelMethod {
       case MultipleModelMethodType::MEDIAN:
         return [mp](const Sample& s, const std::vector<Segment>& e) { return median(s, e, mp); };
       case MultipleModelMethodType::MAX:
-        return [mp](const Sample& s, const std::vector<Segment>& e) { return max(s, e, mp); };
+        // The spec lists max among the methods for classification, not for
+        // regression ("For regression models only average, weightedAverage,
+        // median, weightedMedian, sum, weightedSum, modelChain, selectFirst, or
+        // selectAll are applicable"), and JPMML 1.7.7 refuses to score it there.
+        switch (mining_function.value) {
+          case MiningFunction::MiningFunctionType::CLASSIFICATION:
+            return [mp, classes](const Sample& s, const std::vector<Segment>& e) {
+              return classification_max(s, e, mp, classes);
+            };
+          default:
+            throw cpmml::ParsingException("max not supported for this mining function");
+        }
       case MultipleModelMethodType::SUM:
         return [mp](const Sample& s, const std::vector<Segment>& e) { return sum(s, e, mp); };
       case MultipleModelMethodType::SELECT_FIRST:
@@ -619,13 +630,75 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(med);
   }
 
-  inline static std::unique_ptr<InternalScore> max(const Sample& sample, const std::vector<Segment>& ensemble,
-                                                   const MissingPrediction& mp) {
-    auto usable = apply_missing_prediction(evaluate_selected<std::string>(sample, ensemble, predict), mp, false, false);
+  // The place of `category` among the target's declared categories; past them
+  // all when it is not declared.
+  static size_t rank(const std::string& category, const Classes& classes) {
+    for (size_t i = 0; i < classes.values.size(); i++)
+      if (classes.category.same(classes.values[i], category)) return i;
+    return classes.values.size();
+  }
+
+  // max for classification. The spec: max is "applied to the predicted
+  // probabilities of target categories in each of the models used for the
+  // case, then the winning category is selected based on the highest combined
+  // probability", and its probabilities: "consider the model(s) that have
+  // contributed the chosen probability for the winning category. Return their
+  // average probabilities". As in JPMML 1.7.7:
+  //
+  // - The winner is the category of the highest probability any usable
+  //   segment gives. A tie between categories goes to the one declared first
+  //   in the target's DataField; an undeclared one comes after the declared
+  //   ones, and among them by name.
+  // - The probabilities are the plain average, Segment@weight ignored, of the
+  //   segments that give the winner that probability.
+  // - A segment without a prediction is handled as by average: continue and
+  //   returnMissing void the result, skipSegment drops it (missingThreshold
+  //   weighs by Segment@weight). No usable segment is no prediction (JPMML
+  //   throws "Empty classification").
+  //
+  // JPMML departs in one case cPMML cannot follow: when a segment chosen above
+  // gives a second category the same, highest probability, JPMML predicts
+  // whichever of the two that segment's model lists first (its
+  // ScoreDistribution order); cPMML keeps the winner chosen above. Without
+  // declared categories JPMML breaks every tie in that model order, cPMML by
+  // name.
+  inline static std::unique_ptr<InternalScore> classification_max(const Sample& sample,
+                                                                  const std::vector<Segment>& ensemble,
+                                                                  const MissingPrediction& mp, const Classes& classes) {
+    auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
+                                           mp, false, false);
     if (usable.missing || usable.results.empty()) return std::make_unique<InternalScore>();
 
-    const std::vector<double> values = values_of(usable.results);
-    return std::make_unique<InternalScore>(*std::max_element(values.begin(), values.end()));
+    std::string winner;
+    double highest = -1;
+    size_t winner_rank = 0;
+    for (const auto& r : usable.results)
+      for (const auto& [category, prob] : r.result->probabilities) {
+        if (category.empty() || prob < highest) continue;
+        const size_t category_rank = rank(category, classes);
+        if (prob > highest || category_rank < winner_rank ||
+            (category_rank == winner_rank && category < winner && !classes.category.same(category, winner))) {
+          highest = prob;
+          winner = category;
+          winner_rank = category_rank;
+        }
+      }
+    if (winner.empty()) return std::make_unique<InternalScore>();  // no segment gave a probability
+
+    std::unordered_map<std::string, double> probabilities;
+    double contributors = 0;
+    for (const auto& r : usable.results) {
+      const auto& given = r.result->probabilities;
+      const auto it = classes.category.find(given, winner);
+      if (it == given.end() || it->second != highest) continue;
+      for (const auto& probability : given) accumulate(probabilities, probability.first, probability.second, classes);
+      contributors++;
+    }
+
+    normalize(probabilities, contributors);
+    const std::string predicted = classes.category.find(probabilities, winner)->first;
+    add_unpredicted(probabilities, classes);
+    return std::make_unique<InternalScore>(predicted, probabilities);
   }
 
   // A sum over no selected segment is no prediction. A sum whose selected
