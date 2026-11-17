@@ -47,6 +47,7 @@ class GeneralRegressionModel : public InternalModel {
     size_t predictor_index;
     std::string value;  // exponent (continuous) or category level (factor)
     bool is_factor;     // false → continuous covariate
+    Value level;        // a factor's level, read once at load with the predictor's dataType
   };
 
   // One β coefficient from ParamMatrix
@@ -267,6 +268,9 @@ class GeneralRegressionModel : public InternalModel {
       pc.predictor_index = indexer->get_index(pred);
       pc.value = val;
       pc.is_factor = is_factor;
+      // Read at load, while the model's Indexer still interns: a string level
+      // gets its own code, which no string the model never names can share.
+      if (is_factor) pc.level = Value(val, indexer->get_type(pc.predictor_index));
 
       pp_matrix[param].push_back(std::move(pc));
     }
@@ -353,10 +357,13 @@ class GeneralRegressionModel : public InternalModel {
       if (xv.missing) throw cpmml::MissingValueException("missing value for GeneralRegression predictor");
       const double x = xv.value;
       if (cell.is_factor) {
-        // Categorical indicator: 1.0 if sample value matches the level
-        // The sample value is stored as a double index in Value::string_converter
-        const double level_val = Value(cell.value, DataType(DataType::DataTypeValue::STRING)).value;
-        if (x != level_val) return 0.0;  // short-circuit
+        // "set x_i to 1 if the case being scored matches this row, 0 if it
+        // does not" (GeneralRegression, scoring). The level used to be read
+        // here, as a string whatever the predictor's dataType: an integer
+        // factor never matched, and since the Indexer is frozen once the model
+        // is loaded, a level first read here got the code of every unseen
+        // string, so h="zz" matched level "a".
+        if (xv != cell.level) return 0.0;  // short-circuit
       } else {
         // Continuous covariate: x^exponent
         const double exp_val = to_double(cell.value);
