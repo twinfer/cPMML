@@ -59,14 +59,30 @@ class EnsembleModel : public InternalModel {
       // its whole derivedfields_dag (see InternalModel::scope_under).
       model->scope_under(InternalModel::derivedfields_dag);
       ensemble.push_back(Segment(child, predicate_builder, model));
+      ensemble.back().has_outputs = declares_outputs(*model);
     }
 
     score_ensemble = std::bind(multiplemodelmethod.function, std::placeholders::_1, ensemble);
     base_sample = create_basesample(indexer);
   };
 
+  // The method's result may carry segment OutputFields (see
+  // MultipleModelMethod, "segment OutputFields"); this MiningModel's own
+  // OutputFields, added by the caller, shadow those of the same name.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
-    return score_ensemble(sample);
+    std::unique_ptr<InternalScore> score = score_ensemble(sample);
+    MultipleModelMethod::drop_shadowed(*score, output);
+    return score;
+  }
+
+  // Whether a segment model declares an OutputField, itself or in one of its
+  // own segments.
+  static bool declares_outputs(const InternalModel& model) {
+    if (!model.output.raw_outputfields.empty()) return true;
+    if (const auto* nested = dynamic_cast<const EnsembleModel*>(&model))
+      for (const auto& segment : nested->ensemble)
+        if (segment.has_outputs) return true;
+    return false;
   }
 
   inline std::string predict_raw(const Sample& sample) const override {

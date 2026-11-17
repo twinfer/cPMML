@@ -17,6 +17,8 @@
 #include <cmath>
 #include <iostream>
 #include <locale>
+#include <pugixml.hpp>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -111,10 +113,33 @@ static bool check_other_outputs(const cpmml::Result& result,
   return true;
 }
 
-static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row) {
+// The OutputFields declared inside a Segment, at any depth, other than those
+// named like a DataField (a fixture column of that name is an input). A
+// MiningModel may return them (selectFirst, selectAll, modelChain), and
+// model.output_names() lists only the top-level ones: without these a fixture
+// column asserting a segment field passed whenever the field was missing.
+static std::unordered_set<std::string> segment_output_names(const std::string& model_zip) {
+  std::unordered_set<std::string> names;
+  const std::vector<char> document = read_file(model_zip, true);
+  pugi::xml_document xml;
+  if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
+  const pugi::xml_node pmml = xml.child("PMML");
+  std::unordered_set<std::string> data_fields;
+  for (const auto& field : pmml.child("DataDictionary").children("DataField"))
+    data_fields.insert(field.attribute("name").value());
+  for (const auto& node : pmml.select_nodes("//Segment//Output/OutputField")) {
+    const std::string name = node.node().attribute("name").value();
+    if (!data_fields.count(name)) names.insert(name);
+  }
+  return names;
+}
+
+static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row,
+                     const std::string& model_zip) {
   const std::string out_col = model.output_name();
   const auto names = model.output_names();
-  const std::unordered_set<std::string> declared_outputs(names.cbegin(), names.cend());
+  std::unordered_set<std::string> declared_outputs(names.cbegin(), names.cend());
+  for (const auto& name : segment_output_names(model_zip)) declared_outputs.insert(name);
 
   if (!row.count(out_col)) {
     std::cerr << "output column '" << out_col << "' not found in fixture CSV" << std::endl;
@@ -397,7 +422,7 @@ int main(int argc, char** argv) {
     else if (mf == "ASSOCIATION_RULES" && first.count("transaction"))
       return run_transactional(model, reader, std::move(first));
     else
-      return run_score(model, reader, std::move(first));
+      return run_score(model, reader, std::move(first), argv[1]);
   } catch (const std::exception& e) {
     std::cerr << e.what() << std::endl;
     return -1;

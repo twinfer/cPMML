@@ -8,11 +8,15 @@
 #define CPMML_MULTIPLEMODELMETHOD_H
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef MULTITHREADING
@@ -334,6 +338,192 @@ class MultipleModelMethod {
     return segment.score(sample);
   }
 
+  // ---- segment OutputFields ---------------------------------------------------
+  //
+  // When a method's result is one segment's result -- selectFirst's selected
+  // segment, modelChain's last executed segment -- that segment model's whole
+  // result is returned next to the MiningModel's own OutputFields: the
+  // segment's OutputFields and, when it is itself a MiningModel, whatever its
+  // result carries, recursively. No other segment's OutputFields are returned.
+  // selectAll returns every such field as a collection with one entry per
+  // selected segment, in document order. The aggregating methods (sum,
+  // average, majorityVote, ...) return no segment field. A segment field
+  // named like one of the MiningModel's own OutputFields is not returned: the
+  // MiningModel's own one stands, with its value or none (drop_shadowed).
+  //
+  // This is what JPMML 1.7.7 does, and what the spec allows: an engine "need
+  // only return the output fields specified for the topmost MiningModel", and
+  // of OutputFields duplicated across segments the one returned "comes from
+  // the Segment selected by" the method.
+  //
+  // A segment without a prediction still returns its transformedValue fields
+  // (missing or not); a field of another feature only when it has a value.
+  //
+  // selectAll needs every selected segment to return the same field names.
+  // JPMML throws "Field sets ... do not match" when they differ (for instance
+  // when one selected segment has a prediction and another none); cPMML keeps
+  // the prediction and returns no segment field, which the spec allows.
+
+  // One field of a segment's result, with the text a selectAll collection
+  // writes for it. A missing value is written null, as JPMML does.
+  struct ResultField {
+    std::string name;
+    bool missing = true;
+    std::string text;
+  };
+
+  // The score of a MiningModel whose result is, or collects, segment results:
+  // `fields` are the segment fields it returns (also in num_outputs and
+  // str_outputs), with their collection text, so that an enclosing selectAll
+  // can collect them.
+  struct EnsembleScore : InternalScore {
+    using InternalScore::InternalScore;
+    explicit EnsembleScore(InternalScore&& score) : InternalScore(std::move(score)) {}
+    std::vector<ResultField> fields;
+  };
+
+  // A number as Java's Double.toString (Float.toString when single) writes it,
+  // which is how JPMML writes the entries of a collection: the shortest
+  // decimal that reads back as the same value, plain between 10^-3 and 10^7,
+  // computerized scientific notation ("1.0E7", "5.0E-5") outside.
+  static std::string java_number(const double number, const bool single) {
+    const double value = single ? static_cast<double>(static_cast<float>(number)) : number;
+    if (std::isnan(value)) return "NaN";
+    if (std::isinf(value)) return value > 0 ? "Infinity" : "-Infinity";
+    if (value == 0) return std::signbit(value) ? "-0.0" : "0.0";
+
+    std::array<char, 64> buffer{};
+    const auto converted =
+        single ? std::to_chars(buffer.data(), buffer.data() + buffer.size(), static_cast<float>(value),
+                               std::chars_format::scientific)
+               : std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::scientific);
+    const std::string scientific(buffer.data(), converted.ptr);  // e.g. "-1.25e-04"
+
+    const bool negative = scientific[0] == '-';
+    const size_t e = scientific.find('e');
+    const int exponent = std::stoi(scientific.substr(e + 1));
+    std::string digits;
+    for (size_t i = negative ? 1 : 0; i < e; i++)
+      if (scientific[i] != '.') digits += scientific[i];
+
+    std::string text = negative ? "-" : "";
+    const double magnitude = std::abs(value);
+    if (magnitude >= 1e-3 && magnitude < 1e7) {
+      if (exponent >= 0) {
+        const size_t integer_digits = static_cast<size_t>(exponent) + 1;
+        if (digits.size() < integer_digits) digits.append(integer_digits - digits.size(), '0');
+        text += digits.substr(0, integer_digits) + ".";
+        text += digits.size() > integer_digits ? digits.substr(integer_digits) : "0";
+      } else {
+        text += "0." + std::string(static_cast<size_t>(-exponent - 1), '0') + digits;
+      }
+    } else {
+      text += digits.substr(0, 1) + "." + (digits.size() > 1 ? digits.substr(1) : "0") + "E" + std::to_string(exponent);
+    }
+    return text;
+  }
+
+  // A numeric OutputField value as JPMML writes it in a collection, by the
+  // field's dataType: 7 for an integer, true/false for a boolean, Java's
+  // float and double notation otherwise. The date and time types are carried
+  // as doubles (see DataType) and are written as such; so is the value of an
+  // OutputField without a dataType attribute, whatever its target's type.
+  static std::string collection_entry(const double value, const OutputField& field) {
+    if (field.integer && std::trunc(value) == value && std::abs(value) < 9.2e18)
+      return std::to_string(static_cast<long long>(value));
+    switch (field.datatype.value) {
+      case DataType::DataTypeValue::BOOLEAN:
+        return value != 0 ? "true" : "false";
+      case DataType::DataTypeValue::FLOAT:
+        return java_number(value, true);
+      default:
+        return java_number(value, false);
+    }
+  }
+
+  // The fields a segment model's result returns: its own OutputFields, then
+  // those its score carries from its own segments (a MiningModel), less any
+  // its own OutputFields shadow.
+  static std::vector<ResultField> fields_of(const InternalModel& model, const InternalScore& score) {
+    std::vector<ResultField> fields;
+    std::unordered_set<std::string> own;
+    for (const auto& of : model.output.raw_outputfields) {
+      if (!own.insert(of.name).second) continue;
+      ResultField field{of.name};
+      const auto s = score.str_outputs.find(of.name);
+      const auto n = score.num_outputs.find(of.name);
+      if (s != score.str_outputs.end() && !s->second.empty()) {
+        field.missing = false;
+        field.text = s->second;
+      } else if (n != score.num_outputs.end()) {
+        field.missing = false;
+        field.text = collection_entry(n->second, of);
+      }
+      if (!field.missing || !score.empty ||
+          of.expression_type.value == OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE)
+        fields.push_back(std::move(field));
+    }
+    if (const auto* carried = dynamic_cast<const EnsembleScore*>(&score))
+      for (const auto& field : carried->fields)
+        if (!own.count(field.name)) fields.push_back(field);
+    return fields;
+  }
+
+  // `score`, a segment's result, as the result of the MiningModel: it keeps
+  // the segment's fields (see fields_of).
+  static std::unique_ptr<InternalScore> carrying(const Segment& segment, std::unique_ptr<InternalScore> score) {
+    if (!segment.has_outputs) return score;
+    std::vector<ResultField> fields = fields_of(*segment.model, *score);
+    auto result = std::make_unique<EnsembleScore>(std::move(*score));
+    result->fields = std::move(fields);
+    return result;
+  }
+
+  // The MiningModel's own OutputFields shadow the segment fields of the same
+  // name, even when they have no value: called on the method's result before
+  // the MiningModel adds its own.
+  static void drop_shadowed(InternalScore& score, const OutputDictionary& output) {
+    if (output.empty || (score.num_outputs.empty() && score.str_outputs.empty())) return;
+    for (const auto& of : output.raw_outputfields) {
+      score.num_outputs.erase(of.name);
+      score.str_outputs.erase(of.name);
+    }
+    if (auto* carried = dynamic_cast<EnsembleScore*>(&score)) {
+      auto& fields = carried->fields;
+      fields.erase(std::remove_if(fields.begin(), fields.end(),
+                                  [&output](const ResultField& field) { return output.contains(field.name); }),
+                   fields.end());
+    }
+  }
+
+  // selectAll: when every selected segment returns the same field names, each
+  // field as a collection, "[entry, entry, ...]", one entry per selected
+  // segment in document order. Otherwise none (see above).
+  static void add_collections(EnsembleScore& score, const std::vector<std::vector<ResultField>>& selected) {
+    if (selected.empty() || selected.front().empty()) return;
+    const auto names_of = [](const std::vector<ResultField>& fields) {
+      std::unordered_set<std::string> names;
+      for (const auto& field : fields) names.insert(field.name);
+      return names;
+    };
+    const auto names = names_of(selected.front());
+    for (const auto& fields : selected)
+      if (names_of(fields) != names) return;
+
+    for (const auto& name : selected.front()) {
+      std::string text = "[";
+      for (size_t i = 0; i < selected.size(); i++) {
+        const auto it = std::find_if(selected[i].begin(), selected[i].end(),
+                                     [&name](const ResultField& field) { return field.name == name.name; });
+        if (i > 0) text += ", ";
+        text += it->missing ? "null" : it->text;
+      }
+      text += "]";
+      score.str_outputs[name.name] = text;
+      score.fields.push_back({name.name, false, text});
+    }
+  }
+
   // ---- methods --------------------------------------------------------------
 
   inline static std::unique_ptr<InternalScore> vote(const Sample& sample, const std::vector<Segment>& ensemble,
@@ -452,15 +642,22 @@ class MultipleModelMethod {
   }
 
   // The first selected segment's result stands, even when it has none; only
-  // skipSegment moves on to the next selected segment.
+  // skipSegment moves on to the next selected segment. Its OutputFields come
+  // with it, also when it has no prediction (see "segment OutputFields").
   inline static std::unique_ptr<InternalScore> select_first(const Sample& sample, const std::vector<Segment>& ensemble,
                                                             const MissingPrediction& mp) {
     for (const auto& segment : ensemble) {
-      if (segment.predicate(sample)) {
-        auto score = segment.score(sample);
-        if (!score->empty) return score;
-        if (mp.treatment != MissingPredictionTreatment::SKIP_SEGMENT) break;
-      }
+      if (!segment.predicate(sample)) continue;
+      std::unique_ptr<InternalScore> score = segment.result(sample);
+      if (!score->empty) return carrying(segment, std::move(score));
+      if (mp.treatment == MissingPredictionTreatment::SKIP_SEGMENT) continue;
+      if (!segment.has_outputs) break;
+      // No prediction, so a fresh empty score: only the fields carry over.
+      auto none = std::make_unique<EnsembleScore>();
+      none->fields = fields_of(*segment.model, *score);
+      none->num_outputs = std::move(score->num_outputs);
+      none->str_outputs = std::move(score->str_outputs);
+      return none;
     }
     return std::make_unique<InternalScore>();
   }
@@ -468,11 +665,15 @@ class MultipleModelMethod {
   // selectAll: collect every active segment's prediction and format as PMML
   // Collection string "[pred1, pred2, ...]". A segment without a prediction
   // leaves an empty entry (JPMML writes null), or under returnMissing voids the
-  // result. skipSegment, which JPMML refuses here, acts as continue.
+  // result. skipSegment, which JPMML refuses here, acts as continue. The
+  // segments' OutputFields are returned as collections (add_collections); a
+  // segment is scored for them, on top of its prediction, only when it has any.
   inline static std::unique_ptr<InternalScore> select_all(const Sample& sample, const std::vector<Segment>& ensemble,
                                                           const MissingPrediction& mp) {
     std::string result = "[";
     bool first = true;
+    bool with_fields = false;
+    std::vector<std::vector<ResultField>> fields;
     for (const auto& segment : ensemble) {
       if (segment.predicate(sample)) {
         const std::string prediction = segment.predict(sample);
@@ -481,10 +682,19 @@ class MultipleModelMethod {
         if (!first) result += ", ";
         result += prediction;
         first = false;
+        if (segment.has_outputs) {
+          with_fields = true;
+          fields.push_back(fields_of(*segment.model, *segment.result(sample)));
+        } else {
+          fields.emplace_back();
+        }
       }
     }
     result += "]";
-    return std::make_unique<InternalScore>(result);
+    if (!with_fields) return std::make_unique<InternalScore>(result);
+    auto score = std::make_unique<EnsembleScore>(result);
+    add_collections(*score, fields);
+    return score;
   }
 
   // modelChain: "Segments whose Predicates evaluate to TRUE are executed in the
@@ -507,6 +717,9 @@ class MultipleModelMethod {
   // Each step evaluates its own LocalTransformations, which are gone again when
   // the step ends: the next segments read its target and OutputFields only.
   //
+  // The result carries the last executed segment's OutputFields (see "segment
+  // OutputFields"), not those of the segments before it.
+  //
   // A segment without a prediction leaves its target and OutputFields missing
   // for the segments after it (continue), or voids the chain (returnMissing).
   // skipSegment, which JPMML refuses here, acts as continue. JPMML also throws
@@ -521,7 +734,7 @@ class MultipleModelMethod {
     for (size_t i = 0; i < ensemble.size(); i++) {
       const Segment& segment = ensemble[i];
       if (!segment.predicate(tmp_sample)) continue;
-      if (i + 1 == ensemble.size()) return segment.model->augment_last(tmp_sample);
+      if (i + 1 == ensemble.size()) return carrying(segment, segment.model->augment_last(tmp_sample));
 
       before_last = tmp_sample;
       const bool predicted = segment.model->augment(tmp_sample);
@@ -532,7 +745,7 @@ class MultipleModelMethod {
 
     if (!last) return std::make_unique<InternalScore>();  // no segment selected
     tmp_sample = std::move(before_last);
-    return last->model->augment_last(tmp_sample);
+    return carrying(*last, last->model->augment_last(tmp_sample));
   }
 };
 

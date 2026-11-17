@@ -30,6 +30,9 @@ class OutputField {
   OutputExpressionType expression_type;
   bool derived;
   DataType datatype;
+  // dataType="integer", which DataType carries as a double: a selectAll
+  // collection writes such a value as an integer (see MultipleModelMethod).
+  bool integer = false;
   size_t index;
   std::shared_ptr<OutputExpression> expression;
 
@@ -65,8 +68,10 @@ class OutputField {
       } else {
         throw cpmml::ParsingException("Impossible to determine datatype for output: " + name);
       }
-    } else
+    } else {
       datatype = node.get_attribute("dataType");
+      integer = node.get_attribute("dataType") == "integer";
+    }
 
     index = indexer->get_or_set(name, datatype).first;
     expression = OutputExpressionBuilder::build(node, index, datatype, indexer, model_target);

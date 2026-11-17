@@ -85,7 +85,7 @@ class OutputDictionary {
     for (const auto& outputfield : dag) outputfield.prepare(sample);
   }
 
-  inline void add_output(Sample& sample, InternalScore& score) const {
+  inline void add_output(const Sample& sample, InternalScore& score) const {
     for (const auto& outputfield : dag) outputfield.add_output(sample, score);
   }
 };

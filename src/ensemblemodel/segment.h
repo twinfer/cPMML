@@ -29,6 +29,10 @@ class Segment {
   double weight = 1;
   Predicate predicate;
   std::shared_ptr<InternalModel> model;
+  // Whether the model declares an OutputField, or is a MiningModel one of
+  // whose segments does (set by EnsembleModel). selectAll scores a segment
+  // for its OutputFields only then.
+  bool has_outputs = false;
 
   Segment() = default;
 
@@ -53,6 +57,18 @@ class Segment {
     return model->in_segment_scope(sample, [this](const Sample& s) {
       std::unique_ptr<InternalScore> result = model->score_raw(s);
       model->target(*result, false);
+      return result;
+    });
+  }
+
+  // score() plus the model's own OutputFields, evaluated in the segment's
+  // scope: the segment model's whole result, as selectFirst, selectAll and
+  // modelChain return it (see MultipleModelMethod).
+  inline std::unique_ptr<InternalScore> result(const Sample& sample) const {
+    return model->in_segment_scope(sample, [this](const Sample& s) {
+      std::unique_ptr<InternalScore> result = model->score_raw(s);
+      model->target(*result, false);
+      model->output.add_output(s, *result);
       return result;
     });
   }
