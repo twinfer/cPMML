@@ -14,7 +14,9 @@
  *
  * pmml_tester.exe <model.zip> <inputs.csv> --dump <out.csv> writes the
  * predicted value and every OutputField as text instead of checking a fixture
- * (see run_dump; used by tools/cross-validate-text.py).
+ * (see run_dump; used by tools/cross-validate-text.py and
+ * tools/fixture-dump-diff.sh), or for a time-series model the forecast (and
+ * variance) of every step of the fixture (run_dump_forecast).
  *******************************************************************************/
 
 #include <algorithm>
@@ -457,8 +459,47 @@ static java::Kind kind_of_type(const std::string& datatype) {
   return java::Kind::DOUBLE;
 }
 
+// A time-series model is dumped the way run_forecast scores it: the forecast
+// fixture itself is the input (one row per step, regressor columns beside
+// "forecast", an optional "variance" column asking for the predictive
+// variance), and the dump is a "forecast" column (and "variance") with one
+// row per step, as doubles. Used by tools/fixture-dump-diff.sh; JPMML has no
+// counterpart.
+static int run_dump_forecast(cpmml::Model& model, const std::string& inputs, const std::string& out_path) {
+  CSVReader reader(inputs);
+  int horizon = 0;
+  bool with_variance = false;
+  std::unordered_map<std::string, std::vector<double>> regressors;
+  for (auto row = reader.read(); !row.empty(); row = reader.read()) {
+    horizon++;
+    for (const auto& [k, v] : row) {
+      if (k == "variance") with_variance = true;
+      else if (k != "forecast") regressors[k].push_back(to_double(v));
+    }
+  }
+  std::ofstream out(out_path);
+  out << "forecast" << (with_variance ? ",variance" : "") << "\n";
+  try {
+    cpmml::Input args;
+    args["horizon"] = horizon;
+    if (with_variance) args["_variance"] = std::string("true");
+    for (const auto& [col, values] : regressors) args[col] = values;
+    const cpmml::Result result = model.evaluate(args);
+    if (with_variance) {
+      for (const auto& [f, v] : result.series_with_variance())
+        out << java::text({f, java::Kind::DOUBLE}) << "," << java::text({v, java::Kind::DOUBLE}) << "\n";
+    } else {
+      for (const double f : result.series()) out << java::text({f, java::Kind::DOUBLE}) << "\n";
+    }
+  } catch (const std::exception& e) {
+    out << csv_cell(std::string("ERROR: ") + e.what()) << "\n";
+  }
+  return 0;
+}
+
 static int run_dump(cpmml::Model& model, const std::string& model_zip, const std::string& inputs,
                     const std::string& out_path) {
+  if (model.mining_function() == "TIMESERIES") return run_dump_forecast(model, inputs, out_path);
   const std::vector<char> document = read_file(model_zip, true);
   pugi::xml_document xml;
   if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
