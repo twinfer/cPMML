@@ -38,7 +38,7 @@
  *
  * For instance:
  * - majorityVote
- * - weightedAverage
+ * - weightedAverage, weightedSum, weightedMedian
  * - modelChain
  */
 class MultipleModelMethod {
@@ -49,8 +49,10 @@ class MultipleModelMethod {
     AVERAGE,
     WEIGHTED_AVERAGE,
     MEDIAN,
+    WEIGHTED_MEDIAN,
     MAX,
     SUM,
+    WEIGHTED_SUM,
     SELECT_FIRST,
     SELECT_ALL,
     MODEL_CHAIN
@@ -109,8 +111,10 @@ class MultipleModelMethod {
       {"average", MultipleModelMethodType::AVERAGE, "average"},
       {"weightedaverage", MultipleModelMethodType::WEIGHTED_AVERAGE, "weightedAverage"},
       {"median", MultipleModelMethodType::MEDIAN, "median"},
+      {"weightedmedian", MultipleModelMethodType::WEIGHTED_MEDIAN, "weightedMedian"},
       {"max", MultipleModelMethodType::MAX, "max"},
       {"sum", MultipleModelMethodType::SUM, "sum"},
+      {"weightedsum", MultipleModelMethodType::WEIGHTED_SUM, "weightedSum"},
       {"selectfirst", MultipleModelMethodType::SELECT_FIRST, "selectFirst"},
       {"selectall", MultipleModelMethodType::SELECT_ALL, "selectAll"},
       {"modelchain", MultipleModelMethodType::MODEL_CHAIN, "modelChain"},
@@ -175,6 +179,17 @@ class MultipleModelMethod {
         }
       case MultipleModelMethodType::MEDIAN:
         return [mp](const Sample& s, const std::vector<Segment>& e) { return median(s, e, mp); };
+      case MultipleModelMethodType::WEIGHTED_MEDIAN:
+        // The spec also allows weightedMedian for classification, on the
+        // segments' probabilities; JPMML 1.7.7 refuses to load it there, as for
+        // clustering and every other function ("Segmentation@multipleModelMethod
+        // =weightedMedian is not valid"). cPMML implements it for regression only.
+        switch (mining_function.value) {
+          case MiningFunction::MiningFunctionType::REGRESSION:
+            return [mp](const Sample& s, const std::vector<Segment>& e) { return weighted_median(s, e, mp); };
+          default:
+            throw cpmml::ParsingException("weightedMedian not supported for this mining function");
+        }
       case MultipleModelMethodType::MAX:
         // The spec lists max among the methods for classification, not for
         // regression ("For regression models only average, weightedAverage,
@@ -190,6 +205,16 @@ class MultipleModelMethod {
         }
       case MultipleModelMethodType::SUM:
         return [mp](const Sample& s, const std::vector<Segment>& e) { return sum(s, e, mp); };
+      case MultipleModelMethodType::WEIGHTED_SUM:
+        // "For classification models all the combination methods, except for sum
+        // and weightedSum, can be used", and clustering lists neither. JPMML
+        // 1.7.7 refuses weightedSum for every function but regression.
+        switch (mining_function.value) {
+          case MiningFunction::MiningFunctionType::REGRESSION:
+            return [mp](const Sample& s, const std::vector<Segment>& e) { return weighted_sum(s, e, mp); };
+          default:
+            throw cpmml::ParsingException("weightedSum not supported for this mining function");
+        }
       case MultipleModelMethodType::SELECT_FIRST:
         return [mp](const Sample& s, const std::vector<Segment>& e) { return select_first(s, e, mp); };
       case MultipleModelMethodType::SELECT_ALL:
@@ -630,6 +655,66 @@ class MultipleModelMethod {
     return std::make_unique<InternalScore>(med);
   }
 
+  // weightedMedian, as the spec defines it: for values x1 < ... < xn with
+  // positive weights adding up to 1, the xk such that the weights before it
+  // and the weights after it each add up to at most 1/2; when two values
+  // qualify, their mean.
+  //
+  // Computed as JPMML 1.7.7 does -- the usable segments' values sorted, ties
+  // in document order, the first one at which the running weight reaches half
+  // the total weight -- except where JPMML departs from the spec: when the
+  // running weight is half the total there (up to rounding), the next value with a
+  // positive weight qualifies too, and the result is the mean of the two
+  // (JPMML returns the lower one). A segment of weight 0 adds nothing and is
+  // never the result. When the usable segments' weights add up to 0 there is
+  // no weighted median and no prediction (JPMML returns the smallest value).
+  //
+  // A segment without a prediction is handled as by median, missingThreshold
+  // weighing by Segment@weight; every segment skipped is no prediction (JPMML
+  // throws "Undefined result"). A negative Segment@weight is refused at load
+  // (EnsembleModel).
+  inline static std::unique_ptr<InternalScore> weighted_median(const Sample& sample,
+                                                               const std::vector<Segment>& ensemble,
+                                                               const MissingPrediction& mp) {
+    auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
+                                           mp, false, true);
+    if (usable.missing || usable.results.empty()) return std::make_unique<InternalScore>();
+
+    struct Entry {
+      double value;
+      double weight;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(usable.results.size());
+    double total = 0;
+    for (const auto& r : usable.results) {
+      entries.push_back({r.result->double_score, r.segment->weight});
+      total += r.segment->weight;
+    }
+    if (!(total > 0)) return std::make_unique<InternalScore>();
+
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const Entry& lhs, const Entry& rhs) { return lhs.value < rhs.value; });
+    // Whether the running weight is exactly half the total is decided up to
+    // rounding: the total adds the weights in document order and the running
+    // weight in value order, so decimal weights such as .1, .2, .3 can miss
+    // half by an ulp in either direction and flip between the mean and a
+    // single value with the order of the inputs.
+    const double half = 0.5 * total;
+    const double tolerance = 1e-9 * total;
+    double running = 0;
+    for (size_t k = 0; k < entries.size(); k++) {
+      running += entries[k].weight;
+      if (running < half - tolerance) continue;
+      if (running <= half + tolerance)
+        for (size_t next = k + 1; next < entries.size(); next++)
+          if (entries[next].weight > 0)
+            return std::make_unique<InternalScore>((entries[k].value + entries[next].value) / 2.0);
+      return std::make_unique<InternalScore>(entries[k].value);
+    }
+    return std::make_unique<InternalScore>();  // unreachable: running ends at total
+  }
+
   // The place of `category` among the target's declared categories; past them
   // all when it is not declared.
   static size_t rank(const std::string& category, const Classes& classes) {
@@ -711,6 +796,22 @@ class MultipleModelMethod {
 
     double score = 0;
     for (const auto& r : usable.results) score += r.result->double_score;
+    return std::make_unique<InternalScore>(score);
+  }
+
+  // weightedSum: the sum of each usable segment's prediction times its
+  // Segment@weight, in document order, as JPMML 1.7.7 adds them. A segment
+  // without a prediction is handled as by sum, missingThreshold weighing by
+  // Segment@weight; every segment skipped gives 0, as in JPMML. A negative
+  // Segment@weight is refused at load (EnsembleModel).
+  inline static std::unique_ptr<InternalScore> weighted_sum(const Sample& sample, const std::vector<Segment>& ensemble,
+                                                            const MissingPrediction& mp) {
+    auto usable = apply_missing_prediction(evaluate_selected<std::unique_ptr<InternalScore>>(sample, ensemble, score),
+                                           mp, false, true);
+    if (usable.missing) return std::make_unique<InternalScore>();
+
+    double score = 0;
+    for (const auto& r : usable.results) score += r.segment->weight * r.result->double_score;
     return std::make_unique<InternalScore>(score);
   }
 

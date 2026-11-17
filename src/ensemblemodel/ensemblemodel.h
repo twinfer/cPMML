@@ -62,6 +62,16 @@ class EnsembleModel : public InternalModel {
       ensemble.back().has_outputs = declares_outputs(*model);
     }
 
+    // The weighted median is defined for positive weights, and JPMML 1.7.7
+    // throws on a negative Segment@weight under weightedSum and weightedMedian
+    // whenever that segment predicts. cPMML refuses the document at load.
+    const auto method = multiplemodelmethod.value;
+    if (method == MultipleModelMethod::MultipleModelMethodType::WEIGHTED_SUM ||
+        method == MultipleModelMethod::MultipleModelMethodType::WEIGHTED_MEDIAN)
+      for (const auto& segment : ensemble)
+        if (segment.weight < 0)
+          throw cpmml::ParsingException("Segment@weight is negative under " + multiplemodelmethod.to_string());
+
     score_ensemble = std::bind(multiplemodelmethod.function, std::placeholders::_1, ensemble);
     base_sample = create_basesample(indexer);
   };
