@@ -73,7 +73,7 @@ class InternalModel {
   InternalModel(const XmlNode& node, const DataDictionary& data_dictionary,
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : indexer(indexer),
-        mining_function(node.get_attribute("functionName")),
+        mining_function(MiningFunction::read(node)),
         mining_schema(MiningSchema(node.get_child("MiningSchema"), data_dictionary)),
         target_field(get_target(mining_function, mining_schema, indexer)),
         transformation_dictionary(transformation_dictionary),

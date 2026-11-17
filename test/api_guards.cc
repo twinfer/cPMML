@@ -191,7 +191,7 @@ static void unsupported_baseline_statistics_are_rejected() {
       R"(<CountTable><FieldValue field="v" value="1" count="10"/></CountTable>)";
 
   CHECK(baseline_loads("zValue", gaussian));
-  CHECK(baseline_loads("zScore", gaussian));  // tolerated alias
+  CHECK(!baseline_loads("zScore", gaussian));  // not a PMML token: the spec spells it zValue
 
   CHECK(!baseline_loads("chiSquareIndependence", counts));
   CHECK(!baseline_loads("chiSquareDistribution", counts));

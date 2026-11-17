@@ -31,26 +31,21 @@ class FieldUsageType {
       {"supplementary", FieldUsageTypeValue::SUPPLEMENTARY, "SUPPLEMENTARY"},
       {"group", FieldUsageTypeValue::GROUP, "GROUP"},
       {"order", FieldUsageTypeValue::ORDER, "ORDER"},
-      {"frequency_weight", FieldUsageTypeValue::FREQUENCY_WEIGHT, "FREQUENCY_WEIGHT"},
-      {"frequencyweight", FieldUsageTypeValue::FREQUENCY_WEIGHT, "FREQUENCY_WEIGHT"},
-      {"analysis_weight", FieldUsageTypeValue::ANALYSIS_WEIGHT, "ANALYSIS_WEIGHT"},
-      {"analysisweight", FieldUsageTypeValue::ANALYSIS_WEIGHT, "ANALYSIS_WEIGHT"},
+      {"frequencyWeight", FieldUsageTypeValue::FREQUENCY_WEIGHT, "FREQUENCY_WEIGHT"},
+      {"analysisWeight", FieldUsageTypeValue::ANALYSIS_WEIGHT, "ANALYSIS_WEIGHT"},
   };
 
   FieldUsageTypeValue value = FieldUsageTypeValue::ACTIVE;
 
   FieldUsageType() = default;
 
-  explicit FieldUsageType(const std::string& field_usage_type) : value(from_string(field_usage_type)) {}
+  explicit FieldUsageType(FieldUsageTypeValue value) : value(value) {}
 
-  // MiningField/@usageType defaults to active. The spec spells the weight
-  // usages "frequencyWeight" and "analysisWeight"; the underscored forms were
-  // the only ones in the table, so a conforming document fell through to ACTIVE
-  // -- harmless while nothing distinguishes the two, but now that an
-  // unrecognised usageType is a load error the conforming spelling has to be
-  // here. Both are accepted.
-  static FieldUsageTypeValue from_string(const std::string& field_usage_type) {
-    return enum_value(field_usage_type, TABLE, "usageType", FieldUsageTypeValue::ACTIVE);
+  // MiningField@usageType, default active. The underscored spellings
+  // frequency_weight and analysis_weight this table used to accept are not
+  // PMML; JPMML 1.7.7 reads them as an absent usageType.
+  static FieldUsageType read(const XmlNode& node) {
+    return FieldUsageType(read_enum(node, "usageType", TABLE, FieldUsageTypeValue::ACTIVE));
   }
 
   inline bool operator==(FieldUsageType other) const { return value == other.value; }

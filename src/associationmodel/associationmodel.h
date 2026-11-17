@@ -96,7 +96,7 @@ class AssociationModel : public InternalModel {
     if (node.exists_child("Output")) {
       for (const auto& of_node : node.get_child("Output").get_childs("OutputField")) {
         if (of_node.exists_attribute("algorithm")) {
-          algorithm = algorithm_from_string(of_node.get_attribute("algorithm"));
+          algorithm = read_algorithm(of_node);
           break;
         }
       }
@@ -408,15 +408,15 @@ class AssociationModel : public InternalModel {
   }
 
   static constexpr EnumEntry<Algorithm> ALGORITHM_TABLE[] = {
-      {"recommendation", Algorithm::RECOMMENDATION, "recommendation"},
-      {"exclusiverecommendation", Algorithm::EXCLUSIVE_RECOMMENDATION, "exclusiveRecommendation"},
-      {"ruleassociation", Algorithm::RULE_ASSOCIATION, "ruleAssociation"},
+      {"recommendation", Algorithm::RECOMMENDATION},
+      {"exclusiveRecommendation", Algorithm::EXCLUSIVE_RECOMMENDATION},
+      {"ruleAssociation", Algorithm::RULE_ASSOCIATION},
   };
 
   // Everything unrecognised used to become recommendation, so a misspelt
   // algorithm silently scored as the least restrictive of the three.
-  static Algorithm algorithm_from_string(const std::string& raw) {
-    return enum_value(raw, ALGORITHM_TABLE, "OutputField/@algorithm", Algorithm::EXCLUSIVE_RECOMMENDATION);
+  static Algorithm read_algorithm(const XmlNode& output_field) {
+    return read_enum(output_field, "algorithm", ALGORITHM_TABLE, Algorithm::EXCLUSIVE_RECOMMENDATION);
   }
 };
 

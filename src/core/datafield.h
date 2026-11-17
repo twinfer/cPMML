@@ -64,16 +64,16 @@ class DataField {
 
   DataField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
-        datatype(node.get_attribute("dataType")),
-        integer(to_lower(node.get_attribute("dataType")) == "integer"),
+        datatype(DataType::read(node)),
+        integer(DataType::is_integer(node)),
         index(indexer->get_or_set(name, datatype).first),
-        optype(node.get_attribute("optype")) {
+        optype(OpType::read(node)) {
     auto values = node.get_childs("Value");
     std::vector<Predicate> tmp_contraints;
     std::set<Value> allowed_values;
     std::set<Value> forbidden_values;
     for (const auto& value : values) {
-      auto property = Property(value.get_attribute("property"));
+      auto property = Property(value);
       switch (property.value) {
         case Property::PropertyValue::VALID:
           allowed_values.emplace(Value(value.get_attribute("value"), datatype));
@@ -87,13 +87,14 @@ class DataField {
           break;
       }
     }
-    if (allowed_values.size() > 0) tmp_contraints.push_back(Predicate(index, "isIn", allowed_values));
-    if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, "isNotIn", forbidden_values));
+    using Op = PredicateOpType::PredicateOpTypeValue;
+    if (allowed_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_IN, allowed_values));
+    if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_NOT_IN, forbidden_values));
 
     auto intervals = node.get_childs("Interval");
     for (const auto& interval : intervals) tmp_contraints.push_back(IntervalBuilder::build(interval, index, datatype));
 
-    if (tmp_contraints.size() > 0) constraints = Predicate(tmp_contraints, "AND");
+    if (tmp_contraints.size() > 0) constraints = Predicate(tmp_contraints, Op::AND);
 
     n_values = allowed_values.size() > 0 ? allowed_values.size() : 1;
   };

@@ -31,11 +31,12 @@ class MiningFunction {
   };
 
   static constexpr EnumEntry<MiningFunctionType> TABLE[] = {
-      {"associationrules", MiningFunctionType::ASSOCIATION_RULES, "ASSOCIATION_RULES"},
+      {"associationRules", MiningFunctionType::ASSOCIATION_RULES, "ASSOCIATION_RULES"},
+      {"sequences", MiningFunctionType::MIXED, nullptr, EnumSupport::UNSUPPORTED},
       {"classification", MiningFunctionType::CLASSIFICATION, "CLASSIFICATION"},
       {"regression", MiningFunctionType::REGRESSION, "REGRESSION"},
       {"clustering", MiningFunctionType::CLUSTERING, "CLUSTERING"},
-      {"timeseries", MiningFunctionType::TIMESERIES, "TIMESERIES"},
+      {"timeSeries", MiningFunctionType::TIMESERIES, "TIMESERIES"},
       {"mixed", MiningFunctionType::MIXED, "MIXED"},
   };
 
@@ -43,11 +44,11 @@ class MiningFunction {
 
   MiningFunction() = default;
 
-  explicit MiningFunction(const std::string& mining_function) : value(from_string(mining_function)) {}
+  explicit MiningFunction(MiningFunctionType value) : value(value) {}
 
-  // functionName is required on every MODEL-ELEMENT.
-  static MiningFunctionType from_string(const std::string& mining_function) {
-    return enum_value(mining_function, TABLE, "mining function");
+  // functionName is required on every model element.
+  static MiningFunction read(const XmlNode& model_node) {
+    return MiningFunction(read_enum(model_node, "functionName", TABLE));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }

@@ -81,20 +81,32 @@ class CastInteger {
   std::function<double(const double)> cast_function;
 
   CastInteger() = default;
-  explicit CastInteger(const std::string& cast_integer) {
-    static std::unordered_map<std::string, std::function<double(const double)>> cast_integer_converter = {
-        {"round", _round},
-        {"ceiling", _ceil},
-        {"floor", _floor},
-    };
+  enum class Kind { ROUND, CEILING, FLOOR };
 
-    auto result = cast_integer_converter.find(cast_integer);
-    if (result != cast_integer_converter.cend()) {
-      empty = false;
-      cast_function = result->second;
-    } else {
-      empty = true;
+  // Target@castInteger: round, ceiling or floor, absent meaning no cast.
+  // Anything else used to mean no cast too.
+  static constexpr EnumEntry<Kind> TABLE[] = {
+      {"round", Kind::ROUND},
+      {"ceiling", Kind::CEILING},
+      {"floor", Kind::FLOOR},
+  };
+
+  explicit CastInteger(const XmlNode& target) {
+    if (!target.exists_attribute("castInteger")) {
       cast_function = _identity;
+      return;
+    }
+    empty = false;
+    switch (read_enum(target, "castInteger", TABLE)) {
+      case Kind::ROUND:
+        cast_function = _round;
+        break;
+      case Kind::CEILING:
+        cast_function = _ceil;
+        break;
+      case Kind::FLOOR:
+        cast_function = _floor;
+        break;
     }
   }
 
@@ -167,7 +179,7 @@ class Target {
       : mining_function(mining_fuction),
         has_field_name(node.exists_attribute("field")),
         field_name(node.get_attribute("field")),
-        cast(node.get_attribute("castInteger")),
+        cast(node),
         has_min(node.exists_attribute("min")),
         min(node.get_double_attribute("min")),
         has_max(node.exists_attribute("max")),

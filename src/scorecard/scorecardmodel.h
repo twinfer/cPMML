@@ -61,6 +61,13 @@ class ScorecardModel : public InternalModel {
 
   // --- Constructors ---
 
+  // reasonCodeAlgorithm, default pointsBelow; anything but a case-folded
+  // "pointsabove" used to mean pointsBelow.
+  static constexpr EnumEntry<bool> REASON_CODE_ALGORITHM_TABLE[] = {
+      {"pointsAbove", false},
+      {"pointsBelow", true},
+  };
+
   ScorecardModel() = default;
 
   ScorecardModel(const XmlNode& node, const DataDictionary& data_dictionary,
@@ -68,7 +75,7 @@ class ScorecardModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         initial_score(node.get_double_attribute("initialScore", 0.0)),
         use_reason_codes(node.get_bool_attribute("useReasonCodes", true)),
-        points_below(to_lower(node.get_attribute("reasonCodeAlgorithm")) != "pointsabove"),
+        points_below(read_enum(node, "reasonCodeAlgorithm", REASON_CODE_ALGORITHM_TABLE, true)),
         model_baseline(node.get_double_attribute("baselineScore", 0.0)) {
     classes.push_back(mining_schema.target.name);
     parse_characteristics(node, indexer);

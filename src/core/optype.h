@@ -31,12 +31,14 @@ class OpType {
   OpTypeValue value = OpTypeValue::UNDEFINED;
 
   OpType() = default;
-  explicit OpType(const std::string& optype) : value(from_string(optype)) {}
+  explicit OpType(OpTypeValue value) : value(value) {}
 
-  // optype is required on DataField but optional on MiningField and elsewhere,
-  // where its absence means "inherit"; UNDEFINED is that state.
-  static OpTypeValue from_string(const std::string& optype) {
-    return enum_value(optype, TABLE, "optype", OpTypeValue::UNDEFINED);
+  // optype is required on DataField and DerivedField; elsewhere (MiningField,
+  // OutputField) its absence means "inherit", and UNDEFINED is that state.
+  static OpType read(const XmlNode& node) { return OpType(read_enum(node, "optype", TABLE)); }
+
+  static OpType read_optional(const XmlNode& node) {
+    return OpType(read_enum(node, "optype", TABLE, OpTypeValue::UNDEFINED));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }

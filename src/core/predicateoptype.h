@@ -44,23 +44,50 @@ class PredicateOpType {
     FALSE
   };
 
+  // What to_string() shows; True and False are the elements of that name.
   static constexpr EnumEntry<PredicateOpTypeValue> TABLE[] = {
       {"equal", PredicateOpTypeValue::EQUAL, "=="},
-      {"notequal", PredicateOpTypeValue::NOT_EQUAL, "!="},
-      {"greaterthan", PredicateOpTypeValue::GREATER_THAN, ">"},
-      {"greaterorequal", PredicateOpTypeValue::GREATER_OR_EQUAL, ">="},
-      {"lessthan", PredicateOpTypeValue::LESS_THAN, "<"},
-      {"lessorequal", PredicateOpTypeValue::LESS_OR_EQUAL, "<="},
-      {"isin", PredicateOpTypeValue::IS_IN, "isIn"},
-      {"isnotin", PredicateOpTypeValue::IS_NOT_IN, "isNotIn"},
-      {"ismissing", PredicateOpTypeValue::IS_MISSING, "isMissing"},
-      {"isnotmissing", PredicateOpTypeValue::IS_NOT_MISSING, "isNotMissing"},
+      {"notEqual", PredicateOpTypeValue::NOT_EQUAL, "!="},
+      {"greaterThan", PredicateOpTypeValue::GREATER_THAN, ">"},
+      {"greaterOrEqual", PredicateOpTypeValue::GREATER_OR_EQUAL, ">="},
+      {"lessThan", PredicateOpTypeValue::LESS_THAN, "<"},
+      {"lessOrEqual", PredicateOpTypeValue::LESS_OR_EQUAL, "<="},
+      {"isIn", PredicateOpTypeValue::IS_IN, "isIn"},
+      {"isNotIn", PredicateOpTypeValue::IS_NOT_IN, "isNotIn"},
+      {"isMissing", PredicateOpTypeValue::IS_MISSING, "isMissing"},
+      {"isNotMissing", PredicateOpTypeValue::IS_NOT_MISSING, "isNotMissing"},
       {"and", PredicateOpTypeValue::AND, "AND"},
       {"or", PredicateOpTypeValue::OR, "OR"},
       {"xor", PredicateOpTypeValue::XOR, "XOR"},
       {"surrogate", PredicateOpTypeValue::SURROGATE, "SURROGATE"},
-      {"true", PredicateOpTypeValue::TRUE, "TRUE"},
-      {"false", PredicateOpTypeValue::FALSE, "FALSE"},
+      {"True", PredicateOpTypeValue::TRUE, "TRUE"},
+      {"False", PredicateOpTypeValue::FALSE, "FALSE"},
+  };
+
+  // Each predicate element has its own operator enumeration, so a
+  // CompoundPredicate with booleanOperator="isIn" is refused rather than read
+  // as a set test with no field.
+  static constexpr EnumEntry<PredicateOpTypeValue> SIMPLE_OPERATOR_TABLE[] = {
+      {"equal", PredicateOpTypeValue::EQUAL},
+      {"notEqual", PredicateOpTypeValue::NOT_EQUAL},
+      {"lessThan", PredicateOpTypeValue::LESS_THAN},
+      {"lessOrEqual", PredicateOpTypeValue::LESS_OR_EQUAL},
+      {"greaterThan", PredicateOpTypeValue::GREATER_THAN},
+      {"greaterOrEqual", PredicateOpTypeValue::GREATER_OR_EQUAL},
+      {"isMissing", PredicateOpTypeValue::IS_MISSING},
+      {"isNotMissing", PredicateOpTypeValue::IS_NOT_MISSING},
+  };
+
+  static constexpr EnumEntry<PredicateOpTypeValue> SET_OPERATOR_TABLE[] = {
+      {"isIn", PredicateOpTypeValue::IS_IN},
+      {"isNotIn", PredicateOpTypeValue::IS_NOT_IN},
+  };
+
+  static constexpr EnumEntry<PredicateOpTypeValue> COMPOUND_OPERATOR_TABLE[] = {
+      {"or", PredicateOpTypeValue::OR},
+      {"and", PredicateOpTypeValue::AND},
+      {"xor", PredicateOpTypeValue::XOR},
+      {"surrogate", PredicateOpTypeValue::SURROGATE},
   };
 
   // See PredicateType: default-constructed instances used to hold an
@@ -69,13 +96,7 @@ class PredicateOpType {
 
   PredicateOpType() = default;
 
-  explicit PredicateOpType(const std::string& predicatetype) : value(from_string(predicatetype)) {}
-
-  // SimplePredicate/@operator and CompoundPredicate/@booleanOperator are both
-  // required.
-  static PredicateOpTypeValue from_string(const std::string& predicate_type) {
-    return enum_value(predicate_type, TABLE, "predicate operator");
-  }
+  PredicateOpType(PredicateOpTypeValue value) : value(value) {}
 
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 };

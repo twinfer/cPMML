@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "core/enum_parser.h"
 #include "outputexpression.h"
 
 /**
@@ -22,18 +23,53 @@
  * ruleValue style (feature="ruleValue" + ruleFeature attribute).
  *
  * Attributes:
- *   algorithm  — which matching algorithm (read from OutputField, but scoring
- *                uses the matched rules already computed by the model)
+ *   algorithm  — which matching algorithm's rules to read (default
+ *                exclusiveRecommendation, as the spec and JPMML have it)
  *   rank       — 0 = all matching rules, 1 = best, 2 = second-best, etc.
  *   rankBasis  — sort field: confidence (default), support, lift
  *   rankOrder  — descending (default) or ascending
  *   isMultiValued — "1" when rank=0, output is pipe-delimited list
  *   ruleFeature   — for feature="ruleValue": which sub-feature to extract
+ *                   (default consequent)
  */
 class AssociationOutput : public OutputExpression {
  public:
   enum class RuleFeature { RULE_ID, ANTECEDENT, CONSEQUENT, RULE, SUPPORT, CONFIDENCE, LIFT };
   enum class RankBasis { CONFIDENCE, SUPPORT, LIFT };
+
+  // OutputField@algorithm, mapped to the key InternalScore files the matched
+  // rules under (AssociationModel::score).
+  static constexpr EnumEntry<const char*> ALGORITHM_TABLE[] = {
+      {"recommendation", "recommendation"},
+      {"exclusiveRecommendation", "exclusiverecommendation"},
+      {"ruleAssociation", "ruleassociation"},
+  };
+
+  static constexpr EnumEntry<RankBasis> RANK_BASIS_TABLE[] = {
+      {"confidence", RankBasis::CONFIDENCE},
+      {"support", RankBasis::SUPPORT},
+      {"lift", RankBasis::LIFT},
+      {"leverage", RankBasis::CONFIDENCE, nullptr, EnumSupport::UNSUPPORTED},
+      {"affinity", RankBasis::CONFIDENCE, nullptr, EnumSupport::UNSUPPORTED},
+  };
+
+  static constexpr EnumEntry<bool> RANK_ORDER_TABLE[] = {
+      {"descending", true},
+      {"ascending", false},
+  };
+
+  // RULE-FEATURE.
+  static constexpr EnumEntry<RuleFeature> RULE_FEATURE_TABLE[] = {
+      {"antecedent", RuleFeature::ANTECEDENT},
+      {"consequent", RuleFeature::CONSEQUENT},
+      {"rule", RuleFeature::RULE},
+      {"ruleId", RuleFeature::RULE_ID},
+      {"confidence", RuleFeature::CONFIDENCE},
+      {"support", RuleFeature::SUPPORT},
+      {"lift", RuleFeature::LIFT},
+      {"leverage", RuleFeature::RULE_ID, nullptr, EnumSupport::UNSUPPORTED},
+      {"affinity", RuleFeature::RULE_ID, nullptr, EnumSupport::UNSUPPORTED},
+  };
 
   RuleFeature rule_feature;
   std::string algorithm_key;  // lowercase algorithm name for matched_rules_by_algorithm lookup
@@ -43,17 +79,23 @@ class AssociationOutput : public OutputExpression {
   bool multi_valued;
 
   AssociationOutput()
-      : algorithm_key("recommendation"), rank(1), rank_basis(RankBasis::CONFIDENCE), descending(true), multi_valued(false) {}
+      : algorithm_key("exclusiverecommendation"),
+        rank(1),
+        rank_basis(RankBasis::CONFIDENCE),
+        descending(true),
+        multi_valued(false) {}
 
   AssociationOutput(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
                     const DataType& output_type, RuleFeature feature)
       : OutputExpression(output_index, output_type, indexer),
         rule_feature(feature),
-        algorithm_key(to_lower(node.exists_attribute("algorithm") ? node.get_attribute("algorithm") : "recommendation")),
+        // The spec default is exclusiveRecommendation; this used to default to
+        // recommendation, so an OutputField without algorithm returned rules
+        // whose consequent the basket already holds.
+        algorithm_key(read_enum(node, "algorithm", ALGORITHM_TABLE, "exclusiverecommendation")),
         rank(static_cast<int>(node.get_long_attribute("rank", 1))),
-        rank_basis(parse_rank_basis(node.exists_attribute("rankBasis") ? node.get_attribute("rankBasis") : "confidence")),
-        descending(to_lower(node.exists_attribute("rankOrder") ? node.get_attribute("rankOrder") : "descending") ==
-                   "descending"),
+        rank_basis(read_enum(node, "rankBasis", RANK_BASIS_TABLE, RankBasis::CONFIDENCE)),
+        descending(read_enum(node, "rankOrder", RANK_ORDER_TABLE, true)),
         multi_valued(node.exists_attribute("isMultiValued") && node.get_attribute("isMultiValued") == "1") {}
 
   inline virtual std::string eval_str(const Sample& /*sample*/, const InternalScore& score) const override {
@@ -148,32 +190,14 @@ class AssociationOutput : public OutputExpression {
       std::sort(rules.begin(), rules.end(), [&](const auto& a, const auto& b) { return key(a) < key(b); });
   }
 
-  static RankBasis parse_rank_basis(const std::string& s) {
-    const std::string lower = to_lower(s);
-    if (lower == "support") return RankBasis::SUPPORT;
-    if (lower == "lift") return RankBasis::LIFT;
-    return RankBasis::CONFIDENCE;
-  }
-
-  static RuleFeature parse_rule_feature(const std::string& s) {
-    const std::string lower = to_lower(s);
-    if (lower == "antecedent") return RuleFeature::ANTECEDENT;
-    if (lower == "consequent") return RuleFeature::CONSEQUENT;
-    if (lower == "rule") return RuleFeature::RULE;
-    if (lower == "ruleid") return RuleFeature::RULE_ID;
-    if (lower == "support") return RuleFeature::SUPPORT;
-    if (lower == "confidence") return RuleFeature::CONFIDENCE;
-    if (lower == "lift") return RuleFeature::LIFT;
-    return RuleFeature::RULE_ID;
-  }
-
  public:
   // Factory for feature="ruleValue" (reads ruleFeature attribute from node)
   static std::shared_ptr<AssociationOutput> from_rule_value(const XmlNode& node,
                                                              const std::shared_ptr<Indexer>& indexer,
                                                              const size_t& output_index,
                                                              const DataType& output_type) {
-    RuleFeature rf = parse_rule_feature(node.exists_attribute("ruleFeature") ? node.get_attribute("ruleFeature") : "ruleId");
+    // The spec default is consequent; this used to default to ruleId.
+    const RuleFeature rf = read_enum(node, "ruleFeature", RULE_FEATURE_TABLE, RuleFeature::CONSEQUENT);
     return std::make_shared<AssociationOutput>(node, indexer, output_index, output_type, rf);
   }
 };

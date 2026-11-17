@@ -63,13 +63,13 @@ class RuleSetModel : public InternalModel {
 
     // Parse selection criterion (take first method if multiple present)
     if (ruleset_node.exists_child("RuleSelectionMethod")) {
-      std::string crit = to_lower(ruleset_node.get_child("RuleSelectionMethod").get_attribute("criterion"));
-      if (crit == "weightedmax")
-        criterion = SelectionCriterion::WEIGHTED_MAX;
-      else if (crit == "weightedsum")
-        criterion = SelectionCriterion::WEIGHTED_SUM;
-      else
-        criterion = SelectionCriterion::FIRST_HIT;
+      // criterion is required; anything unrecognised used to become firstHit.
+      static constexpr EnumEntry<SelectionCriterion> CRITERION_TABLE[] = {
+          {"weightedSum", SelectionCriterion::WEIGHTED_SUM},
+          {"weightedMax", SelectionCriterion::WEIGHTED_MAX},
+          {"firstHit", SelectionCriterion::FIRST_HIT},
+      };
+      criterion = read_enum(ruleset_node.get_child("RuleSelectionMethod"), "criterion", CRITERION_TABLE);
     }
 
     parse_rules(ruleset_node, indexer);
@@ -117,7 +117,7 @@ class RuleSetModel : public InternalModel {
 
         // AND with ancestor CompoundRule predicate (if any)
         rule.predicate = (!parent_pred.is_empty && !rule_pred.is_empty)
-                             ? Predicate({parent_pred, rule_pred}, "and")
+                             ? Predicate({parent_pred, rule_pred}, PredicateOpType::PredicateOpTypeValue::AND)
                              : (rule_pred.is_empty ? parent_pred : rule_pred);
         rules.push_back(std::move(rule));
 
@@ -127,7 +127,7 @@ class RuleSetModel : public InternalModel {
 
         // Combine with parent predicate and recurse
         Predicate combined = (!parent_pred.is_empty && !compound_pred.is_empty)
-                                 ? Predicate({parent_pred, compound_pred}, "and")
+                                 ? Predicate({parent_pred, compound_pred}, PredicateOpType::PredicateOpTypeValue::AND)
                                  : (compound_pred.is_empty ? parent_pred : compound_pred);
         collect_rules(child, pb, combined);
       }

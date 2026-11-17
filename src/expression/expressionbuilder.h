@@ -30,7 +30,7 @@ class ExpressionBuilder {
   inline static std::shared_ptr<Expression> build(const XmlNode& node, const unsigned int& output_index,
                                                   const DataType& output_type,
                                                   const std::shared_ptr<Indexer>& indexer) {
-    switch (ExpressionType(node.name()).value) {
+    switch (ExpressionType(node).value) {
       case ExpressionType::ExpressionTypeValue::CONSTANT:
         return std::make_shared<Constant>(node, output_index, output_type,
                                           indexer);  // to be refined in case of Parameter fields

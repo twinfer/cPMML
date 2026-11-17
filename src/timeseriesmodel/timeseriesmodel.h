@@ -171,22 +171,35 @@ class TimeSeriesModel {
 
   TimeSeriesModel() = default;
 
+  // TIMESERIES-ALGORITHM. Matched case-sensitively: "exponentialSmoothing"
+  // and "arima" used to be accepted.
+  enum class BestFit { ETS, SSM, ARIMA, GARCH };
+  static constexpr EnumEntry<BestFit> BEST_FIT_TABLE[] = {
+      {"ARIMA", BestFit::ARIMA},
+      {"ExponentialSmoothing", BestFit::ETS},
+      {"SeasonalTrendDecomposition", BestFit::ETS, nullptr, EnumSupport::UNSUPPORTED},
+      {"SpectralAnalysis", BestFit::ETS, nullptr, EnumSupport::UNSUPPORTED},
+      {"StateSpaceModel", BestFit::SSM},
+      {"GARCH", BestFit::GARCH},
+  };
+
   explicit TimeSeriesModel(const XmlNode& ts_node) {
-    std::string bf = to_lower(ts_node.get_attribute("bestFit"));
-    if (bf == "exponentialsmoothing") {
-      algorithm = Algorithm::ETS;
-      parse_ets(ts_node.get_child("ExponentialSmoothing"));
-    } else if (bf == "statespacemodel") {
-      algorithm = Algorithm::SSM;
-      parse_ssm(ts_node.get_child("StateSpaceModel"));
-    } else if (bf == "arima") {
-      parse_arima(ts_node.get_child("ARIMA"), ts_node);  // sets algorithm internally
-    } else if (bf == "garch") {
-      algorithm = Algorithm::GARCH;
-      parse_garch(ts_node.get_child("GARCH"), ts_node);
-    } else {
-      throw cpmml::ParsingException("TimeSeriesModel: unsupported bestFit=\"" + ts_node.get_attribute("bestFit") +
-                                    "\"; supported: ExponentialSmoothing, StateSpaceModel, ARIMA, GARCH");
+    switch (read_enum(ts_node, "bestFit", BEST_FIT_TABLE)) {
+      case BestFit::ETS:
+        algorithm = Algorithm::ETS;
+        parse_ets(ts_node.get_child("ExponentialSmoothing"));
+        break;
+      case BestFit::SSM:
+        algorithm = Algorithm::SSM;
+        parse_ssm(ts_node.get_child("StateSpaceModel"));
+        break;
+      case BestFit::ARIMA:
+        parse_arima(ts_node.get_child("ARIMA"), ts_node);  // sets algorithm internally
+        break;
+      case BestFit::GARCH:
+        algorithm = Algorithm::GARCH;
+        parse_garch(ts_node.get_child("GARCH"), ts_node);
+        break;
     }
     parse_dynamic_regressors(ts_node);
   }
@@ -253,10 +266,24 @@ class TimeSeriesModel {
   // Transform helpers
   // =========================================================================
 
-  static Transform parse_transform(const std::string& attr) {
-    if (attr == "logarithmic") return Transform::LOG;
-    if (attr == "squareroot") return Transform::SQRT;
-    return Transform::NONE;
+  // transformation on ExponentialSmoothing, ARIMA and DynamicRegressor,
+  // default none. Anything unrecognised used to mean none.
+  static constexpr EnumEntry<Transform> TRANSFORMATION_TABLE[] = {
+      {"none", Transform::NONE},
+      {"logarithmic", Transform::LOG},
+      {"squareroot", Transform::SQRT},
+  };
+
+  static Transform read_transform(const XmlNode& node) {
+    return read_enum(node, "transformation", TRANSFORMATION_TABLE, Transform::NONE);
+  }
+
+  // TimeSeries@usage, default original; only the original series is read.
+  static bool is_original_series(const XmlNode& time_series) {
+    enum class Usage { ORIGINAL, OTHER };
+    static constexpr EnumEntry<Usage> USAGE_TABLE[] = {
+        {"original", Usage::ORIGINAL}, {"logical", Usage::OTHER}, {"prediction", Usage::OTHER}};
+    return read_enum(time_series, "usage", USAGE_TABLE, Usage::ORIGINAL) == Usage::ORIGINAL;
   }
 
   static double apply_transform(double v, Transform t) {
@@ -816,26 +843,25 @@ class TimeSeriesModel {
   // under ts_node, then subtracts the estimated effect from the raw values.
   // =========================================================================
 
-  static void apply_outlier_corrections(std::vector<std::pair<int, double>>& pts, const XmlNode& ts_node) {
+  // OutlierEffect is unsupported. The spec gives it startTime, magnitude and
+  // dampingCoefficient, and a type of additive, level, transient,
+  // seasonalAdditive, trend or innovational; this read time, value and delta
+  // -- none of them PMML attributes -- and types spelled levelshift and
+  // transientchange, so a conforming OutlierEffect was skipped without a word
+  // and the forecast came from the uncorrected series. The type is checked
+  // first, so a misspelt one is reported as invalid.
+  static void apply_outlier_corrections(std::vector<std::pair<int, double>>& /*pts*/, const XmlNode& ts_node) {
+    static constexpr EnumEntry<bool> OUTLIER_TYPE_TABLE[] = {
+        {"additive", false, nullptr, EnumSupport::UNSUPPORTED},
+        {"level", false, nullptr, EnumSupport::UNSUPPORTED},
+        {"transient", false, nullptr, EnumSupport::UNSUPPORTED},
+        {"seasonalAdditive", false, nullptr, EnumSupport::UNSUPPORTED},
+        {"trend", false, nullptr, EnumSupport::UNSUPPORTED},
+        {"innovational", false, nullptr, EnumSupport::UNSUPPORTED},
+    };
     for (const auto& ts : ts_node.get_childs("TimeSeries")) {
-      if (ts.exists_attribute("usage") && to_lower(ts.get_attribute("usage")) != "original") continue;
-      for (const auto& oe : ts.get_childs("OutlierEffect")) {
-        if (!oe.exists_attribute("time")) continue;
-        int t = static_cast<int>(oe.get_long_attribute("time"));
-        double value = oe.get_double_attribute("value", 0.0);
-        double delta = oe.get_double_attribute("delta", 0.0);
-        std::string type = oe.exists_attribute("type") ? to_lower(oe.get_attribute("type")) : "additive";
-
-        for (auto& [idx, val] : pts) {
-          if (type == "additive") {
-            if (idx == t) val -= value;
-          } else if (type == "levelshift") {
-            if (idx >= t) val -= value;
-          } else if (type == "transientchange") {
-            if (idx >= t) val -= value * std::pow(delta, static_cast<double>(idx - t));
-          }
-        }
-      }
+      if (!is_original_series(ts)) continue;
+      for (const auto& oe : ts.get_childs("OutlierEffect")) read_enum(oe, "type", OUTLIER_TYPE_TABLE);
     }
   }
 
@@ -880,7 +906,7 @@ class TimeSeriesModel {
   static std::vector<std::pair<int, double>> collect_timeseries(const XmlNode& ts_node) {
     std::vector<std::pair<int, double>> pts;
     for (const auto& ts : ts_node.get_childs("TimeSeries")) {
-      if (ts.exists_attribute("usage") && to_lower(ts.get_attribute("usage")) != "original") continue;
+      if (!is_original_series(ts)) continue;
       for (const auto& tv : ts.get_childs("TimeValue")) {
         int idx = static_cast<int>(tv.get_long_attribute("index"));
         double val = tv.get_double_attribute("value");
@@ -898,8 +924,7 @@ class TimeSeriesModel {
     ets.trend = "none";
     ets.seasonal = "none";
 
-    if (node.exists_attribute("transformation"))
-      ets.transform = parse_transform(to_lower(node.get_attribute("transformation")));
+    ets.transform = read_transform(node);
     if (node.exists_attribute("RMSE")) ets.rmse = node.get_double_attribute("RMSE");
 
     // Level (required by spec)
@@ -913,17 +938,18 @@ class TimeSeriesModel {
     ets.gamma = 0.0;
     if (node.exists_child("Trend_ExpoSmooth")) {
       XmlNode tr = node.get_child("Trend_ExpoSmooth");
-      ets.trend = tr.exists_attribute("trend") ? to_lower(tr.get_attribute("trend")) : "additive";
       // Brown's polynomial models read their smoothed coefficients from the
       // Array sub-element rather than smoothedValue, and forecast by a
       // different rule than the Gardner trends below. Scoring one as though it
       // had no trend at all would silently return a flat line.
-      if (ets.trend == "polynomial_exponential")
-        throw cpmml::ParsingException(
-            "ExponentialSmoothing trend=\"polynomial_exponential\" (Brown's polynomial model) is not supported");
-      if (ets.trend != "additive" && ets.trend != "damped_additive" && ets.trend != "multiplicative" &&
-          ets.trend != "damped_multiplicative")
-        throw cpmml::ParsingException("ExponentialSmoothing trend=\"" + ets.trend + "\" is not supported");
+      static constexpr EnumEntry<const char*> TREND_TABLE[] = {
+          {"additive", "additive"},
+          {"damped_additive", "damped_additive"},
+          {"multiplicative", "multiplicative"},
+          {"damped_multiplicative", "damped_multiplicative"},
+          {"polynomial_exponential", "", nullptr, EnumSupport::UNSUPPORTED},
+      };
+      ets.trend = read_enum(tr, "trend", TREND_TABLE, "additive");
       ets.gamma = tr.get_double_attribute("gamma", 0.0);
       ets.phi = tr.get_double_attribute("phi", 1.0);
       ets.b = tr.get_double_attribute("smoothedValue");
@@ -932,7 +958,12 @@ class TimeSeriesModel {
     // Seasonality_ExpoSmooth (optional)
     if (node.exists_child("Seasonality_ExpoSmooth")) {
       XmlNode se = node.get_child("Seasonality_ExpoSmooth");
-      ets.seasonal = se.exists_attribute("type") ? to_lower(se.get_attribute("type")) : "additive";
+      // type is required; absent used to mean additive.
+      static constexpr EnumEntry<const char*> SEASONALITY_TYPE_TABLE[] = {
+          {"additive", "additive"},
+          {"multiplicative", "multiplicative"},
+      };
+      ets.seasonal = read_enum(se, "type", SEASONALITY_TYPE_TABLE);
       ets.delta = se.get_double_attribute("delta", 0.0);
       ets.period = static_cast<int>(se.get_long_attribute("period"));
       ets.phase = static_cast<int>(se.get_long_attribute("phase", ets.period));
@@ -1081,8 +1112,7 @@ class TimeSeriesModel {
     double constant_val = node.get_double_attribute("constantTerm", 0.0);
     bool include_const = (constant_val != 0.0);
 
-    Transform tr = Transform::NONE;
-    if (node.exists_attribute("transformation")) tr = parse_transform(to_lower(node.get_attribute("transformation")));
+    const Transform tr = read_transform(node);
 
     double sigma2_val = 1.0;
     if (node.exists_attribute("RMSE")) {
@@ -1090,8 +1120,11 @@ class TimeSeriesModel {
       sigma2_val = rmse * rmse;
     }
 
-    std::string method = "conditionalleastsquares";
-    if (node.exists_attribute("predictionMethod")) method = to_lower(node.get_attribute("predictionMethod"));
+    static constexpr EnumEntry<bool> PREDICTION_METHOD_TABLE[] = {
+        {"conditionalLeastSquares", false},
+        {"exactLeastSquares", true},
+    };
+    const bool exact_least_squares = read_enum(node, "predictionMethod", PREDICTION_METHOD_TABLE, false);
 
     // --- Collect and pre-process training data ---
     auto pts = collect_timeseries(ts_node);
@@ -1104,7 +1137,7 @@ class TimeSeriesModel {
     // Apply outlier corrections (subtract outlier effects from observations)
     apply_outlier_corrections(pts, ts_node);
 
-    if (method == "exactleastsquares") {
+    if (exact_least_squares) {
       // ----- Kalman path -----
 
       // Try FinalStateVector shortcut first (avoids re-filtering)
@@ -1119,6 +1152,9 @@ class TimeSeriesModel {
       bool have_state = false;
       if (node.exists_child("MaximumLikelihoodStat")) {
         XmlNode mls = node.get_child("MaximumLikelihoodStat");
+        // method is required; the content (KalmanState or not) decides the route.
+        static constexpr EnumEntry<bool> MLS_METHOD_TABLE[] = {{"kalman", true}, {"thetaRecursion", false}};
+        read_enum(mls, "method", MLS_METHOD_TABLE);
         if (mls.exists_child("KalmanState")) {
           XmlNode ks = mls.get_child("KalmanState");
           if (ks.exists_child("FinalStateVector") && ks.get_child("FinalStateVector").exists_child("Array")) {
@@ -1491,12 +1527,17 @@ class TimeSeriesModel {
       DynamicRegressorState dr;
       dr.field = dr_node.get_attribute("field");
       dr.delay = static_cast<int>(dr_node.get_long_attribute("delay", 0));
-      if (dr_node.exists_attribute("transformation"))
-        dr.transform = parse_transform(to_lower(dr_node.get_attribute("transformation")));
+      dr.transform = read_transform(dr_node);
 
-      std::string fvm = "constant";
-      if (dr_node.exists_attribute("futureValuesMethod")) fvm = to_lower(dr_node.get_attribute("futureValuesMethod"));
-      dr.user_supplied = (fvm == "usersupplied");
+      // trend, stored and otherModel used to be scored as constant.
+      static constexpr EnumEntry<bool> FUTURE_VALUES_METHOD_TABLE[] = {
+          {"constant", false},
+          {"trend", false, nullptr, EnumSupport::UNSUPPORTED},
+          {"stored", false, nullptr, EnumSupport::UNSUPPORTED},
+          {"otherModel", false, nullptr, EnumSupport::UNSUPPORTED},
+          {"userSupplied", true},
+      };
+      dr.user_supplied = read_enum(dr_node, "futureValuesMethod", FUTURE_VALUES_METHOD_TABLE, false);
 
       if (dr_node.exists_child("Numerator") && dr_node.get_child("Numerator").exists_child("Array"))
         dr.numerator = parse_array(dr_node.get_child("Numerator").get_child("Array"));

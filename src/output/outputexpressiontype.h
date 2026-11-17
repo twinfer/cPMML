@@ -27,7 +27,6 @@ class OutputExpressionType {
     PROBABILITY,
     ENTITY_ID,
     RESIDUAL,
-    PASS_VALUE,
     // Association model output features (PMML 4.2+)
     RULE_VALUE,  // feature="ruleValue" (PMML 4.0/4.1 style, uses ruleFeature attr)
     ANTECEDENT,  // feature="antecedent"
@@ -41,22 +40,38 @@ class OutputExpressionType {
     REASON_CODE  // feature="reasonCode", selected by the rank attribute
   };
 
+  // RESULT-FEATURE (4.4.1). The members cPMML does not compute stay in the
+  // table as unsupported: an OutputField asking for one used to be answered
+  // with the predicted value (a PASS_VALUE catch-all), as was any misspelt
+  // feature, so feature="affinity" or feature="Probability" returned a
+  // plausible number that was not what the document asked for.
   static constexpr EnumEntry<OutputExpressionTypeValue> TABLE[] = {
-      {"predictedvalue", OutputExpressionTypeValue::PREDICTED_VALUE, "predictedValue"},
-      {"predicteddisplayvalue", OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE, "predictedDisplayValue"},
-      {"transformedvalue", OutputExpressionTypeValue::TRANSFORMED_VALUE, "transformedValue"},
-      {"probability", OutputExpressionTypeValue::PROBABILITY, "probability"},
-      {"entityid", OutputExpressionTypeValue::ENTITY_ID, "entityId"},
-      {"residual", OutputExpressionTypeValue::RESIDUAL, "residual"},
-      {"rulevalue", OutputExpressionTypeValue::RULE_VALUE, "ruleValue"},
-      {"antecedent", OutputExpressionTypeValue::ANTECEDENT, "antecedent"},
-      {"consequent", OutputExpressionTypeValue::CONSEQUENT, "consequent"},
-      {"rule", OutputExpressionTypeValue::RULE, "rule"},
-      {"ruleid", OutputExpressionTypeValue::RULE_ID, "ruleId"},
-      {"support", OutputExpressionTypeValue::SUPPORT, "support"},
-      {"confidence", OutputExpressionTypeValue::CONFIDENCE, "confidence"},
-      {"lift", OutputExpressionTypeValue::LIFT, "lift"},
-      {"reasoncode", OutputExpressionTypeValue::REASON_CODE, "reasonCode"},
+      {"predictedValue", OutputExpressionTypeValue::PREDICTED_VALUE},
+      {"predictedDisplayValue", OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE},
+      {"transformedValue", OutputExpressionTypeValue::TRANSFORMED_VALUE},
+      {"decision", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"probability", OutputExpressionTypeValue::PROBABILITY},
+      {"affinity", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"residual", OutputExpressionTypeValue::RESIDUAL},
+      {"standardError", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"standardDeviation", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"clusterId", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"clusterAffinity", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"entityId", OutputExpressionTypeValue::ENTITY_ID},
+      {"entityAffinity", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"warning", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"ruleValue", OutputExpressionTypeValue::RULE_VALUE},
+      {"reasonCode", OutputExpressionTypeValue::REASON_CODE},
+      {"antecedent", OutputExpressionTypeValue::ANTECEDENT},
+      {"consequent", OutputExpressionTypeValue::CONSEQUENT},
+      {"rule", OutputExpressionTypeValue::RULE},
+      {"ruleId", OutputExpressionTypeValue::RULE_ID},
+      {"confidence", OutputExpressionTypeValue::CONFIDENCE},
+      {"support", OutputExpressionTypeValue::SUPPORT},
+      {"lift", OutputExpressionTypeValue::LIFT},
+      {"leverage", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"confidenceIntervalLower", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
+      {"confidenceIntervalUpper", OutputExpressionTypeValue::PREDICTED_VALUE, nullptr, EnumSupport::UNSUPPORTED},
   };
 
   OutputExpressionTypeValue value = OutputExpressionTypeValue::PREDICTED_VALUE;
@@ -65,28 +80,16 @@ class OutputExpressionType {
 
   explicit OutputExpressionType(const OutputExpressionTypeValue& value) : value(value) {}
 
-  explicit OutputExpressionType(const std::string& value) : value(from_string(value)) {}
-
   inline bool operator==(const OutputExpressionType& other) const { return value == other.value; };
 
   inline bool operator!=(const OutputExpressionType& other) const { return value != other.value; };
 
-  /**
-   * OutputField/@feature defaults to predictedValue.
-   *
-   * This is the one enumeration whose catch-all is deliberate rather than a
-   * guess: PASS_VALUE is a real state meaning "a RESULT-FEATURE cPMML does not
-   * compute", and the OutputField machinery handles it. So an unrecognised
-   * feature stays a value here instead of becoming a load error.
-   */
-  static OutputExpressionTypeValue from_string(const std::string& expressiontype) {
-    if (is_absent_attribute(expressiontype)) return OutputExpressionTypeValue::PREDICTED_VALUE;
-
-    const EnumEntry<OutputExpressionTypeValue>* entry = enum_find(expressiontype, TABLE);
-    return entry ? entry->value : OutputExpressionTypeValue::PASS_VALUE;
+  // OutputField@feature, default predictedValue.
+  static OutputExpressionType read(const XmlNode& output_field) {
+    return OutputExpressionType(read_enum(output_field, "feature", TABLE, OutputExpressionTypeValue::PREDICTED_VALUE));
   }
 
-  std::string to_string() const { return enum_display(value, TABLE, "passValue"); }
+  std::string to_string() const { return enum_display(value, TABLE, "predictedValue"); }
 };
 
 #endif  // CPMML_SRC_EXPRESSION_OUTPUTEXPRESSIONTYPE_H_

@@ -78,20 +78,18 @@ class TextIndex : public Expression {
     field_index = indexer->get_or_set(field_name);
     inputs.insert(field_name);
 
-    if (node.exists_attribute("localTermWeights")) {
-      const std::string w = to_lower(node.get_attribute("localTermWeights"));
-      if (w == "termfrequency")
-        local_weights = LocalTermWeights::TERM_FREQUENCY;
-      else if (w == "binary")
-        local_weights = LocalTermWeights::BINARY;
-      else if (w == "logarithmic")
-        local_weights = LocalTermWeights::LOGARITHMIC;
-      else if (w == "augmentednormalizedtermfrequency")
-        local_weights = LocalTermWeights::AUGMENTED_NORMALIZED;
-      else
-        throw cpmml::ParsingException("TextIndex: unsupported localTermWeights: " +
-                                      node.get_attribute("localTermWeights"));
-    }
+    // Case-sensitive, as in JPMML; "TermFrequency" used to be accepted.
+    static constexpr EnumEntry<LocalTermWeights> LOCAL_TERM_WEIGHTS_TABLE[] = {
+        {"termFrequency", LocalTermWeights::TERM_FREQUENCY},
+        {"binary", LocalTermWeights::BINARY},
+        {"logarithmic", LocalTermWeights::LOGARITHMIC},
+        {"augmentedNormalizedTermFrequency", LocalTermWeights::AUGMENTED_NORMALIZED},
+    };
+    local_weights = read_enum(node, "localTermWeights", LOCAL_TERM_WEIGHTS_TABLE, LocalTermWeights::TERM_FREQUENCY);
+    // countHits is validated though, with maxLevenshteinDistance 0, both
+    // values count the same hits.
+    static constexpr EnumEntry<bool> COUNT_HITS_TABLE[] = {{"allHits", true}, {"bestHits", false}};
+    read_enum(node, "countHits", COUNT_HITS_TABLE, true);
 
     case_sensitive = node.get_bool_attribute("isCaseSensitive", false);
 

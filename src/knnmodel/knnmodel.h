@@ -62,8 +62,21 @@ class NearestNeighborModel : public InternalModel {
   double minkowski_p;
   BinarySimilarityParams binary_params;  // read only for binarySimilarity
   CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // ComparisonMeasure/@compareFunction
-  std::string categorical_method;  // to_lower of categoricalScoringMethod
-  std::string continuous_method;   // to_lower of continuousScoringMethod
+  enum class CategoricalScoring { MAJORITY_VOTE, WEIGHTED_MAJORITY_VOTE };
+  enum class ContinuousScoring { MEDIAN, AVERAGE, WEIGHTED_AVERAGE };
+  // CAT-SCORING-METHOD and CONT-SCORING-METHOD. Anything but the weighted
+  // spellings (and median) used to score as majorityVote / average.
+  static constexpr EnumEntry<CategoricalScoring> CATEGORICAL_SCORING_TABLE[] = {
+      {"majorityVote", CategoricalScoring::MAJORITY_VOTE},
+      {"weightedMajorityVote", CategoricalScoring::WEIGHTED_MAJORITY_VOTE},
+  };
+  static constexpr EnumEntry<ContinuousScoring> CONTINUOUS_SCORING_TABLE[] = {
+      {"median", ContinuousScoring::MEDIAN},
+      {"average", ContinuousScoring::AVERAGE},
+      {"weightedAverage", ContinuousScoring::WEIGHTED_AVERAGE},
+  };
+  CategoricalScoring categorical_method = CategoricalScoring::MAJORITY_VOTE;
+  ContinuousScoring continuous_method = ContinuousScoring::AVERAGE;
   std::string instance_id_variable;  // instanceIdVariable attribute (for clustering)
   double threshold = 0.001;          // threshold attribute: added to the distance for weighted methods
   bool is_clustering = false;
@@ -87,12 +100,10 @@ class NearestNeighborModel : public InternalModel {
         k(static_cast<int>(node.required_long_attribute("numberOfNeighbors"))),
         metric(DistanceMetric::EUCLIDEAN),
         minkowski_p(2.0),
-        categorical_method(to_lower(node.get_attribute("categoricalScoringMethod") == "null"
-                                        ? "majorityvote"
-                                        : node.get_attribute("categoricalScoringMethod"))),
-        continuous_method(to_lower(node.get_attribute("continuousScoringMethod") == "null"
-                                       ? "average"
-                                       : node.get_attribute("continuousScoringMethod"))),
+        categorical_method(read_enum(node, "categoricalScoringMethod", CATEGORICAL_SCORING_TABLE,
+                                     CategoricalScoring::MAJORITY_VOTE)),
+        continuous_method(
+            read_enum(node, "continuousScoringMethod", CONTINUOUS_SCORING_TABLE, ContinuousScoring::AVERAGE)),
         instance_id_variable(node.exists_attribute("instanceIdVariable") ? node.get_attribute("instanceIdVariable") : ""),
         threshold(node.get_double_attribute("threshold", 0.001)),
         is_clustering(mining_function.value == MiningFunction::MiningFunctionType::CLUSTERING) {
@@ -202,55 +213,13 @@ class NearestNeighborModel : public InternalModel {
  private:
   // --- Parsing ---
 
-  // ComparisonMeasure holds exactly one measure element (an xs:choice of the
-  // nine below), besides any Extension. This used to have no squaredEuclidean
-  // case and to return euclidean for anything it did not recognise -- so
-  // <squaredEuclidean/> scored with the root taken, which ranks the same but
-  // changes 1/(d + threshold) weights and AdjustM -- and to take euclidean
-  // for a model with no ComparisonMeasure at all. A missing, unknown or second
-  // measure is now a load error. JPMML 1.7.7 refuses the first two ("Required
-  // element ComparisonMeasure/<Measure> is not defined") and a missing
-  // ComparisonMeasure; it skips an unknown element next to a known one and
-  // takes the last of two measures, both schema violations cPMML refuses.
-  static DistanceMetric parse_metric_type(const XmlNode& measure) {
-    static const std::pair<const char*, DistanceMetric> measures[] = {
-        {"euclidean", DistanceMetric::EUCLIDEAN},
-        {"squaredEuclidean", DistanceMetric::SQUARED_EUCLIDEAN},
-        {"cityBlock", DistanceMetric::CITYBLOCK},
-        {"chebychev", DistanceMetric::CHEBYSHEV},
-        {"minkowski", DistanceMetric::MINKOWSKI},
-        {"simpleMatching", DistanceMetric::SIMPLE_MATCHING},
-        {"jaccard", DistanceMetric::JACCARD},
-        {"tanimoto", DistanceMetric::TANIMOTO},
-        {"binarySimilarity", DistanceMetric::BINARY_SIMILARITY},
-    };
-
-    bool found = false;
-    DistanceMetric result = DistanceMetric::EUCLIDEAN;
-    for (const auto& child : measure.get_childs()) {
-      const std::string name = child.name();
-      if (name.empty() || name == "Extension") continue;  // text, or an Extension
-      const auto it = std::find_if(std::cbegin(measures), std::cend(measures),
-                                   [&](const auto& m) { return name == m.first; });
-      if (it == std::cend(measures))
-        throw cpmml::ParsingException("NearestNeighborModel: unknown ComparisonMeasure measure <" + name + ">");
-      if (found)
-        throw cpmml::ParsingException("NearestNeighborModel: ComparisonMeasure has more than one measure (<" + name +
-                                      "> after another)");
-      found = true;
-      result = it->second;
-    }
-    if (!found) throw cpmml::ParsingException("NearestNeighborModel: ComparisonMeasure has no measure element");
-
-    return result;
-  }
-
   void parse_metric(const XmlNode& node) {
     if (!node.exists_child("ComparisonMeasure"))
       throw cpmml::ParsingException("NearestNeighborModel: required element ComparisonMeasure is missing");
     const XmlNode cm = node.get_child("ComparisonMeasure");
-    metric = parse_metric_type(cm);
-    default_compare_func = parse_compare_function(cm, CompareFunc::ABS_DIFF, "ComparisonMeasure");
+    read_measure_kind_is_similarity(cm);
+    metric = read_measure(cm);
+    default_compare_func = read_compare_function(cm, CompareFunc::ABS_DIFF);
     if (metric == DistanceMetric::MINKOWSKI) minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
     if (metric == DistanceMetric::BINARY_SIMILARITY)
       binary_params = parse_binary_similarity(cm.get_child("binarySimilarity"));
@@ -260,25 +229,13 @@ class NearestNeighborModel : public InternalModel {
   // for every KNNInput that does not declare its own. KNNInput used to ignore
   // the ComparisonMeasure value and fall back to absDiff, so a model declaring
   // <ComparisonMeasure compareFunction="delta"> compared categorical codes by
-  // their difference; it also took any unknown value as absDiff. An unknown
-  // value is now a load error. JPMML 1.7.7 reads the ComparisonMeasure default
-  // the same way, but takes an unknown value (at either level) as absDiff.
-  static CompareFunc parse_compare_function(const XmlNode& node, CompareFunc fallback, const std::string& where) {
-    if (!node.exists_attribute("compareFunction")) return fallback;
-    const std::string raw = node.get_attribute("compareFunction");
-    const std::string s = to_lower(raw);
-    if (s != "absdiff" && s != "gausssim" && s != "delta" && s != "equal")
-      throw cpmml::ParsingException("NearestNeighborModel: unknown compareFunction \"" + raw + "\" on " + where);
-    return parse_compare_func(s);
-  }
-
+  // their difference. See read_compare_function (distance.h).
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& ki : node.get_child("KNNInputs").get_childs("KNNInput")) {
       KnnInput input;
       input.field_name = ki.get_attribute("field");
       input.field_index = indexer->get_index(input.field_name);
-      input.compare_func =
-          parse_compare_function(ki, default_compare_func, "KNNInput \"" + input.field_name + "\"");
+      input.compare_func = read_compare_function(ki, default_compare_func);
       input.field_weight = ki.get_double_attribute("fieldWeight", 1.0);
       knn_inputs.push_back(std::move(input));
     }
@@ -480,7 +437,7 @@ class NearestNeighborModel : public InternalModel {
   std::vector<double> vote(const std::vector<std::pair<double, int>>& neighbors) const {
     if (neighbors.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for classification");
 
-    const bool weighted = (categorical_method == "weightedmajorityvote");
+    const bool weighted = (categorical_method == CategoricalScoring::WEIGHTED_MAJORITY_VOTE);
     std::vector<double> votes(classes.size(), 0.0);
     for (const auto& [dist, idx] : neighbors) {
       const double w = neighbor_weight(dist, weighted);
@@ -527,7 +484,7 @@ class NearestNeighborModel : public InternalModel {
 
   std::string regress(const std::vector<std::pair<double, int>>& neighbors) const {
     if (neighbors.empty()) throw cpmml::MissingValueException("KNN: no neighbors available for regression");
-    if (continuous_method == "median") {
+    if (continuous_method == ContinuousScoring::MEDIAN) {
       std::vector<double> vals;
       for (const auto& [dist, idx] : neighbors) vals.push_back(to_double(training_targets[idx]));
       std::sort(vals.begin(), vals.end());
@@ -536,7 +493,7 @@ class NearestNeighborModel : public InternalModel {
       return double_to_string(med);
     }
 
-    const bool weighted = (continuous_method == "weightedaverage");
+    const bool weighted = (continuous_method == ContinuousScoring::WEIGHTED_AVERAGE);
     double sum = 0.0, weight_sum = 0.0;
     for (const auto& [dist, idx] : neighbors) {
       const double w = neighbor_weight(dist, weighted);

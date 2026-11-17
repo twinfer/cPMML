@@ -29,7 +29,7 @@ class Constant : public Expression {
            const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         datatype_exists(node.exists_attribute("dataType")),
-        value(datatype_exists ? Value(node.value(), node.get_attribute("dataType"))
+        value(datatype_exists ? Value(node.value(), DataType::read(node))
                               : Value(node.value()))  // if datatype is missing the standard
                                                       // says the type should be inferred
   {}

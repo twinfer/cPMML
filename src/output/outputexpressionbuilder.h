@@ -34,7 +34,7 @@ class OutputExpressionBuilder {
                                                         const DataType& output_type,
                                                         const std::shared_ptr<Indexer>& indexer,
                                                         const std::string& model_target) {
-    switch (OutputExpressionType(node.get_attribute("feature")).value) {
+    switch (OutputExpressionType::read(node).value) {
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
         return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE:
@@ -83,8 +83,6 @@ class OutputExpressionBuilder {
                                                     AssociationOutput::RuleFeature::LIFT);
       case OutputExpressionType::OutputExpressionTypeValue::REASON_CODE:
         return std::make_shared<ReasonCode>(node, indexer, output_index, output_type);
-      case OutputExpressionType::OutputExpressionTypeValue::PASS_VALUE:
-        return std::make_shared<PredictedValue>(model_target, indexer, output_index, output_type);
       default:
         return nullptr;
     }

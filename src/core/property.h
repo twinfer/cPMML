@@ -31,12 +31,9 @@ class Property {
 
   const PropertyValue value;
 
-  explicit Property(const std::string& property) : value(from_string(property)) {}
-
-  // Value/@property defaults to "valid".
-  static PropertyValue from_string(const std::string& property) {
-    return enum_value(property, TABLE, "Value/@property", PropertyValue::VALID);
-  }
+  // Value@property, default valid.
+  explicit Property(const XmlNode& value_node)
+      : value(read_enum(value_node, "property", TABLE, PropertyValue::VALID)) {}
 
   std::string to_string() const { return enum_display(value, TABLE, "VALID"); }
 };

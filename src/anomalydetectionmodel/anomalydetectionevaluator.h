@@ -54,7 +54,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     // functionName, algorithmType, sampleDataSize and isScorable — so it was
     // not a dropped feature but an invented one. Removed rather than wired up.
     sample_data_size = ad.get_double_attribute("sampleDataSize", 256.0);
-    algorithm = parse_algorithm(ad.get_attribute("algorithmType"));
+    algorithm = read_enum(ad, "algorithmType", ALGORITHM_TYPE_TABLE);
 
     if (ad.exists_child("MiningModel")) {
       inner = std::make_unique<EnsembleModel>(ad.get_child("MiningModel"), data_dictionary, transformation_dictionary,
@@ -123,18 +123,15 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   // that was not "iforest" used to be scored as a raw inner prediction, so
   // clusterMeanDist and an unrecognised or absent algorithmType were all the
   // same branch.
-  static Algorithm parse_algorithm(const std::string& raw) {
-    const std::string a = to_lower(raw);
-    if (a == "iforest") return Algorithm::IFOREST;
-    if (a == "ocsvm") return Algorithm::OCSVM;
-    if (a == "clustermeandist") return Algorithm::CLUSTER_MEAN_DIST;
-    if (a == "other")
-      throw cpmml::ParsingException(
-          "AnomalyDetectionModel: algorithmType=\"other\" names an algorithm the document does not define, "
-          "so there is no scoring procedure to apply");
-
-    throw cpmml::ParsingException("AnomalyDetectionModel: unsupported algorithmType: " + raw);
-  }
+  // ALGORITHM-TYPE, required. "other" names an algorithm the document does
+  // not define, so there is no scoring procedure to apply. The spec spells
+  // the first "iforest"; "iForest" used to be accepted through case-folding.
+  static constexpr EnumEntry<Algorithm> ALGORITHM_TYPE_TABLE[] = {
+      {"iforest", Algorithm::IFOREST},
+      {"ocsvm", Algorithm::OCSVM},
+      {"clusterMeanDist", Algorithm::CLUSTER_MEAN_DIST},
+      {"other", Algorithm::IFOREST, nullptr, EnumSupport::UNSUPPORTED},
+  };
 
   /**
    * "The MeanClusterDistances element contains an array of non-negative real

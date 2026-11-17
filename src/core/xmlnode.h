@@ -29,6 +29,8 @@ class XmlNode {
 
   std::string name() const { return node.name(); }
 
+  std::string parent_name() const { return node.parent().name(); }
+
   std::string value() const { return node.child_value(); }
 
   bool exists_attribute(const std::string& attribute_name) const {
@@ -115,14 +117,6 @@ class XmlNode {
     return result;
   }
 
-  XmlNode get_child_bypattern(const std::string& pattern) const {
-    for (auto child : node.children()) {
-      XmlNode child_node(child);
-      if (to_lower(child_node.name()).find(to_lower(pattern)) != std::string::npos) return child_node;
-    }
-    return XmlNode();
-  }
-
   XmlNode get_child_bylist(const std::unordered_set<std::string>& list) const {
     for (auto child : node.children()) {
       if (list.find(child.name()) != list.cend()) return XmlNode(child);
@@ -135,16 +129,6 @@ class XmlNode {
       if (list.find(child.name()) != list.cend()) return true;
     }
     return false;
-  }
-
-  std::vector<XmlNode> get_childs_bypattern(const std::string& pattern) const {
-    std::vector<XmlNode> result;
-    const std::string lower_pattern = to_lower(pattern);
-    for (auto child : node.children()) {
-      if (to_lower(std::string(child.name())).find(lower_pattern) != std::string::npos)
-        result.push_back(XmlNode(child));
-    }
-    return result;
   }
 
   std::vector<XmlNode> get_childs_byattribute(const std::string& child_name, const std::string& attribute_name,

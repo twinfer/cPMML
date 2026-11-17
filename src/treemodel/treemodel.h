@@ -46,25 +46,32 @@ class TreeModel : public InternalModel {
   TreeModel(const XmlNode& node, const DataDictionary& data_dictionary,
             const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),
-        missing_value_strategy(to_missing_value_strategy(node.get_attribute("missingValueStrategy", "none"))),
-        no_true_child_strategy(to_no_true_child_strategy(node.get_attribute("noTrueChildStrategy", "returnNullPrediction"))),
-        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)) {};
-
-  static MissingValueStrategy to_missing_value_strategy(const std::string& value) {
-    if (value == "none") return MissingValueStrategy::NONE;
-    if (value == "lastPrediction") return MissingValueStrategy::LAST_PREDICTION;
-    if (value == "nullPrediction") return MissingValueStrategy::NULL_PREDICTION;
-    if (value == "defaultChild") return MissingValueStrategy::DEFAULT_CHILD;
-    // weightedConfidence/aggregateNodes would need a different result than a
-    // single node's score; scoring them as "none" would be silently wrong.
-    throw cpmml::ParsingException("TreeModel missingValueStrategy=\"" + value + "\" is not supported");
+        missing_value_strategy(read_enum(node, "missingValueStrategy", MISSING_VALUE_STRATEGY_TABLE,
+                                         MissingValueStrategy::NONE)),
+        no_true_child_strategy(read_enum(node, "noTrueChildStrategy", NO_TRUE_CHILD_STRATEGY_TABLE,
+                                         NoTrueChildStrategy::RETURN_NULL_PREDICTION)),
+        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)) {
+    // Informational for scoring (every Node's children are tried in order
+    // either way), but still a TreeModel enumeration.
+    static constexpr EnumEntry<bool> SPLIT_CHARACTERISTIC_TABLE[] = {{"binarySplit", true}, {"multiSplit", false}};
+    read_enum(node, "splitCharacteristic", SPLIT_CHARACTERISTIC_TABLE, false);
   }
 
-  static NoTrueChildStrategy to_no_true_child_strategy(const std::string& value) {
-    if (value == "returnNullPrediction") return NoTrueChildStrategy::RETURN_NULL_PREDICTION;
-    if (value == "returnLastPrediction") return NoTrueChildStrategy::RETURN_LAST_PREDICTION;
-    throw cpmml::ParsingException("TreeModel noTrueChildStrategy=\"" + value + "\" is not supported");
-  }
+  // weightedConfidence/aggregateNodes would need a different result than a
+  // single node's score; scoring them as "none" would be silently wrong.
+  static constexpr EnumEntry<MissingValueStrategy> MISSING_VALUE_STRATEGY_TABLE[] = {
+      {"lastPrediction", MissingValueStrategy::LAST_PREDICTION},
+      {"nullPrediction", MissingValueStrategy::NULL_PREDICTION},
+      {"defaultChild", MissingValueStrategy::DEFAULT_CHILD},
+      {"weightedConfidence", MissingValueStrategy::NONE, nullptr, EnumSupport::UNSUPPORTED},
+      {"aggregateNodes", MissingValueStrategy::NONE, nullptr, EnumSupport::UNSUPPORTED},
+      {"none", MissingValueStrategy::NONE},
+  };
+
+  static constexpr EnumEntry<NoTrueChildStrategy> NO_TRUE_CHILD_STRATEGY_TABLE[] = {
+      {"returnNullPrediction", NoTrueChildStrategy::RETURN_NULL_PREDICTION},
+      {"returnLastPrediction", NoTrueChildStrategy::RETURN_LAST_PREDICTION},
+  };
 
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     const Node* predicting_node = walk(sample, root_node);

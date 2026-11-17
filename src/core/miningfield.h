@@ -61,10 +61,10 @@ class MiningField : public DataField {
   MiningField(XmlNode node, const DataField& data_field)
       : DataField(data_field),
         empty(false),
-        field_usage_type(node.get_attribute("usageType")),
+        field_usage_type(FieldUsageType::read(node)),
         importance(node.get_double_attribute("importance")),
         hasOutlierTreatment(node.exists_attribute("outliers")),
-        outliertreatmentmethod(OutlierTreatmentMethod(node.get_attribute("outliers"))),
+        outliertreatmentmethod(OutlierTreatmentMethod::read(node)),
         hasLowValue(node.exists_attribute("lowValue")),
         low_value(hasOutlierTreatment && hasLowValue ? Value(node.get_attribute("lowValue"), datatype) : Value()),
         hasHighValue(node.exists_attribute("highValue")),
@@ -72,18 +72,13 @@ class MiningField : public DataField {
         hasMissingReplacement(node.exists_attribute("missingValueReplacement")),
         missingvalue_replacement(hasMissingReplacement ? Value(node.get_attribute("missingValueReplacement"), datatype)
                                                        : Value()),  //, data_dictionary.datafields[name].datatype)),
-        // The attributes are spelled missingValueTreatment and
-        // invalidValueTreatment; these read "...Method", a name no MiningField
-        // carries, so both always saw an absent attribute and took the default.
-        // Neither member is consulted while scoring, so the only thing that
-        // changes is that a document spelling one of them wrongly is now
-        // refused instead of silently ignored.
-        missingvalue_treatmentmethod(node.get_attribute("missingValueTreatment")),
+        // missingValueTreatment is not consulted while scoring (the replacement
+        // is missingValueReplacement), except that returnInvalid, which cPMML
+        // does not implement, is refused at load.
+        missingvalue_treatmentmethod(MissingValueTreatmentMethod::read(node)),
         hasInvalidTreatment(node.exists_attribute("invalidValueTreatment")),
-        invalidvalue_treatmentmethod(hasInvalidTreatment
-                                         ? InvalidValueTreatmentMethod(node.get_attribute("invalidValueTreatment"))
-                                         : InvalidValueTreatmentMethod()) {
-    if (node.exists_attribute("optype")) optype = OpType(node.get_attribute("optype"));
+        invalidvalue_treatmentmethod(InvalidValueTreatmentMethod::read(node)) {
+    if (node.exists_attribute("optype")) optype = OpType::read(node);
     // asValue without the value to use has nothing to replace with. JPMML
     // 1.7.7 loads such a document and fails on the first invalid input; the
     // fault is in the document, so it is reported when the document is read.

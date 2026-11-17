@@ -44,7 +44,7 @@ class NormalizationMethodType {
 
   NormalizationMethodType() = default;
 
-  explicit NormalizationMethodType(const std::string& value) : value(from_string(value)) {}
+  explicit NormalizationMethodType(NormalizationMethodTypeValue value) : value(value) {}
 
   inline bool operator==(const NormalizationMethodType& other) const { return value == other.value; };
 
@@ -53,8 +53,8 @@ class NormalizationMethodType {
   // normalizationMethod defaults to none. A misspelt one used to become NONE
   // too, which is not a degraded answer but a different model: the scores are
   // returned unsquashed and read as probabilities.
-  static NormalizationMethodTypeValue from_string(const std::string& normalization_methodtype) {
-    return enum_value(normalization_methodtype, TABLE, "normalizationMethod", NormalizationMethodTypeValue::NONE);
+  static NormalizationMethodType read(const XmlNode& node) {
+    return NormalizationMethodType(read_enum(node, "normalizationMethod", TABLE, NormalizationMethodTypeValue::NONE));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "none"); }

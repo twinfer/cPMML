@@ -40,15 +40,15 @@ class OutputField {
 
   OutputField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
       : name(node.get_attribute("name")),
-        optype(node.get_attribute("optype")),
-        expression_type(node.get_attribute("feature")),
+        optype(OpType::read_optional(node)),
+        expression_type(OutputExpressionType::read(node)),
         derived(expression_type.value == OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE)
   //      target_field(node.get_attribute("targetField")),
   {
     if (!node.exists_attribute("dataType")) {
       // Probability features are always numeric; entityId is always string —
       // both regardless of the target field's datatype.
-      const auto feat = OutputExpressionType(node.get_attribute("feature")).value;
+      const auto feat = expression_type.value;
       if (feat == OutputExpressionType::OutputExpressionTypeValue::PROBABILITY ||
           feat == OutputExpressionType::OutputExpressionTypeValue::RESIDUAL ||
           feat == OutputExpressionType::OutputExpressionTypeValue::SUPPORT ||
@@ -69,8 +69,8 @@ class OutputField {
         throw cpmml::ParsingException("Impossible to determine datatype for output: " + name);
       }
     } else {
-      datatype = node.get_attribute("dataType");
-      integer = node.get_attribute("dataType") == "integer";
+      datatype = DataType::read(node);
+      integer = DataType::is_integer(node);
     }
 
     index = indexer->get_or_set(name, datatype).first;

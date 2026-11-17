@@ -32,6 +32,14 @@ target_link_libraries(strict_parse.exe ${PROJECT_NAME} pugixml::pugixml miniz Ei
 add_dependencies(unit_tests strict_parse.exe)
 add_test(strict_parse strict_parse.exe)
 
+# The enum reader: case-sensitive enumerations, no fallback for an unknown
+# value, "unsupported" for a PMML value cPMML does not implement.
+add_executable(enum_reader.exe enum_reader.cc)
+target_include_directories(enum_reader.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(enum_reader.exe ${PROJECT_NAME} ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests enum_reader.exe)
+add_test(enum_reader enum_reader.exe)
+
 # Concurrent scoring: a data race does not fail a single-threaded fixture, so
 # nothing else in the suite would notice if R3 regressed. Two models, one with
 # categorical string inputs (the string-interning path) and one ensemble (the

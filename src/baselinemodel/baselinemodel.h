@@ -64,7 +64,7 @@ class BaselineModel : public InternalModel {
     test_field = td.get_attribute("field");
     test_field_idx = indexer->get_index(test_field);
 
-    parse_test_statistic(td.get_attribute("testStatistic"));
+    parse_test_statistic(td);
 
     XmlNode base_node = td.get_child("Baseline");
 
@@ -136,20 +136,19 @@ class BaselineModel : public InternalModel {
    * quantity. A load failure naming the reason beats a number that means
    * nothing.
    */
-  static void parse_test_statistic(const std::string& raw) {
-    const std::string s = to_lower(raw);
-    // "zscore" is not a spec token; kept as an alias because it is what cPMML
-    // has always accepted and what its own fixtures were written with.
-    if (s == "zvalue" || s == "zscore") return;
+  //
+  // zScore, which this used to accept (case-folded) as an alias, is not a
+  // PMML token and is now invalid like any other.
+  static constexpr EnumEntry<bool> TEST_STATISTIC_TABLE[] = {
+      {"zValue", true},
+      {"chiSquareIndependence", false, nullptr, EnumSupport::UNSUPPORTED},
+      {"chiSquareDistribution", false, nullptr, EnumSupport::UNSUPPORTED},
+      {"CUSUM", false, nullptr, EnumSupport::UNSUPPORTED},
+      {"scalarProduct", false, nullptr, EnumSupport::UNSUPPORTED},
+  };
 
-    if (s == "chisquareindependence" || s == "chisquaredistribution" || s == "chisquare" || s == "cusum" ||
-        s == "scalarproduct")
-      throw cpmml::ParsingException(
-          "BaselineModel: testStatistic=\"" + raw +
-          "\" is not supported: it is defined over an aggregated distribution across a window of records, "
-          "which single-record scoring cannot form");
-
-    throw cpmml::ParsingException("BaselineModel: unsupported testStatistic: " + raw);
+  static void parse_test_statistic(const XmlNode& test_distributions) {
+    read_enum(test_distributions, "testStatistic", TEST_STATISTIC_TABLE);
   }
 
   double compute(const Sample& sample) const {

@@ -42,7 +42,7 @@ class RegressionModel : public InternalModel {
   RegressionModel(const XmlNode& node, const DataDictionary& data_dictionary,
                   const TransformationDictionary& transformationDictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformationDictionary, indexer),
-        normalization_methodtype(node.get_attribute("normalizationMethod")),
+        normalization_methodtype(NormalizationMethodType::read(node)),
         regression_normalization(SingleNormalizationMethodBuilder::build(normalization_methodtype)),
         classification_normalization(MultiNormalizationMethodBuilder::build(
             normalization_methodtype, target_field.optype.value == OpType::OpTypeValue::ORDINAL)),

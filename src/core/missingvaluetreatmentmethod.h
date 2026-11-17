@@ -26,27 +26,30 @@ class MissingValueTreatmentMethod {
   enum class MissingValueTreatmentMethodValue { AS_IS, AS_MEAN, AS_MODE, AS_MEDIAN, AS_VALUE };
 
   static constexpr EnumEntry<MissingValueTreatmentMethodValue> TABLE[] = {
-      {"asis", MissingValueTreatmentMethodValue::AS_IS, "asIs"},
-      {"asmean", MissingValueTreatmentMethodValue::AS_MEAN, "asMean"},
-      {"asmode", MissingValueTreatmentMethodValue::AS_MODE, "asMode"},
-      {"asmedian", MissingValueTreatmentMethodValue::AS_MEDIAN, "asMedian"},
-      {"asvalue", MissingValueTreatmentMethodValue::AS_VALUE, "asValue"},
+      {"asIs", MissingValueTreatmentMethodValue::AS_IS},
+      {"asMean", MissingValueTreatmentMethodValue::AS_MEAN},
+      {"asMode", MissingValueTreatmentMethodValue::AS_MODE},
+      {"asMedian", MissingValueTreatmentMethodValue::AS_MEDIAN},
+      {"asValue", MissingValueTreatmentMethodValue::AS_VALUE},
+      // PMML 4.4: a missing input makes the result invalid. Not implemented;
+      // scoring it as asIs would be a silent guess.
+      {"returnInvalid", MissingValueTreatmentMethodValue::AS_IS, nullptr, EnumSupport::UNSUPPORTED},
   };
 
   MissingValueTreatmentMethodValue value = MissingValueTreatmentMethodValue::AS_IS;
 
   MissingValueTreatmentMethod() = default;
 
-  explicit MissingValueTreatmentMethod(const std::string& value) : value(from_string(value)) {}
+  explicit MissingValueTreatmentMethod(MissingValueTreatmentMethodValue value) : value(value) {}
 
   inline bool operator==(const MissingValueTreatmentMethod& other) const { return value == other.value; };
 
   inline bool operator!=(const MissingValueTreatmentMethod& other) const { return value != other.value; };
 
-  // MiningField/@missingValueTreatment is optional; absent means asIs.
-  static MissingValueTreatmentMethodValue from_string(const std::string& missingvaluetreatmentmethod) {
-    return enum_value(missingvaluetreatmentmethod, TABLE, "missingValueTreatment",
-                      MissingValueTreatmentMethodValue::AS_IS);
+  // MiningField@missingValueTreatment, default asIs.
+  static MissingValueTreatmentMethod read(const XmlNode& node) {
+    return MissingValueTreatmentMethod(
+        read_enum(node, "missingValueTreatment", TABLE, MissingValueTreatmentMethodValue::AS_IS));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "asIs"); }

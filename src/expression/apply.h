@@ -49,14 +49,14 @@ class Apply : public Expression {
         mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
         defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()),
-        invalidValueTreatmentMethod(node.get_attribute("invalidValueTreatment")) {
+        invalidValueTreatmentMethod(InvalidValueTreatmentMethod::read(node)) {
     // asValue names MiningField/@invalidValueReplacement; an Apply has no
     // replacement to give, so the token is refused rather than read as asIs.
     if (invalidValueTreatmentMethod.value == InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_VALUE)
       throw cpmml::ParsingException("Apply: invalidValueTreatment=\"asValue\" is only defined for a MiningField");
     std::shared_ptr<Expression> expression;
     for (const auto& n : node.get_childs()) {
-      ExpressionType expression_type(n.name());
+      ExpressionType expression_type(n);
       switch (expression_type.value) {
         case ExpressionType::ExpressionTypeValue::CONSTANT:
           expression = std::make_shared<Constant>(n, output_index, output_type, indexer);

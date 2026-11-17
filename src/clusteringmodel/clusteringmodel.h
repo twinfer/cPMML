@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/datadictionary.h"
+#include "core/enum_parser.h"
 #include "core/internal_model.h"
 #include "core/internal_score.h"
 #include "core/transformationdictionary.h"
@@ -44,6 +45,16 @@ class ClusteringModel : public InternalModel {
     Eigen::VectorXd centroid;
   };
 
+  enum class ModelClass { CENTER_BASED, DISTRIBUTION_BASED };
+
+  // ClusteringModel@modelClass is required. distributionBased is valid PMML
+  // but cPMML scores centerBased models only; it used to be ignored, so a
+  // distributionBased model was silently scored as centerBased.
+  static constexpr EnumEntry<ModelClass> MODEL_CLASS_TABLE[] = {
+      {"centerBased", ModelClass::CENTER_BASED},
+      {"distributionBased", ModelClass::DISTRIBUTION_BASED, nullptr, EnumSupport::UNSUPPORTED},
+  };
+
   // --- Members ---
 
   DistanceMetric metric;
@@ -69,6 +80,7 @@ class ClusteringModel : public InternalModel {
         metric(DistanceMetric::EUCLIDEAN),
         minkowski_p(2.0),
         is_similarity(false) {
+    read_enum(node, "modelClass", MODEL_CLASS_TABLE);
     parse_comparison_measure(node);
     parse_clustering_fields(node, indexer);
     parse_missing_value_weights(node);
@@ -158,31 +170,20 @@ class ClusteringModel : public InternalModel {
   }
 
  private:
+  // ComparisonMeasure is required (ClusteringModel, 4.4.1); a model without
+  // one used to score with euclidean distance.
   void parse_comparison_measure(const XmlNode& node) {
-    if (!node.exists_child("ComparisonMeasure")) return;
+    if (!node.exists_child("ComparisonMeasure"))
+      throw cpmml::ParsingException("ClusteringModel: required element ComparisonMeasure is missing");
     const XmlNode cm = node.get_child("ComparisonMeasure");
-    is_similarity = (to_lower(cm.get_attribute("kind")) == "similarity");
+    is_similarity = read_measure_kind_is_similarity(cm);
     // Model-wide default compare function that ClusteringFields inherit.
-    default_compare_func = parse_compare_func(to_lower(cm.get_attribute("compareFunction")));
-
-    if (cm.exists_child("squaredEuclidean")) { metric = DistanceMetric::SQUARED_EUCLIDEAN; return; }
-    if (cm.exists_child("cityBlock")) { metric = DistanceMetric::CITYBLOCK; return; }
-    if (cm.exists_child("chebychev")) { metric = DistanceMetric::CHEBYSHEV; return; }
-    if (cm.exists_child("minkowski")) {
-      metric = DistanceMetric::MINKOWSKI;
-      minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
-      return;
-    }
-    // Similarity measures (ranked as 1−s dissimilarities, binary_measure_similarity)
-    if (cm.exists_child("simpleMatching")) { metric = DistanceMetric::SIMPLE_MATCHING; return; }
-    if (cm.exists_child("jaccard")) { metric = DistanceMetric::JACCARD; return; }
-    if (cm.exists_child("tanimoto")) { metric = DistanceMetric::TANIMOTO; return; }
-    if (cm.exists_child("binarySimilarity")) {
-      metric = DistanceMetric::BINARY_SIMILARITY;
+    default_compare_func = read_compare_function(cm, CompareFunc::ABS_DIFF);
+    metric = read_measure(cm);
+    if (metric == DistanceMetric::MINKOWSKI) minkowski_p = parse_minkowski_p(cm.get_child("minkowski"));
+    // Similarity measures (ranked as 1-s dissimilarities, binary_measure_similarity)
+    if (metric == DistanceMetric::BINARY_SIMILARITY)
       binary_params = parse_binary_similarity(cm.get_child("binarySimilarity"));
-      return;
-    }
-    // default: euclidean
   }
 
   // Only center fields (isCenterField="true", the default) are components of
@@ -201,7 +202,7 @@ class ClusteringModel : public InternalModel {
       ClusteringField f;
       f.field_name = cf.get_attribute("field");
       f.field_index = indexer->get_index(f.field_name);
-      f.compare_func = parse_compare_func(to_lower(cf.get_attribute("compareFunction")), default_compare_func);
+      f.compare_func = read_compare_function(cf, default_compare_func);
       f.field_weight = cf.get_double_attribute("fieldWeight", 1.0);
       f.similarity_scale = cf.get_double_attribute("similarityScale", 1.0);
       fields.push_back(std::move(f));

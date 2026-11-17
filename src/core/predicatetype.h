@@ -32,11 +32,11 @@ class PredicateType {
   enum class PredicateTypeValue { TRUE, FALSE, SIMPLE, SIMPLESET, COMPOUND };
 
   static constexpr EnumEntry<PredicateTypeValue> TABLE[] = {
-      {"true", PredicateTypeValue::TRUE, "True"},
-      {"false", PredicateTypeValue::FALSE, "False"},
-      {"simplepredicate", PredicateTypeValue::SIMPLE, "SimplePredicate"},
-      {"simplesetpredicate", PredicateTypeValue::SIMPLESET, "SimpleSetPredicate"},
-      {"compoundpredicate", PredicateTypeValue::COMPOUND, "CompoundPredicate"},
+      {"True", PredicateTypeValue::TRUE},
+      {"False", PredicateTypeValue::FALSE},
+      {"SimplePredicate", PredicateTypeValue::SIMPLE},
+      {"SimpleSetPredicate", PredicateTypeValue::SIMPLESET},
+      {"CompoundPredicate", PredicateTypeValue::COMPOUND},
   };
 
   // Default-constructed and then assigned in several places; without an
@@ -46,13 +46,9 @@ class PredicateType {
 
   PredicateType() = default;
 
-  explicit PredicateType(const std::string& predicatetype) : value(from_string(predicatetype)) {}
-
-  // Comes from an XML element name, never from an attribute: there is nothing
-  // to default to.
-  static PredicateTypeValue from_string(const std::string& predicate_type) {
-    return enum_value(predicate_type, TABLE, "predicate type");
-  }
+  // Read from the element name.
+  explicit PredicateType(const XmlNode& element)
+      : value(read_enum_element(element, TABLE, "predicate element in " + element.parent_name())) {}
 
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 };

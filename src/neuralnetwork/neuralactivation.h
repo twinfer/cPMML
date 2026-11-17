@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 
+#include "core/enum_parser.h"
 #include "utils/utils.h"
 
 /**
@@ -36,23 +37,34 @@ enum class NeuralActivationType {
   RADIALBASIS
 };
 
-inline NeuralActivationType parse_activation(const std::string& s) {
-  const std::string lower = to_lower(s);
-  if (lower == "threshold") return NeuralActivationType::THRESHOLD;
-  if (lower == "logistic") return NeuralActivationType::LOGISTIC;
-  if (lower == "tanh") return NeuralActivationType::TANH;
-  if (lower == "exponential") return NeuralActivationType::EXPONENTIAL;
-  if (lower == "reciprocal") return NeuralActivationType::RECIPROCAL;
-  if (lower == "square") return NeuralActivationType::SQUARE;
-  if (lower == "gauss") return NeuralActivationType::GAUSS;
-  if (lower == "sine") return NeuralActivationType::SINE;
-  if (lower == "cosine") return NeuralActivationType::COSINE;
-  if (lower == "elliott") return NeuralActivationType::ELLIOTT;
-  if (lower == "arctan") return NeuralActivationType::ARCTAN;
-  if (lower == "rectifier") return NeuralActivationType::RECTIFIER;
-  if (lower == "radialbasis") return NeuralActivationType::RADIALBASIS;
-  return NeuralActivationType::IDENTITY;
-}
+// ACTIVATION-FUNCTION, spelled as the spec does: Gauss and Elliott are
+// capitalised (JPMML 1.7.7 accepts "Gauss" and refuses "gauss"). Anything
+// unrecognised used to become identity.
+inline constexpr EnumEntry<NeuralActivationType> ACTIVATION_FUNCTION_TABLE[] = {
+    {"threshold", NeuralActivationType::THRESHOLD},
+    {"logistic", NeuralActivationType::LOGISTIC},
+    {"tanh", NeuralActivationType::TANH},
+    {"identity", NeuralActivationType::IDENTITY},
+    {"exponential", NeuralActivationType::EXPONENTIAL},
+    {"reciprocal", NeuralActivationType::RECIPROCAL},
+    {"square", NeuralActivationType::SQUARE},
+    {"Gauss", NeuralActivationType::GAUSS},
+    {"sine", NeuralActivationType::SINE},
+    {"cosine", NeuralActivationType::COSINE},
+    {"Elliott", NeuralActivationType::ELLIOTT},
+    {"arctan", NeuralActivationType::ARCTAN},
+    {"rectifier", NeuralActivationType::RECTIFIER},
+    {"radialBasis", NeuralActivationType::RADIALBASIS},
+};
+
+// NN-NORMALIZATION-METHOD.
+enum class NeuralNormalization { NONE, SIMPLEMAX, SOFTMAX };
+
+inline constexpr EnumEntry<NeuralNormalization> NN_NORMALIZATION_TABLE[] = {
+    {"none", NeuralNormalization::NONE},
+    {"simplemax", NeuralNormalization::SIMPLEMAX},
+    {"softmax", NeuralNormalization::SOFTMAX},
+};
 
 /**
  * Element-wise activations, applied to a neuron's weighted sum.

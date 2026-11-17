@@ -47,8 +47,7 @@ class EnsembleModel : public InternalModel {
   EnsembleModel(const XmlNode& node, const DataDictionary& data_dictionary,
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        multiplemodelmethod(node.get_child("Segmentation").get_attribute("multipleModelMethod"),
-                            InternalModel::mining_function,
+        multiplemodelmethod(node.get_child("Segmentation"), InternalModel::mining_function,
                             MultipleModelMethod::missing_prediction_from(node.get_child("Segmentation")),
                             MultipleModelMethod::classes_of(InternalModel::target_field)) {
     PredicateBuilder predicate_builder(indexer);

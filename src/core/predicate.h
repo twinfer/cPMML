@@ -27,7 +27,7 @@ class Predicate {
  public:
   size_t feature = std::numeric_limits<size_t>::max();
   bool is_empty = true;
-  PredicateOpType predicatetype = PredicateOpType("true");
+  PredicateOpType predicatetype = PredicateOpType::PredicateOpTypeValue::TRUE;
   Value value;
   bool is_set_predicate = false;
   std::set<Value> values;
@@ -38,19 +38,19 @@ class Predicate {
 
   Predicate() = default;
 
-  explicit Predicate(const std::string& predicatetype) : is_empty(false), predicatetype(predicatetype) {}
+  explicit Predicate(PredicateOpType predicatetype) : is_empty(false), predicatetype(predicatetype) {}
 
-  Predicate(const size_t feature, const std::string& predicatetype, const Value& value)
+  Predicate(const size_t feature, PredicateOpType predicatetype, const Value& value)
       : feature(feature), is_empty(false), predicatetype(predicatetype), value(value) {}
 
-  Predicate(const size_t feature, const std::string& predicatetype, const std::set<Value>& values)
+  Predicate(const size_t feature, PredicateOpType predicatetype, const std::set<Value>& values)
       : feature(feature), is_empty(false), predicatetype(predicatetype), is_set_predicate(true), values(values) {}
 
-  Predicate(const size_t feature, const std::string& predicatetype,
+  Predicate(const size_t feature, PredicateOpType predicatetype,
             const std::unordered_set<Value, Value::ValueHash>& values_hash)
       : feature(feature), is_empty(false), predicatetype(predicatetype), is_hash_set(true), values_hash(values_hash) {}
 
-  Predicate(const std::vector<Predicate>& predicates, const std::string& predicatetype)
+  Predicate(const std::vector<Predicate>& predicates, PredicateOpType predicatetype)
       : is_empty(false), predicatetype(predicatetype), is_compound_predicate(true), predicates(predicates) {}
 
   // PMML predicates use three-valued logic: a comparison against a missing

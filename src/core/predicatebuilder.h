@@ -35,44 +35,61 @@ class PredicateBuilder {
   }
 
   // Build the predicate of an element that contains one PREDICATE child among
-  // other children (Segment, Node, SimpleRule, Attribute, ...). Returns an
-  // empty predicate when no PREDICATE child exists.
+  // other children (tree Node, Segment, SimpleRule, CompoundRule, scorecard
+  // Attribute). The PREDICATE is required in every one of them, so a parent
+  // without one is a load error. Element names are case-sensitive: a
+  // misspelt <simplePredicate> used to be skipped, leaving an empty predicate
+  // that matches every record; JPMML 1.7.7 refuses the document.
   inline Predicate build_from_parent(const XmlNode& parent) const {
-    return build(parent.get_child_bylist(predicate_names()));
+    XmlNode predicate = parent.get_child_bylist(predicate_names());
+    if (!predicate.is_empty()) return build(predicate);
+
+    std::string found;
+    for (const auto& child : parent.get_childs()) {
+      if (child.name() == "Extension") continue;
+      if (!found.empty()) found += ", ";
+      found += child.name();
+    }
+    throw cpmml::ParsingException("missing predicate element in " + parent.name() +
+                                  "; allowed elements are SimplePredicate, CompoundPredicate, SimpleSetPredicate, "
+                                  "True, False; found " +
+                                  (found.empty() ? std::string("no child elements") : found));
   }
 
   inline Predicate build(XmlNode node) const {
     if (node.is_empty()) return Predicate();
 
-    Predicate result;
-    PredicateType predicatetype(node.name());
-    switch (predicatetype.value) {
+    using Op = PredicateOpType::PredicateOpTypeValue;
+    switch (PredicateType(node).value) {
       case PredicateType::PredicateTypeValue::TRUE:
-        return Predicate("true");
+        return Predicate(Op::TRUE);
       case PredicateType::PredicateTypeValue::FALSE:
-        return Predicate("false");
+        return Predicate(Op::FALSE);
       case PredicateType::PredicateTypeValue::SIMPLE: {
-        const std::string op = node.get_attribute("operator");
-        const std::string lower_op = to_lower(op);
+        const Op op = read_enum(node, "operator", PredicateOpType::SIMPLE_OPERATOR_TABLE);
         // isMissing / isNotMissing have no value attribute
-        if (lower_op == "ismissing" || lower_op == "isnotmissing")
+        if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING)
           return Predicate(indexer->get_index(node.get_attribute("field")), op, Value());
         return Predicate(indexer->get_index(node.get_attribute("field")), op,
                          Value(node.get_attribute("value"), indexer->get_type(node.get_attribute("field"))));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
+        const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
         std::vector<std::string> values = parse_array(node.get_child("Array").value());
         if (values.size() > SET_THRESHOLD)
-          return Predicate(indexer->get_index(node.get_attribute("field")), node.get_attribute("booleanOperator"),
+          return Predicate(indexer->get_index(node.get_attribute("field")), op,
                            Value::createUnorderedValues(values, indexer->get_type(node.get_attribute("field"))));
-        return Predicate(indexer->get_index(node.get_attribute("field")), node.get_attribute("booleanOperator"),
+        return Predicate(indexer->get_index(node.get_attribute("field")), op,
                          Value::createValues(values, indexer->get_type(node.get_attribute("field"))));
       }
-      case PredicateType::PredicateTypeValue::COMPOUND:
+      case PredicateType::PredicateTypeValue::COMPOUND: {
+        const Op op = read_enum(node, "booleanOperator", PredicateOpType::COMPOUND_OPERATOR_TABLE);
         std::vector<Predicate> predicates;
-        for (const auto& child : node.get_childs()) predicates.push_back(build(child));
+        for (const auto& child : node.get_childs())
+          if (child.name() != "Extension") predicates.push_back(build(child));
 
-        return Predicate(predicates, node.get_attribute("booleanOperator"));
+        return Predicate(predicates, op);
+      }
     }
 
     return Predicate();

@@ -93,6 +93,19 @@ class SupportVectorMachineModel : public InternalModel {
 
   // --- Constructors ---
 
+  // SVM-REPRESENTATION (true: SupportVectors, the default) and
+  // SVM-CLASSIFICATION-METHOD (true: OneAgainstOne; default OneAgainstAll).
+  // Both used to be lower-cased and anything unrecognised taken as the
+  // default.
+  static constexpr EnumEntry<bool> SVM_REPRESENTATION_TABLE[] = {
+      {"SupportVectors", true},
+      {"Coefficients", false},
+  };
+  static constexpr EnumEntry<bool> CLASSIFICATION_METHOD_TABLE[] = {
+      {"OneAgainstAll", false},
+      {"OneAgainstOne", true},
+  };
+
   SupportVectorMachineModel() = default;
 
   SupportVectorMachineModel(const XmlNode& node, const DataDictionary& data_dictionary,
@@ -100,8 +113,8 @@ class SupportVectorMachineModel : public InternalModel {
                             const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         kernel(SvmKernel::from_node(node)),
-        use_support_vectors(to_lower(node.get_attribute("svmRepresentation")) != "coefficients"),
-        is_ovo(to_lower(node.get_attribute("classificationMethod")) == "oneagainstone"),
+        use_support_vectors(read_enum(node, "svmRepresentation", SVM_REPRESENTATION_TABLE, true)),
+        is_ovo(read_enum(node, "classificationMethod", CLASSIFICATION_METHOD_TABLE, false)),
         max_wins(node.get_bool_attribute("maxWins", false)),
         model_threshold(node.get_double_attribute("threshold", 0.0)) {
     // The Coefficients form is the hyperplane w.x + b, which only exists for the

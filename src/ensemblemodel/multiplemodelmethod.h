@@ -84,18 +84,12 @@ class MultipleModelMethod {
 
   MultipleModelMethod() = default;
 
-  MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function)
-      : MultipleModelMethod(multiplemodelmethod, mining_function, MissingPrediction{}) {}
-
-  MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
-                      const MissingPrediction& missing_prediction)
-      : MultipleModelMethod(multiplemodelmethod, mining_function, missing_prediction, Classes{}) {}
-
-  MultipleModelMethod(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
+  // Segmentation@multipleModelMethod is required.
+  MultipleModelMethod(const XmlNode& segmentation, const MiningFunction& mining_function,
                       const MissingPrediction& missing_prediction, const Classes& classes)
-      : value(from_string(multiplemodelmethod)),
+      : value(read_enum(segmentation, "multipleModelMethod", TABLE)),
         missing_prediction(missing_prediction),
-        function(to_function(multiplemodelmethod, mining_function, missing_prediction, classes)) {}
+        function(to_function(value, mining_function, missing_prediction, classes)) {}
 
   // The target field's declared categories, in document order.
   static Classes classes_of(const DataField& target_field) {
@@ -106,51 +100,46 @@ class MultipleModelMethod {
   }
 
   static constexpr EnumEntry<MultipleModelMethodType> TABLE[] = {
-      {"majorityvote", MultipleModelMethodType::MAJORITY_VOTE, "majorityVote"},
-      {"weightedmajorityvote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE, "weightedMajorityVote"},
-      {"average", MultipleModelMethodType::AVERAGE, "average"},
-      {"weightedaverage", MultipleModelMethodType::WEIGHTED_AVERAGE, "weightedAverage"},
-      {"median", MultipleModelMethodType::MEDIAN, "median"},
-      {"weightedmedian", MultipleModelMethodType::WEIGHTED_MEDIAN, "weightedMedian"},
-      {"max", MultipleModelMethodType::MAX, "max"},
-      {"sum", MultipleModelMethodType::SUM, "sum"},
-      {"weightedsum", MultipleModelMethodType::WEIGHTED_SUM, "weightedSum"},
-      {"selectfirst", MultipleModelMethodType::SELECT_FIRST, "selectFirst"},
-      {"selectall", MultipleModelMethodType::SELECT_ALL, "selectAll"},
-      {"modelchain", MultipleModelMethodType::MODEL_CHAIN, "modelChain"},
+      {"majorityVote", MultipleModelMethodType::MAJORITY_VOTE},
+      {"weightedMajorityVote", MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE},
+      {"average", MultipleModelMethodType::AVERAGE},
+      {"weightedAverage", MultipleModelMethodType::WEIGHTED_AVERAGE},
+      {"median", MultipleModelMethodType::MEDIAN},
+      {"weightedMedian", MultipleModelMethodType::WEIGHTED_MEDIAN},
+      {"max", MultipleModelMethodType::MAX},
+      {"sum", MultipleModelMethodType::SUM},
+      {"weightedSum", MultipleModelMethodType::WEIGHTED_SUM},
+      {"selectFirst", MultipleModelMethodType::SELECT_FIRST},
+      {"selectAll", MultipleModelMethodType::SELECT_ALL},
+      {"modelChain", MultipleModelMethodType::MODEL_CHAIN},
   };
 
   static constexpr EnumEntry<MissingPredictionTreatment> MISSING_PREDICTION_TABLE[] = {
-      {"returnmissing", MissingPredictionTreatment::RETURN_MISSING, "returnMissing"},
-      {"skipsegment", MissingPredictionTreatment::SKIP_SEGMENT, "skipSegment"},
-      {"continue", MissingPredictionTreatment::CONTINUE, "continue"},
+      {"returnMissing", MissingPredictionTreatment::RETURN_MISSING},
+      {"skipSegment", MissingPredictionTreatment::SKIP_SEGMENT},
+      {"continue", MissingPredictionTreatment::CONTINUE},
   };
-
-  // Segmentation/@multipleModelMethod is required.
-  static MultipleModelMethodType from_string(const std::string& multiplemodelmethod) {
-    return enum_value(multiplemodelmethod, TABLE, "multipleModelMethod");
-  }
 
   // Segmentation/@missingPredictionTreatment (default continue) and
   // @missingThreshold (default 1).
   static MissingPrediction missing_prediction_from(const XmlNode& segmentation) {
     MissingPrediction result;
     result.treatment =
-        enum_value(segmentation.get_attribute("missingPredictionTreatment", ""), MISSING_PREDICTION_TABLE,
-                   "Segmentation@missingPredictionTreatment", MissingPredictionTreatment::CONTINUE);
+        read_enum(segmentation, "missingPredictionTreatment", MISSING_PREDICTION_TABLE,
+                  MissingPredictionTreatment::CONTINUE);
     result.threshold = segmentation.get_double_attribute("missingThreshold", 1);
     return result;
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "UNDEFINED"); }
 
-  static Function to_function(const std::string& multiplemodelmethod, const MiningFunction& mining_function,
+  static Function to_function(MultipleModelMethodType method, const MiningFunction& mining_function,
                               const MissingPrediction& mp, const Classes& classes) {
     // The spec says skipSegment "should not be used with modelChain", and JPMML
     // 1.7.7 refuses to score it there and with selectAll. cPMML keeps scoring
     // those documents as it did before the attribute was read: such a segment
     // is treated as under continue (select_all, model_chain).
-    switch (from_string(multiplemodelmethod)) {
+    switch (method) {
       case MultipleModelMethodType::MAJORITY_VOTE:
         return [mp, classes](const Sample& s, const std::vector<Segment>& e) { return vote(s, e, mp, false, classes); };
       case MultipleModelMethodType::WEIGHTED_MAJORITY_VOTE:
@@ -223,7 +212,7 @@ class MultipleModelMethod {
         return [mp](const Sample& s, const std::vector<Segment>& e) { return model_chain(s, e, mp); };
     }
 
-    throw cpmml::ParsingException(multiplemodelmethod + " not supported");
+    throw cpmml::ParsingException("multipleModelMethod " + enum_display(method, TABLE, "?") + " not supported");
   }
 
   // Deterministic winner selection: highest probability wins, ties broken by

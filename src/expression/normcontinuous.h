@@ -41,7 +41,7 @@ class NormContinuous : public Expression {
         mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
         field_name(node.get_attribute("field")),
         index(indexer->get_or_set(field_name)),
-        outliertreatment_method(node.get_attribute("outliers")),
+        outliertreatment_method(OutlierTreatmentMethod::read(node)),
         orig(get_values("orig", node,
                         output_type)),  // TYPE IMPLICIT: DOUBLE, we know input type must be
                                         // equal to output type in this case
@@ -58,7 +58,7 @@ class NormContinuous : public Expression {
                                        const DataType& dataType) {
     std::vector<Value> result;
 
-    for (const auto& linear_norm : node.get_childs_bypattern("LinearNorm"))
+    for (const auto& linear_norm : node.get_childs("LinearNorm"))
       result.push_back(Value(linear_norm.get_attribute(linearnorm_type), dataType));
 
     return result;

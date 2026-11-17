@@ -46,7 +46,7 @@ class NeuralNetworkModel : public InternalModel {
     Eigen::VectorXd biases;   // [n_neurons]
     NeuralActivationType activation;
     double threshold;
-    std::string normalization;  // "none", "softmax", "simplemax"
+    NeuralNormalization normalization = NeuralNormalization::NONE;
     bool radial_basis = false;
     Eigen::VectorXd widths;     // [n_neurons], RBF only
     Eigen::VectorXd altitudes;  // [n_neurons], RBF only
@@ -69,7 +69,7 @@ class NeuralNetworkModel : public InternalModel {
   double default_threshold;
   double default_width;
   double default_altitude;
-  std::string model_normalization;
+  NeuralNormalization model_normalization = NeuralNormalization::NONE;
 
   std::vector<NeuralInput> neural_inputs;
   std::vector<Layer> layers;
@@ -86,11 +86,11 @@ class NeuralNetworkModel : public InternalModel {
   NeuralNetworkModel(const XmlNode& node, const DataDictionary& data_dictionary,
                      const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        default_activation(parse_activation(node.get_attribute("activationFunction"))),
+        default_activation(read_enum(node, "activationFunction", ACTIVATION_FUNCTION_TABLE)),
         default_threshold(node.get_double_attribute("threshold", 0.0)),
         default_width(node.get_double_attribute("width", 1.0)),
         default_altitude(node.get_double_attribute("altitude", 1.0)),
-        model_normalization(node.get_attribute("normalizationMethod", "none")) {
+        model_normalization(read_enum(node, "normalizationMethod", NN_NORMALIZATION_TABLE, NeuralNormalization::NONE)) {
     parse_neural_inputs(node.get_child("NeuralInputs"), indexer);
     parse_layers(node);
     parse_neural_outputs(node.get_child("NeuralOutputs"));
@@ -169,14 +169,14 @@ class NeuralNetworkModel : public InternalModel {
       const size_t n = neuron_nodes.size();
       const size_t prev_n = prev_id_to_idx.size();
 
-      NeuralActivationType act = layer_node.exists_attribute("activationFunction")
-                                     ? parse_activation(layer_node.get_attribute("activationFunction"))
-                                     : default_activation;
+      const NeuralActivationType act = read_enum(layer_node, "activationFunction", ACTIVATION_FUNCTION_TABLE,
+                                                 default_activation);
       double thr = layer_node.get_double_attribute("threshold", default_threshold);
       double layer_width = layer_node.get_double_attribute("width", default_width);
       double layer_altitude = layer_node.get_double_attribute("altitude", default_altitude);
       // A layer without normalizationMethod inherits the model-level one.
-      std::string norm = to_lower(layer_node.get_attribute("normalizationMethod", model_normalization));
+      const NeuralNormalization norm =
+          read_enum(layer_node, "normalizationMethod", NN_NORMALIZATION_TABLE, model_normalization);
 
       Eigen::MatrixXd W = Eigen::MatrixXd::Zero(n, prev_n);
       Eigen::VectorXd b = Eigen::VectorXd::Zero(n);
@@ -275,11 +275,11 @@ class NeuralNetworkModel : public InternalModel {
       }
 
       // Layer normalization (softmax/simplemax)
-      if (layer.normalization == "softmax") {
+      if (layer.normalization == NeuralNormalization::SOFTMAX) {
         const double max_val = pre.maxCoeff();
         Eigen::VectorXd shifted = (pre.array() - max_val).exp();
         pre = shifted / shifted.sum();
-      } else if (layer.normalization == "simplemax") {
+      } else if (layer.normalization == NeuralNormalization::SIMPLEMAX) {
         const double s = pre.sum();
         if (s > 0.0) pre /= s;
       }

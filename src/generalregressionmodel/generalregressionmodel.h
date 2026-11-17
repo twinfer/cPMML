@@ -62,9 +62,22 @@ class GeneralRegressionModel : public InternalModel {
   // own table so neither accepts the other's extra members.
   enum class Link { IDENTITY, LOG, LOGC, LOGIT, PROBIT, CLOGLOG, LOGLOG, CAUCHIT, POWER, ODDSPOWER, NEGBIN };
 
+  enum class ModelType { REGRESSION, GENERAL_LINEAR, MULTINOMIAL_LOGISTIC, ORDINAL_MULTINOMIAL, GENERALIZED_LINEAR };
+
+  // modelType is required. CoxRegression used to fall through to the
+  // continuous branch and score as a linear model.
+  static constexpr EnumEntry<ModelType> MODEL_TYPE_TABLE[] = {
+      {"regression", ModelType::REGRESSION},
+      {"generalLinear", ModelType::GENERAL_LINEAR},
+      {"multinomialLogistic", ModelType::MULTINOMIAL_LOGISTIC},
+      {"ordinalMultinomial", ModelType::ORDINAL_MULTINOMIAL},
+      {"generalizedLinear", ModelType::GENERALIZED_LINEAR},
+      {"CoxRegression", ModelType::REGRESSION, nullptr, EnumSupport::UNSUPPORTED},
+  };
+
   // --- Members ---
 
-  std::string model_type;  // to_lower of modelType attribute
+  ModelType model_type;
   Link link;               // cumulativeLink for ordinalMultinomial, else linkFunction
   double link_parameter;   // for power/oddspower/negbin links
 
@@ -102,7 +115,7 @@ class GeneralRegressionModel : public InternalModel {
                          const TransformationDictionary& transformation_dictionary,
                          const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        model_type(to_lower(node.get_attribute("modelType"))),
+        model_type(read_enum(node, "modelType", MODEL_TYPE_TABLE)),
         link(parse_link(node, model_type)),
         link_parameter(node.get_double_attribute("linkParameter", 1.0)),
         reference_category(node.get_attribute("targetReferenceCategory")) {
@@ -131,11 +144,11 @@ class GeneralRegressionModel : public InternalModel {
   // which MiningSchema applies before this point.
   inline std::unique_ptr<InternalScore> score_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return std::make_unique<InternalScore>();
-    if (model_type == "multinomiallogistic") {
+    if (model_type == ModelType::MULTINOMIAL_LOGISTIC) {
       auto [winner, scores] = predict_multinomial(sample);
       return std::make_unique<RegressionScore>(winner, 1.0, classes, scores);
     }
-    if (model_type == "ordinalmultinomial") {
+    if (model_type == ModelType::ORDINAL_MULTINOMIAL) {
       auto [winner, scores] = predict_ordinal(sample);
       return std::make_unique<RegressionScore>(winner, 1.0, classes, scores);
     }
@@ -146,11 +159,11 @@ class GeneralRegressionModel : public InternalModel {
 
   inline std::string predict_raw(const Sample& sample) const override {
     if (has_missing_input(sample)) return "";
-    if (model_type == "multinomiallogistic") {
+    if (model_type == ModelType::MULTINOMIAL_LOGISTIC) {
       auto [winner, scores] = predict_multinomial(sample);
       return winner;
     }
-    if (model_type == "ordinalmultinomial") {
+    if (model_type == ModelType::ORDINAL_MULTINOMIAL) {
       auto [winner, scores] = predict_ordinal(sample);
       return winner;
     }
@@ -169,20 +182,19 @@ class GeneralRegressionModel : public InternalModel {
   // --- Parsing ---
 
   static constexpr EnumEntry<Link> CUMULATIVE_LINK_TABLE[] = {
-      {"logit", Link::LOGIT, "logit"},       {"probit", Link::PROBIT, "probit"},
-      {"cloglog", Link::CLOGLOG, "cloglog"}, {"loglog", Link::LOGLOG, "loglog"},
-      {"cauchit", Link::CAUCHIT, "cauchit"},
+      {"logit", Link::LOGIT},     {"probit", Link::PROBIT}, {"cloglog", Link::CLOGLOG},
+      {"loglog", Link::LOGLOG},   {"cauchit", Link::CAUCHIT},
   };
 
-  // LINK-FUNCTION's ten members, plus cauchit: not in the 4.4 enumeration, but
-  // accepted here before this table existed and its formula is unambiguous.
+  // LINK-FUNCTION's ten members. cauchit used to be accepted here too; it is
+  // a CUMULATIVE-LINK-FUNCTION member only, and JPMML 1.7.7 refuses it as a
+  // linkFunction ("Required attribute GeneralRegressionModel@linkFunction is
+  // not defined").
   static constexpr EnumEntry<Link> LINK_FUNCTION_TABLE[] = {
-      {"identity", Link::IDENTITY, "identity"},    {"log", Link::LOG, "log"},
-      {"logc", Link::LOGC, "logc"},                {"logit", Link::LOGIT, "logit"},
-      {"probit", Link::PROBIT, "probit"},          {"cloglog", Link::CLOGLOG, "cloglog"},
-      {"loglog", Link::LOGLOG, "loglog"},          {"cauchit", Link::CAUCHIT, "cauchit"},
-      {"power", Link::POWER, "power"},             {"oddspower", Link::ODDSPOWER, "oddspower"},
-      {"negbin", Link::NEGBIN, "negbin"},
+      {"identity", Link::IDENTITY}, {"log", Link::LOG},         {"logc", Link::LOGC},
+      {"logit", Link::LOGIT},       {"probit", Link::PROBIT},   {"cloglog", Link::CLOGLOG},
+      {"loglog", Link::LOGLOG},     {"power", Link::POWER},     {"oddspower", Link::ODDSPOWER},
+      {"negbin", Link::NEGBIN},
   };
 
   /**
@@ -207,22 +219,22 @@ class GeneralRegressionModel : public InternalModel {
    * In both cases a value that is present and unrecognised is a load error;
    * it used to become identity.
    */
-  static Link parse_link(const XmlNode& node, const std::string& model_type) {
-    if (model_type == "ordinalmultinomial") {
-      const std::string raw = node.get_attribute("cumulativeLink");
-      if (is_absent_attribute(raw))
+  static Link parse_link(const XmlNode& node, ModelType model_type) {
+    if (model_type == ModelType::ORDINAL_MULTINOMIAL) {
+      if (!node.exists_attribute("cumulativeLink"))
         throw cpmml::ParsingException(
             "GeneralRegressionModel: ordinalMultinomial requires cumulativeLink (linkFunction does not apply to it)");
-      return enum_value(raw, CUMULATIVE_LINK_TABLE, "GeneralRegressionModel@cumulativeLink");
+      return read_enum(node, "cumulativeLink", CUMULATIVE_LINK_TABLE);
     }
     // linkFunction belongs to generalizedLinear alone, the same way cumulativeLink
     // belongs to ordinalMultinomial. regression and generalLinear are identity
     // by definition, and producers do write linkFunction="identity" on them, so
-    // it is ignored there, not validated -- as JPMML does. Applying a present
-    // one there scored linkFunction="log" on a regression as exp(eta).
-    if (model_type != "generalizedlinear") return Link::IDENTITY;  // incl. multinomialLogistic: softmax
-    return enum_value(node.get_attribute("linkFunction"), LINK_FUNCTION_TABLE, "GeneralRegressionModel@linkFunction",
-                      Link::IDENTITY);
+    // it is ignored there -- as JPMML does -- though it must still be a
+    // LINK-FUNCTION. Applying a present one there scored linkFunction="log" on
+    // a regression as exp(eta).
+    const Link link = read_enum(node, "linkFunction", LINK_FUNCTION_TABLE, Link::IDENTITY);
+    if (model_type != ModelType::GENERALIZED_LINEAR) return Link::IDENTITY;  // incl. multinomialLogistic: softmax
+    return link;
   }
 
   void parse_factors(const XmlNode& node) {
@@ -313,7 +325,7 @@ class GeneralRegressionModel : public InternalModel {
    * what the target's categories are.
    */
   void recover_reference_category(const DataDictionary& data_dictionary) {
-    if (model_type != "multinomiallogistic" && model_type != "ordinalmultinomial") return;
+    if (model_type != ModelType::MULTINOMIAL_LOGISTIC && model_type != ModelType::ORDINAL_MULTINOMIAL) return;
 
     const auto target = data_dictionary.datafields.find(mining_schema.target.name);
     if (target == data_dictionary.datafields.cend()) return;

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "core/enum_parser.h"
 #include "core/xmlnode.h"
 #include "utils/utils.h"
 
@@ -38,18 +39,23 @@ struct ComparisonField {
   double similarity_scale = 1.0;
 };
 
-// COMPARE-FUNCTION is spelled absDiff / gaussSim / delta / equal. This used to
-// require the caller to lower-case first, and NearestNeighborModel did not:
-// "gaussSim" matched nothing and fell through to the absDiff fallback, so a
-// KNNInput asking for a Gaussian similarity silently got an absolute
-// difference. It lower-cases its own argument now.
-inline CompareFunc parse_compare_func(const std::string& raw, CompareFunc fallback = CompareFunc::ABS_DIFF) {
-  const std::string s = to_lower(raw);
-  if (s == "absdiff") return CompareFunc::ABS_DIFF;
-  if (s == "gausssim") return CompareFunc::GAUSS_SIM;
-  if (s == "delta") return CompareFunc::DELTA;
-  if (s == "equal") return CompareFunc::EQUAL;
-  return fallback;  // absent/unknown → the model-level default
+// COMPARE-FUNCTION, on ComparisonMeasure (the default for every field, absDiff
+// when absent), ClusteringField and KNNInput. parse_compare_func used to
+// lower-case the value and fall back to absDiff for anything it did not know,
+// so compareFunction="table" -- a valid PMML value cPMML does not implement --
+// and any misspelling scored as an absolute difference. JPMML 1.7.7 refuses
+// table on a field ("Attribute with value ClusteringField@compareFunction=table
+// is not supported") and reads an unknown value as absent.
+inline constexpr EnumEntry<CompareFunc> COMPARE_FUNCTION_TABLE[] = {
+    {"absDiff", CompareFunc::ABS_DIFF},
+    {"gaussSim", CompareFunc::GAUSS_SIM},
+    {"delta", CompareFunc::DELTA},
+    {"equal", CompareFunc::EQUAL},
+    {"table", CompareFunc::ABS_DIFF, nullptr, EnumSupport::UNSUPPORTED},
+};
+
+inline CompareFunc read_compare_function(const XmlNode& node, CompareFunc when_absent) {
+  return read_enum(node, "compareFunction", COMPARE_FUNCTION_TABLE, when_absent);
 }
 
 // Every compare function returns a DISSIMILARITY (0 = identical), so that
@@ -212,6 +218,55 @@ inline BinarySimilarityParams parse_binary_similarity(const XmlNode& node) {
   p.d10 = read("d10-parameter");
   p.d11 = read("d11-parameter");
   return p;
+}
+
+// ComparisonMeasure holds exactly one measure element (an xs:choice of the
+// nine below), besides any Extension. A missing, unknown or second measure is
+// a load error. JPMML 1.7.7 refuses the first two ("Required element
+// ComparisonMeasure/<Measure> is not defined"); it skips an unknown element
+// next to a known one and takes the last of two measures, both schema
+// violations cPMML refuses. ClusteringModel used to take euclidean for a
+// missing or unrecognised measure (<Euclidean/> included).
+inline constexpr EnumEntry<DistanceMetric> MEASURE_TABLE[] = {
+    {"euclidean", DistanceMetric::EUCLIDEAN},
+    {"squaredEuclidean", DistanceMetric::SQUARED_EUCLIDEAN},
+    {"chebychev", DistanceMetric::CHEBYSHEV},
+    {"cityBlock", DistanceMetric::CITYBLOCK},
+    {"minkowski", DistanceMetric::MINKOWSKI},
+    {"simpleMatching", DistanceMetric::SIMPLE_MATCHING},
+    {"jaccard", DistanceMetric::JACCARD},
+    {"tanimoto", DistanceMetric::TANIMOTO},
+    {"binarySimilarity", DistanceMetric::BINARY_SIMILARITY},
+};
+
+inline DistanceMetric read_measure(const XmlNode& comparison_measure) {
+  bool found = false;
+  DistanceMetric result = DistanceMetric::EUCLIDEAN;
+  for (const auto& child : comparison_measure.get_childs()) {
+    const std::string name = child.name();
+    if (name.empty() || name == "Extension") continue;  // text, or an Extension
+    const DistanceMetric metric = read_enum_element(child, MEASURE_TABLE, "measure element in ComparisonMeasure");
+    if (found)
+      throw cpmml::ParsingException("ComparisonMeasure has more than one measure (<" + name + "> after another)");
+    found = true;
+    result = metric;
+  }
+  if (!found)
+    throw cpmml::ParsingException("ComparisonMeasure has no measure element; allowed elements are " +
+                                  enum_reader::list_tokens(MEASURE_TABLE, false));
+  return result;
+}
+
+// ComparisonMeasure@kind is required. Nothing downstream depends on it -- each
+// measure is a distance or a similarity by definition -- but it is read so a
+// document that misspells it is refused like any other.
+inline constexpr EnumEntry<bool> MEASURE_KIND_TABLE[] = {
+    {"distance", false},
+    {"similarity", true},
+};
+
+inline bool read_measure_kind_is_similarity(const XmlNode& comparison_measure) {
+  return read_enum(comparison_measure, "kind", MEASURE_KIND_TABLE);
 }
 
 inline bool is_binary_metric(DistanceMetric metric) {

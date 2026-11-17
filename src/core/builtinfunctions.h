@@ -112,84 +112,100 @@ class BuiltInFunction {  // inputs are mapped by position
         function(get_function(function_type)) {}
 
   static constexpr EnumEntry<BuiltInFunctionType> TABLE[] = {
-      {"+", BuiltInFunctionType::PLUS, "+"},
-      {"-", BuiltInFunctionType::MINUS, "-"},
-      {"*", BuiltInFunctionType::MUL, "*"},
-      {"/", BuiltInFunctionType::DIV, "/"},
-      {"max", BuiltInFunctionType::MAX, "max"},
-      {"min", BuiltInFunctionType::MIN, "min"},
-      {"sum", BuiltInFunctionType::SUM, "sum"},
-      {"avg", BuiltInFunctionType::AVG, "avg"},
-      {"exp", BuiltInFunctionType::EXP, "exp"},
-      {"ln", BuiltInFunctionType::LN, "ln"},
-      {"log10", BuiltInFunctionType::LOG10, "log10"},
-      {"sqrt", BuiltInFunctionType::SQRT, "sqrt"},
-      {"abs", BuiltInFunctionType::ABS, "abs"},
-      {"round", BuiltInFunctionType::ROUND, "round"},
-      {"floor", BuiltInFunctionType::FLOOR, "floor"},
-      {"ceil", BuiltInFunctionType::CEIL, "ceil"},
-      {"pow", BuiltInFunctionType::POW, "pow"},
-      {"if", BuiltInFunctionType::IF, "if"},
-      {"ismissing", BuiltInFunctionType::IS_MISSING, "isMissing"},
-      {"isnotmissing", BuiltInFunctionType::IS_NOT_MISSING, "isNotMissing"},
-      {"equal", BuiltInFunctionType::EQUAL, "equal"},
-      {"notequal", BuiltInFunctionType::NOT_EQUAL, "notEqual"},
-      {"lessthan", BuiltInFunctionType::LESS_THAN, "lessThan"},
-      {"lessorequal", BuiltInFunctionType::LESS_THAN_EQUAL, "lessOrEqual"},
-      {"greaterthan", BuiltInFunctionType::GREATER_THAN, "greaterThan"},
-      {"greaterorequal", BuiltInFunctionType::GREATER_THAN_EQUAL, "greaterOrEqual"},
-      {"isin", BuiltInFunctionType::IS_IN, "isIn"},
-      {"isnotin", BuiltInFunctionType::IS_NOT_IN, "isNotIn"},
-      {"replace", BuiltInFunctionType::REPLACE, "replace"},
-      {"matches", BuiltInFunctionType::MATCHES, "matches"},
-      {"uppercase", BuiltInFunctionType::UPPERCASE, "uppercase"},
-      {"lowercase", BuiltInFunctionType::LOWERCASE, "lowercase"},
-      {"substring", BuiltInFunctionType::SUBSTRING, "substring"},
-      {"trimblanks", BuiltInFunctionType::TRIM_BLANKS, "trimBlanks"},
-      {"concat", BuiltInFunctionType::CONCAT, "concat"},
-      {"stringlength", BuiltInFunctionType::STRING_LENGTH, "stringLength"},
-      {"median", BuiltInFunctionType::MEDIAN, "median"},
-      {"product", BuiltInFunctionType::PRODUCT, "product"},
-      {"threshold", BuiltInFunctionType::THRESHOLD, "threshold"},
-      {"modulo", BuiltInFunctionType::MODULO, "modulo"},
-      {"not", BuiltInFunctionType::NOT, "not"},
-      {"expm1", BuiltInFunctionType::EXPM1, "expm1"},
-      {"ln1p", BuiltInFunctionType::LN1P, "ln1p"},
-      {"hypot", BuiltInFunctionType::HYPOT, "hypot"},
-      {"rint", BuiltInFunctionType::RINT, "rint"},
-      {"sin", BuiltInFunctionType::SIN, "sin"},
-      {"asin", BuiltInFunctionType::ASIN, "asin"},
-      {"sinh", BuiltInFunctionType::SINH, "sinh"},
-      {"cos", BuiltInFunctionType::COS, "cos"},
-      {"acos", BuiltInFunctionType::ACOS, "acos"},
-      {"cosh", BuiltInFunctionType::COSH, "cosh"},
-      {"tan", BuiltInFunctionType::TAN, "tan"},
-      {"atan", BuiltInFunctionType::ATAN, "atan"},
-      {"tanh", BuiltInFunctionType::TANH, "tanh"},
-      {"erf", BuiltInFunctionType::ERF, "erf"},
-      {"normalcdf", BuiltInFunctionType::NORMAL_CDF, "normalCDF"},
-      {"normalpdf", BuiltInFunctionType::NORMAL_PDF, "normalPDF"},
-      {"stdnormalcdf", BuiltInFunctionType::STD_NORMAL_CDF, "stdNormalCDF"},
-      {"stdnormalpdf", BuiltInFunctionType::STD_NORMAL_PDF, "stdNormalPDF"},
+      {"+", BuiltInFunctionType::PLUS},
+      {"-", BuiltInFunctionType::MINUS},
+      {"*", BuiltInFunctionType::MUL},
+      {"/", BuiltInFunctionType::DIV},
+      {"max", BuiltInFunctionType::MAX},
+      {"min", BuiltInFunctionType::MIN},
+      {"sum", BuiltInFunctionType::SUM},
+      {"avg", BuiltInFunctionType::AVG},
+      {"exp", BuiltInFunctionType::EXP},
+      {"ln", BuiltInFunctionType::LN},
+      {"log10", BuiltInFunctionType::LOG10},
+      {"sqrt", BuiltInFunctionType::SQRT},
+      {"abs", BuiltInFunctionType::ABS},
+      {"round", BuiltInFunctionType::ROUND},
+      {"floor", BuiltInFunctionType::FLOOR},
+      {"ceil", BuiltInFunctionType::CEIL},
+      {"pow", BuiltInFunctionType::POW},
+      {"if", BuiltInFunctionType::IF},
+      {"isMissing", BuiltInFunctionType::IS_MISSING},
+      {"isNotMissing", BuiltInFunctionType::IS_NOT_MISSING},
+      {"equal", BuiltInFunctionType::EQUAL},
+      {"notEqual", BuiltInFunctionType::NOT_EQUAL},
+      {"lessThan", BuiltInFunctionType::LESS_THAN},
+      {"lessOrEqual", BuiltInFunctionType::LESS_THAN_EQUAL},
+      {"greaterThan", BuiltInFunctionType::GREATER_THAN},
+      {"greaterOrEqual", BuiltInFunctionType::GREATER_THAN_EQUAL},
+      {"isIn", BuiltInFunctionType::IS_IN},
+      {"isNotIn", BuiltInFunctionType::IS_NOT_IN},
+      {"replace", BuiltInFunctionType::REPLACE},
+      {"matches", BuiltInFunctionType::MATCHES},
+      {"uppercase", BuiltInFunctionType::UPPERCASE},
+      {"lowercase", BuiltInFunctionType::LOWERCASE},
+      {"substring", BuiltInFunctionType::SUBSTRING},
+      {"trimBlanks", BuiltInFunctionType::TRIM_BLANKS},
+      {"concat", BuiltInFunctionType::CONCAT},
+      {"stringLength", BuiltInFunctionType::STRING_LENGTH},
+      {"median", BuiltInFunctionType::MEDIAN},
+      {"product", BuiltInFunctionType::PRODUCT},
+      {"threshold", BuiltInFunctionType::THRESHOLD},
+      {"modulo", BuiltInFunctionType::MODULO},
+      {"not", BuiltInFunctionType::NOT},
+      {"expm1", BuiltInFunctionType::EXPM1},
+      {"ln1p", BuiltInFunctionType::LN1P},
+      {"hypot", BuiltInFunctionType::HYPOT},
+      {"rint", BuiltInFunctionType::RINT},
+      {"sin", BuiltInFunctionType::SIN},
+      {"asin", BuiltInFunctionType::ASIN},
+      {"sinh", BuiltInFunctionType::SINH},
+      {"cos", BuiltInFunctionType::COS},
+      {"acos", BuiltInFunctionType::ACOS},
+      {"cosh", BuiltInFunctionType::COSH},
+      {"tan", BuiltInFunctionType::TAN},
+      {"atan", BuiltInFunctionType::ATAN},
+      {"tanh", BuiltInFunctionType::TANH},
+      {"erf", BuiltInFunctionType::ERF},
+      {"normalCDF", BuiltInFunctionType::NORMAL_CDF},
+      {"normalPDF", BuiltInFunctionType::NORMAL_PDF},
+      {"stdNormalCDF", BuiltInFunctionType::STD_NORMAL_CDF},
+      {"stdNormalPDF", BuiltInFunctionType::STD_NORMAL_PDF},
+      // PMML built-ins cPMML does not implement; see the note at the end of
+      // this class.
+      {"and", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"or", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"isValid", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"isNotValid", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"normalIDF", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"stdNormalIDF", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"formatNumber", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"formatDatetime", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"dateDaysSinceYear", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"dateSecondsSinceYear", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
+      {"dateSecondsSinceMidnight", BuiltInFunctionType::IDENTITY, nullptr, EnumSupport::UNSUPPORTED},
   };
 
-  // Apply/@function is required, and a name that is not a PMML built-in is
-  // either a DefineFunction cPMML does not support or a typo. Either way there
-  // is no function to apply.
+  // Apply@function is required. A name that is not a PMML built-in is either
+  // a DefineFunction, which cPMML does not support, or a typo; either way
+  // there is no function to apply. Names are case-sensitive, as in JPMML.
   static BuiltInFunctionType from_string(const std::string& builtinfunction) {
     // "log" and "ceiling" are what this table used to hold. Neither is a PMML
     // built-in, and "log" is worse than merely non-conforming: several systems
     // spell log10 that way, so a document meaning log10 would have got a
     // natural logarithm. Point at the real name rather than fail blankly.
-    const std::string given = to_lower(builtinfunction);
-    if (given == "log")
+    if (builtinfunction == "log")
       throw cpmml::ParsingException(
           "function \"" + builtinfunction +
           "\" is not a PMML built-in: the natural logarithm is \"ln\" and the base-10 logarithm is \"log10\"");
-    if (given == "ceiling")
+    if (builtinfunction == "ceiling")
       throw cpmml::ParsingException("function \"" + builtinfunction + "\" is not a PMML built-in: it is \"ceil\"");
+    if (!enum_find(builtinfunction, TABLE))
+      throw cpmml::ParsingException("invalid value \"" + builtinfunction +
+                                    "\" for Apply@function: not a PMML built-in function, and user-defined "
+                                    "functions (DefineFunction) are unsupported");
 
-    return enum_value(builtinfunction, TABLE, "function");
+    return enum_value(builtinfunction, TABLE, "Apply@function");
   }
 
   // Exact arity, or -1 for variadic functions (see get_min_nargs for those).

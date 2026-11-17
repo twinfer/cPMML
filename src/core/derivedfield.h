@@ -36,8 +36,8 @@ class DerivedField {
 
   explicit DerivedField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
-        optype(node.get_attribute("optype")),
-        datatype(node.get_attribute("dataType")),
+        optype(OpType::read(node)),
+        datatype(DataType::read(node)),
         index(indexer->get_or_set(name, datatype).first),
         expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)) {}
 

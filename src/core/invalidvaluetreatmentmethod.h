@@ -26,26 +26,26 @@ class InvalidValueTreatmentMethod {
   enum class InvalidValueTreatmentMethodValue { RETURN_INVALID, AS_IS, AS_MISSING, AS_VALUE };
 
   static constexpr EnumEntry<InvalidValueTreatmentMethodValue> TABLE[] = {
-      {"returninvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID, "returnInvalid"},
-      {"asis", InvalidValueTreatmentMethodValue::AS_IS, "asIs"},
-      {"asmissing", InvalidValueTreatmentMethodValue::AS_MISSING, "asMissing"},
-      {"asvalue", InvalidValueTreatmentMethodValue::AS_VALUE, "asValue"},
+      {"returnInvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID},
+      {"asIs", InvalidValueTreatmentMethodValue::AS_IS},
+      {"asMissing", InvalidValueTreatmentMethodValue::AS_MISSING},
+      {"asValue", InvalidValueTreatmentMethodValue::AS_VALUE},
   };
 
   InvalidValueTreatmentMethodValue value = InvalidValueTreatmentMethodValue::RETURN_INVALID;
 
   InvalidValueTreatmentMethod() = default;
 
-  explicit InvalidValueTreatmentMethod(const std::string& value) : value(from_string(value)) {}
+  explicit InvalidValueTreatmentMethod(InvalidValueTreatmentMethodValue value) : value(value) {}
 
   inline bool operator==(const InvalidValueTreatmentMethod& other) const { return value == other.value; };
 
   inline bool operator!=(const InvalidValueTreatmentMethod& other) const { return value != other.value; };
 
-  // MiningField/@invalidValueTreatment defaults to returnInvalid.
-  static InvalidValueTreatmentMethodValue from_string(const std::string& invalidvaluetreatmentmethod) {
-    return enum_value(invalidvaluetreatmentmethod, TABLE, "invalidValueTreatment",
-                      InvalidValueTreatmentMethodValue::RETURN_INVALID);
+  // invalidValueTreatment on MiningField and Apply, default returnInvalid.
+  static InvalidValueTreatmentMethod read(const XmlNode& node) {
+    return InvalidValueTreatmentMethod(
+        read_enum(node, "invalidValueTreatment", TABLE, InvalidValueTreatmentMethodValue::RETURN_INVALID));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "returnInvalid"); }

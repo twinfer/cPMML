@@ -30,27 +30,24 @@ class OutlierTreatmentMethod {
   };
 
   static constexpr EnumEntry<OutlierTreatmentMethodValue> TABLE[] = {
-      {"asis", OutlierTreatmentMethodValue::AS_IS, "asIs"},
-      {"asmissingvalues", OutlierTreatmentMethodValue::AS_MISSING_VALUES, "asMissingValues"},
-      {"asextremevalues", OutlierTreatmentMethodValue::AS_EXTREME_VALUES, "asExtremeValues"},
+      {"asIs", OutlierTreatmentMethodValue::AS_IS},
+      {"asMissingValues", OutlierTreatmentMethodValue::AS_MISSING_VALUES},
+      {"asExtremeValues", OutlierTreatmentMethodValue::AS_EXTREME_VALUES},
   };
 
   OutlierTreatmentMethodValue value = OutlierTreatmentMethodValue::AS_IS;
 
   OutlierTreatmentMethod() = default;
 
-  explicit OutlierTreatmentMethod(const std::string& value) : value(from_string(value)) {}
+  explicit OutlierTreatmentMethod(OutlierTreatmentMethodValue value) : value(value) {}
 
   inline bool operator==(const OutlierTreatmentMethod& other) const { return value == other.value; };
 
   inline bool operator!=(const OutlierTreatmentMethod& other) const { return value != other.value; };
 
-  // MiningField/@outliers defaults to asIs. This one used to look the token up
-  // without lower-casing it, so it only worked because its own constructor
-  // lower-cased first; a direct from_string("asMissingValues") silently
-  // returned asIs.
-  static OutlierTreatmentMethodValue from_string(const std::string& outliertreatmentmethod) {
-    return enum_value(outliertreatmentmethod, TABLE, "outliers", OutlierTreatmentMethodValue::AS_IS);
+  // outliers on MiningField and NormContinuous, default asIs on both.
+  static OutlierTreatmentMethod read(const XmlNode& node) {
+    return OutlierTreatmentMethod(read_enum(node, "outliers", TABLE, OutlierTreatmentMethodValue::AS_IS));
   }
 
   std::string to_string() const { return enum_display(value, TABLE, "asIs"); }

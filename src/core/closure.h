@@ -28,20 +28,16 @@ class Closure {
   enum class ClosureValue { CLOSED_CLOSED, OPEN_OPEN, CLOSED_OPEN, OPEN_CLOSED };
 
   static constexpr EnumEntry<ClosureValue> TABLE[] = {
-      {"closedclosed", ClosureValue::CLOSED_CLOSED, "CLOSED_CLOSED"},
-      {"openopen", ClosureValue::OPEN_OPEN, "OPEN_OPEN"},
-      {"closedopen", ClosureValue::CLOSED_OPEN, "CLOSED_OPEN"},
-      {"openclosed", ClosureValue::OPEN_CLOSED, "OPEN_CLOSED"},
+      {"closedClosed", ClosureValue::CLOSED_CLOSED, "CLOSED_CLOSED"},
+      {"openOpen", ClosureValue::OPEN_OPEN, "OPEN_OPEN"},
+      {"closedOpen", ClosureValue::CLOSED_OPEN, "CLOSED_OPEN"},
+      {"openClosed", ClosureValue::OPEN_CLOSED, "OPEN_CLOSED"},
   };
 
   const ClosureValue value;
 
-  explicit Closure(const std::string& closure) : value(from_string(closure)) {}
-
-  // Interval/@closure is required, so there is no default to fall back to.
-  static ClosureValue from_string(const std::string& closure) {
-    return enum_value(closure, TABLE, "Interval/@closure");
-  }
+  // Interval@closure is required.
+  explicit Closure(const XmlNode& interval) : value(read_enum(interval, "closure", TABLE)) {}
 
   std::string to_string() const { return enum_display(value, TABLE, "OPEN_OPEN"); }
 };
