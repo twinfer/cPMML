@@ -1,0 +1,7 @@
+x,sdisp,y,spred
+-3,"[S_LO, S_LO, S_HI]","[lo, lo, hi]","[lo, lo, hi]"
+-1,"[S_LO, S_LO, S_LO]","[lo, lo, lo]","[lo, lo, lo]"
+0,"[S_HI, S_LO, S_LO]","[hi, lo, lo]","[hi, lo, lo]"
+1,"[S_HI, S_LO, S_LO]","[hi, lo, lo]","[hi, lo, lo]"
+3,"[S_HI, S_HI, S_LO]","[hi, hi, lo]","[hi, hi, lo]"
+,"[S_LO, S_LO, S_LO]","[lo, lo, lo]","[lo, lo, lo]"

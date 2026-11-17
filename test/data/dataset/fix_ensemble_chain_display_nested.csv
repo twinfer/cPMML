@@ -1,0 +1,6 @@
+x,sdisp,ndisp,npred,pred,disp,phi
+-3,S_HI,N_HI,hi,hi,T_HI,0.75
+-1,S_HI,N_HI,hi,hi,T_HI,0.75
+0,S_LO,N_LO,lo,lo,T_LO,0.2
+1,S_LO,N_LO,lo,lo,T_LO,0.2
+3,hi,N_HI,hi,hi,T_HI,0.9

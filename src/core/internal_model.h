@@ -210,21 +210,70 @@ class InternalModel {
     return true;
   };
 
+  // The final step: its score is the MiningModel's, by raw class like any
+  // segment's, so that only the MiningModel's own Targets name it. This step's
+  // displayValue showed through as the MiningModel's prediction and
+  // predictedDisplayValue ("HIGH" where JPMML 1.7.7 gives "hi"), and kept the
+  // MiningModel's own displayValue from applying.
   inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {
     ChainScope scope(*this, sample);
     std::unique_ptr<InternalScore> score = score_raw(sample);
-    target(*score);
-    output.add_output(sample, *score);
+    target(*score, false);
+    add_outputs(sample, *score);
 
     return score;
   };
+
+  // This model's OutputFields, as a segment, for `score`, which names the raw
+  // class (target(..., false)). A predictedDisplayValue OutputField reports the
+  // class's displayValue from this model's Targets, as when the model is scored
+  // on its own: JPMML 1.7.7 does so for selectFirst, selectAll and modelChain
+  // segments, while the MiningModel's prediction stays the raw class.
+  inline void add_outputs(const Sample& sample, InternalScore& score) const {
+    output.add_output(sample, score);
+    const std::unique_ptr<InternalScore> shown = displayed(score);
+    if (!shown) return;
+    for (const auto& of : output.dag) {
+      if (of.expression_type.value != OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE)
+        continue;
+      score.str_outputs.erase(of.name);
+      score.num_outputs.erase(of.name);
+      shown->str_outputs.clear();
+      shown->num_outputs.clear();
+      of.add_output(sample, *shown);
+      score.str_outputs.insert(shown->str_outputs.begin(), shown->str_outputs.end());
+      score.num_outputs.insert(shown->num_outputs.begin(), shown->num_outputs.end());
+    }
+  }
+
+  // `score`, a raw-class prediction, named by its displayValue; nullptr when no
+  // TargetValue renames it. What a predictedDisplayValue OutputField reads.
+  inline std::unique_ptr<InternalScore> displayed(const InternalScore& score) const {
+    if (score.empty) return nullptr;
+    const TargetValue* shown = target.display_of(score.score);
+    if (shown == nullptr) return nullptr;
+    auto result = std::make_unique<InternalScore>(shown->display_value);
+    result->raw_score = score.score;
+    return result;
+  }
 
   // Write each OutputField value into the sample so downstream chain segments
   // can read them.  Probability-type OutputFields require the InternalScore
   // (which has score.probabilities); PredictedValue-type OutputFields read
   // from the sample directly via eval().
   inline void _write_outputs_to_sample(Sample& sample, const InternalScore& score) const {
+    const std::unique_ptr<InternalScore> shown = displayed(score);
     for (const auto& of : output.dag) {
+      if (shown &&
+          of.expression_type.value == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE) {
+        // The displayValue, which the next steps read as the field's value
+        // (JPMML 1.7.7), not the raw class in the target slot.
+        if (of.datatype.value == DataType::DataTypeValue::STRING)
+          sample.change_value_if_missing(of.index, Value(shown->score, of.datatype));
+        else if (!is_double_min(shown->double_score))
+          sample.change_value(of.index, Value(shown->double_score));
+        continue;
+      }
       if (of.datatype.value == DataType::DataTypeValue::STRING) {
         sample.change_value_if_missing(of.index, of.expression->eval(sample));
       } else {
@@ -269,8 +318,7 @@ class InternalModel {
     }
 
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
-    // Preserve the pre-Target prediction. A modelChain's final step has already
-    // applied its own Targets and kept its raw class here; keep that one.
+    // Preserve the pre-Target prediction, unless the model recorded one itself.
     if (score->raw_score.empty()) score->raw_score = score->score;
     target(*score);
     output.add_output(internal_sample, *score);

@@ -200,10 +200,13 @@ class Target {
   //
   // display chooses how the predicted class is named. A model scored on its
   // own reports the displayValue (display = true). A segment inside a
-  // MiningModel hands its parent the raw class values (display = false): JPMML
-  // 1.7.7 votes, averages probabilities and writes modelChain predictedValue
-  // outputs by value, never by displayValue. Priors, defaultValue and the
-  // rescaling apply either way.
+  // MiningModel, the last step of a modelChain included, hands its parent the
+  // raw class values (display = false): JPMML 1.7.7 votes, averages
+  // probabilities, writes modelChain predictedValue outputs and predicts at the
+  // MiningModel level by value, never by displayValue; only the MiningModel's
+  // own Targets name its prediction. Priors, defaultValue and the rescaling
+  // apply either way. The segment's own predictedDisplayValue OutputFields
+  // still report its displayValue (InternalModel::add_outputs).
   //
   // The probabilities stay keyed by the raw class whatever display is: a
   // probability OutputField's value "corresponds to one of the target
@@ -227,22 +230,18 @@ class Target {
         }
 
         {
-          bool renamed = false;
-          for (const auto& target_value : target_values) {
-            if (display && !renamed && target_value.has_display_value &&
-                category.same(score.score, target_value.value)) {
-              // Keep the raw class: it names the probabilities, and a modelChain
-              // whose final step this is has not recorded it yet.
-              if (score.raw_score.empty()) score.raw_score = score.score;
-              score.score = target_value.display_value;
-              renamed = true;
-              try {
-                score.double_score = to_double(score.score);
-              } catch (const cpmml::ParsingException& e) {
-                score.double_score = double_min();
-              }
+          if (const TargetValue* shown = display ? display_of(score.score) : nullptr) {
+            // Keep the raw class: it names the probabilities and the
+            // predictedValue OutputFields.
+            if (score.raw_score.empty()) score.raw_score = score.score;
+            score.score = shown->display_value;
+            try {
+              score.double_score = to_double(score.score);
+            } catch (const cpmml::ParsingException& e) {
+              score.double_score = double_min();
             }
-
+          }
+          for (const auto& target_value : target_values) {
             // The model may spell a numeric class differently ("4" for "4.0").
             if (category.find(score.probabilities, target_value.value) != score.probabilities.end()) continue;
             if (!score.probabilities.empty()) {
@@ -285,10 +284,7 @@ class Target {
           return display ? best->label() : best->value;
         }
         if (!display) break;
-        for (const auto& target_value : target_values) {
-          if (target_value.has_display_value && category.same(predicted, target_value.value))
-            return target_value.display_value;
-        }
+        if (const TargetValue* shown = display_of(predicted)) return shown->display_value;
         break;
 
       case MiningFunction::MiningFunctionType::REGRESSION:
@@ -306,6 +302,16 @@ class Target {
     }
 
     return predicted;
+  }
+
+  // The first TargetValue whose displayValue names the class `predicted` of a
+  // classification model, or nullptr: no TargetValue renames it, or the model
+  // is not a classifier.
+  inline const TargetValue* display_of(const std::string& predicted) const {
+    if (mining_function.value != MiningFunction::MiningFunctionType::CLASSIFICATION) return nullptr;
+    for (const auto& target_value : target_values)
+      if (target_value.has_display_value && category.same(predicted, target_value.value)) return &target_value;
+    return nullptr;
   }
 
  private:

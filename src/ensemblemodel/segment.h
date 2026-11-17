@@ -68,7 +68,7 @@ class Segment {
     return model->in_segment_scope(sample, [this](const Sample& s) {
       std::unique_ptr<InternalScore> result = model->score_raw(s);
       model->target(*result, false);
-      model->output.add_output(s, *result);
+      model->add_outputs(s, *result);
       return result;
     });
   }
