@@ -37,8 +37,9 @@
  * - All 9 PMML ComparisonMeasure measures (euclidean, squaredEuclidean,
  *   cityBlock, chebychev, minkowski, simpleMatching, jaccard, tanimoto,
  *   binarySimilarity)
- * - Per-field compare functions: absDiff, gaussSim, delta, equal, defaulting
- *   to the ComparisonMeasure compareFunction
+ * - Per-field compare functions: absDiff, delta, equal, defaulting to the
+ *   ComparisonMeasure compareFunction (gaussSim is refused at load: it needs
+ *   a similarityScale, which KNNInput does not have)
  * - Per-field weights (KNNInput fieldWeight)
  * - Classification: majorityVote, weightedMajorityVote
  * - Regression: average, median, weightedAverage
@@ -232,11 +233,8 @@ class NearestNeighborModel : public InternalModel {
   // their difference. See read_compare_function (distance.h).
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& ki : node.get_child("KNNInputs").get_childs("KNNInput")) {
-      KnnInput input;
-      input.field_name = ki.get_attribute("field");
+      KnnInput input = read_comparison_field(ki, default_compare_func, false);
       input.field_index = indexer->get_index(input.field_name);
-      input.compare_func = read_compare_function(ki, default_compare_func);
-      input.field_weight = ki.get_double_attribute("fieldWeight", 1.0);
       knn_inputs.push_back(std::move(input));
     }
   }
@@ -377,38 +375,18 @@ class NearestNeighborModel : public InternalModel {
 
   // --- Distance computation (uses shared math/distance.h) ---
 
-  // SumNM over the present KNNInputs, then AdjustM (all Qi = 1) applied where
-  // each aggregation puts it (apply_adjust).
-  //
-  // The binary measures are similarities s, ranked as the dissimilarity 1 - s.
-  // They are only reached with every input present (has_missing_input), and
-  // are NaN where s is undefined (binary_measure_similarity).
+  // The query's dissimilarity to one training instance, shared with
+  // ClusteringModel (query_dissimilarity in math/distance.h): SumNM over the
+  // present KNNInputs, then AdjustM (all Qi = 1). Binary measures are only
+  // reached with every input present (has_missing_input).
   //
   // compareFunction="equal" is the spec's c(x,y) = 1 if x = y, 0 otherwise,
-  // fed into the measure as it stands, as JPMML 1.7.7 does: under a distance
-  // measure a matching value adds 1. field_compare in math/distance.h flips it
-  // to 0-if-equal, which made it the same as delta and inverted every equal
-  // field. ClusteringModel shares field_compare and is left as it is here; for
-  // KNN an equal field is passed to compute_distance as |c(x,y) - 0| under
-  // absDiff, which is c(x,y) itself.
+  // fed into the measure as it stands. It used to be passed to compute_distance
+  // as |c(x,y) - 0| under absDiff, a workaround for the shared field_compare,
+  // which turned it into 0-if-equal; field_compare now applies it as written.
   double compute_row_distance(const Query& query, Eigen::Index row) const {
-    const Eigen::VectorXd train = training_features.row(row);
-    const std::vector<size_t>& present = query.present;
-    if (is_binary_metric())
-      return 1.0 - binary_measure_similarity(
-                       metric, binary_params, present.size(), [&](size_t j) { return query.values[present[j]]; },
-                       [&](size_t j) { return train[present[j]]; });
-    const auto is_equal = [&](size_t j) { return knn_inputs[present[j]].compare_func == CompareFunc::EQUAL; };
-    const double distance = compute_distance(
-        metric, present.size(), minkowski_p,
-        [&](size_t j) {
-          const double x = query.values[present[j]];
-          return is_equal(j) ? (x == train[present[j]] ? 1.0 : 0.0) : x;
-        },
-        [&](size_t j) { return is_equal(j) ? 0.0 : train[present[j]]; },
-        [&](size_t j) { return knn_inputs[present[j]].field_weight; },
-        [&](size_t j) { return is_equal(j) ? CompareFunc::ABS_DIFF : knn_inputs[present[j]].compare_func; });
-    return apply_adjust(metric, distance, query.adjust, minkowski_p);
+    return query_dissimilarity(metric, minkowski_p, binary_params, knn_inputs, query,
+                               [&](size_t i) { return training_features(row, static_cast<Eigen::Index>(i)); });
   }
 
   // --- K-nearest neighbor search ---

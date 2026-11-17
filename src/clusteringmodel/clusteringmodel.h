@@ -60,8 +60,8 @@ class ClusteringModel : public InternalModel {
   DistanceMetric metric;
   double minkowski_p;
   BinarySimilarityParams binary_params;  // read only for binarySimilarity
-  bool is_similarity;  // kind="similarity"; compute_distance flips similarities
-                       // to dissimilarities, so selection always minimizes
+  bool is_similarity;  // kind="similarity"; the binary similarities are ranked as
+                       // the dissimilarity 1 - s, so selection always minimizes
   CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // model-level ComparisonMeasure/@compareFunction
 
   std::vector<ClusteringField> fields;
@@ -84,7 +84,7 @@ class ClusteringModel : public InternalModel {
     parse_comparison_measure(node);
     parse_clustering_fields(node, indexer);
     parse_missing_value_weights(node);
-    parse_clusters(node);
+    parse_clusters(node, indexer);
 
     // A ClusteringModel with no Cluster has nothing to assign a case to. This
     // was detected on the first score instead, so a document that could never
@@ -199,12 +199,8 @@ class ClusteringModel : public InternalModel {
   void parse_clustering_fields(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& cf : node.get_childs("ClusteringField")) {
       if (!cf.get_bool_attribute("isCenterField", true)) continue;
-      ClusteringField f;
-      f.field_name = cf.get_attribute("field");
+      ClusteringField f = read_comparison_field(cf, default_compare_func, true);
       f.field_index = indexer->get_index(f.field_name);
-      f.compare_func = read_compare_function(cf, default_compare_func);
-      f.field_weight = cf.get_double_attribute("fieldWeight", 1.0);
-      f.similarity_scale = cf.get_double_attribute("similarityScale", 1.0);
       fields.push_back(std::move(f));
     }
     // With no center field there is no distance: every cluster would tie at 0
@@ -231,7 +227,7 @@ class ClusteringModel : public InternalModel {
 
   bool is_binary_metric() const { return ::is_binary_metric(metric); }
 
-  void parse_clusters(const XmlNode& node) {
+  void parse_clusters(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     int idx = 1;
     for (const auto& cl : node.get_childs("Cluster")) {
       Cluster c;
@@ -241,8 +237,6 @@ class ClusteringModel : public InternalModel {
       // Parse Array: space-separated real values
       const XmlNode arr = cl.get_child("Array");
       const std::vector<std::string> vals = parse_array(arr.value());
-      c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
-      for (size_t i = 0; i < vals.size(); i++) c.centroid[static_cast<Eigen::Index>(i)] = to_double(vals[i]);
       // One entry per center ClusteringField, as JPMML 1.7.7 requires
       // (InvalidElementException). A shorter Array used to be read past its
       // end, a longer one had its extra entries ignored.
@@ -250,6 +244,34 @@ class ClusteringModel : public InternalModel {
         throw cpmml::ParsingException("ClusteringModel: Cluster \"" + c.id + "\" has " + std::to_string(vals.size()) +
                                       " center values for " + std::to_string(fields.size()) +
                                       " center ClusteringFields");
+      // The spec makes every center a NUM-ARRAY, so an entry is a number
+      // whatever its field's dataType. For a numeric or boolean field it is
+      // read as that number (::to_double, strict): a boolean field's center is
+      // typically a mean such as 0.37, and "1.0" is its true. That is what the
+      // query's 0/1 is compared with, as in JPMML 1.7.7.
+      //
+      // A string field's query value is an Indexer code, so its center has to
+      // become a string to be compared with it. JPMML 1.7.7 compares the
+      // string with the text Java's Double.toString gives the center, whatever
+      // the Array's type (int or real): the center 0 is the string "0.0", 7 is
+      // "7.0", 1e7 is "1.0E7", and -0 is "0.0" (java::double_text). So the
+      // query "0" does not match the center 0 and "0.0" does. The center used
+      // to be read as a bare number for a string field too, and compared with
+      // the Indexer code of the query's string, so it matched whichever
+      // category happened to have that code. An Array of type="string"
+      // (refused by JPMML, so there is no oracle) is read token by token.
+      const bool string_array = arr.exists_attribute("type") && arr.get_attribute("type") == "string";
+      c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
+      for (size_t i = 0; i < vals.size(); i++) {
+        const Eigen::Index at = static_cast<Eigen::Index>(i);
+        if (indexer->get_type(fields[i].field_name) != DataType::DataTypeValue::STRING) {
+          c.centroid[at] = ::to_double(vals[i]);
+          continue;
+        }
+        const std::string center =
+            string_array ? vals[i] : java::double_text(::to_double(vals[i]) + 0.0);  // + 0.0: -0 is 0, as in JPMML
+        c.centroid[at] = Value(center, DataType::DataTypeValue::STRING).value;
+      }
 
       clusters.push_back(std::move(c));
       idx++;
@@ -261,25 +283,12 @@ class ClusteringModel : public InternalModel {
     return ::build_query(sample, fields, [&](size_t i) { return missing_value_weight(i); });
   }
 
-  // SumNM over the present ClusteringFields, then AdjustM where each
-  // aggregation puts it (apply_adjust).
-  //
-  // The binary measures are similarities s, ranked as the dissimilarity 1 - s;
-  // they are only reached with every field present (has_missing_input), and
-  // are NaN where s is undefined (binary_measure_similarity). binarySimilarity
-  // used to be scored as simpleMatching here, its c/d parameters unread.
+  // The query's dissimilarity to one center, shared with NearestNeighborModel
+  // (query_dissimilarity in math/distance.h). Binary measures are only reached
+  // with every field present (has_missing_input).
   double compute_distance_to(const Query& q, const Eigen::VectorXd& c) const {
-    const std::vector<size_t>& present = q.present;
-    if (is_binary_metric())
-      return 1.0 - binary_measure_similarity(
-                       metric, binary_params, present.size(), [&](size_t j) { return q.values[present[j]]; },
-                       [&](size_t j) { return c[present[j]]; });
-    const double distance = compute_distance(
-        metric, present.size(), minkowski_p, [&](size_t j) { return q.values[present[j]]; },
-        [&](size_t j) { return c[present[j]]; }, [&](size_t j) { return fields[present[j]].field_weight; },
-        [&](size_t j) { return fields[present[j]].compare_func; },
-        [&](size_t j) { return fields[present[j]].similarity_scale; });
-    return apply_adjust(metric, distance, q.adjust, minkowski_p);
+    return query_dissimilarity(metric, minkowski_p, binary_params, fields, q,
+                               [&](size_t i) { return c[static_cast<Eigen::Index>(i)]; });
   }
 
   // clusters is non-empty: the constructor refuses a model without one.

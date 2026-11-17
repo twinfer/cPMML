@@ -1,6 +1,10 @@
 
 /*******************************************************************************
  * Shared distance and similarity metrics for ClusteringModel and KNN.
+ *
+ * Both models read their fields with read_comparison_field and rank rows with
+ * query_dissimilarity, which applies the ComparisonMeasure inner functions
+ * (field_compare) exactly as the spec defines them and then the measure.
  *******************************************************************************/
 
 #ifndef CPMML_DISTANCE_H
@@ -58,26 +62,97 @@ inline CompareFunc read_compare_function(const XmlNode& node, CompareFunc when_a
   return read_enum(node, "compareFunction", COMPARE_FUNCTION_TABLE, when_absent);
 }
 
-// Every compare function returns a DISSIMILARITY (0 = identical), so that
-// compute_distance is uniformly "smaller = closer" for ranking. Similarity
-// compare functions from the spec are therefore flipped: gaussSim's
-// c(x,y) = exp(-ln(2)·(x−y)²/s²) becomes 1−c (s is the PMML similarityScale
-// attribute); equal's 1-if-equal becomes 0-if-equal.
-inline double field_compare(double xi, double yi, CompareFunc cf, double scale = 1.0) {
+// The inner function c(x,y) of ComparisonMeasure (ClusteringModel.html, 4.4.1),
+// exactly as the spec writes it, for ClusteringModel and NearestNeighborModel
+// alike:
+//
+//   absDiff   c(x,y) = |x - y|
+//   gaussSim  c(x,y) = exp(-ln(2) * z*z / (s*s)), z = x - y, s = similarityScale
+//   delta     c(x,y) = 0 if x = y, 1 else
+//   equal     c(x,y) = 1 if x = y, 0 else
+//
+// c(x,y) goes into the measure as it stands -- euclidean sums w*c^2, cityBlock
+// w*c, chebychev takes the max of w*c -- so under a distance measure a matching
+// value adds 1 with equal and an identical value adds 1 with gaussSim. That is
+// what the spec says and what JPMML 1.7.7 computes, in both models. This used to
+// turn every similarity into a dissimilarity first: gaussSim into 1 - c and
+// equal into 0-if-equal, i.e. delta, which inverted every such field. KNN had
+// worked around it for equal (1be5d0f); ClusteringModel had not.
+//
+// x and y are the same kind of double: a number for a numeric or boolean field
+// (the query's boolean is 0/1, a cluster center any number, a mean such as
+// 0.37 included), the model's Indexer code for a string field (a string
+// center is the Java text of its number, see ClusteringModel::parse_clusters;
+// a KNN training cell is read with the field's dataType). So x = y is equality
+// of the field's values. Value carries no type tag to compare by, so this is
+// done by reading both sides alike. s is never 0 (read_comparison_field), and
+// missing values never reach this.
+inline double field_compare(double xi, double yi, CompareFunc cf, double scale) {
   switch (cf) {
     case CompareFunc::ABS_DIFF:
       return std::abs(xi - yi);
     case CompareFunc::GAUSS_SIM: {
-      const double d = xi - yi;
-      const double s2 = scale * scale;
-      return 1.0 - std::exp(-std::log(2.0) * d * d / (s2 > 0 ? s2 : 1.0));
+      const double z = xi - yi;
+      return std::exp(-std::log(2.0) * z * z / (scale * scale));
     }
     case CompareFunc::DELTA:
-      return (xi != yi) ? 1.0 : 0.0;
+      return xi == yi ? 0.0 : 1.0;
     case CompareFunc::EQUAL:
-      return (xi != yi) ? 1.0 : 0.0;
+      return xi == yi ? 1.0 : 0.0;
   }
-  return std::abs(xi - yi);
+  throw std::logic_error("field_compare: unknown CompareFunc");
+}
+
+/**
+ * Reads the attributes a ClusteringField and a KNNInput share -- field,
+ * compareFunction (`default_cf`, the ComparisonMeasure value, when absent) and
+ * fieldWeight -- and, for a ClusteringField, similarityScale. The caller
+ * resolves field_index.
+ *
+ * gaussSim needs s: "s is the value of attribute similarityScale (required in
+ * this case) in the ClusteringField", the distance at which the similarity is
+ * 0.5. So a field whose compare function is gaussSim, its own or inherited, is
+ * a load error
+ *  - on a ClusteringField without similarityScale, or with similarityScale 0
+ *    or not finite. It used to default to 1, and 0 was replaced by 1. JPMML
+ *    1.7.7 refuses the first ("Element ClusteringField is not valid") and gives
+ *    NaN for an identical value with the second;
+ *  - on any KNNInput, which has no similarityScale attribute. It used to score
+ *    with s = 1. JPMML 1.7.7 refuses it ("Element KNNInput is not valid").
+ * The same goes for an s so small that s*s is 0 (1e-320): JPMML 1.7.7 scores
+ * it with the NaN that 0/0 gives an identical value. A negative s is accepted:
+ * only s*s enters c, as in JPMML. JPMML also refuses ComparisonMeasure
+ * compareFunction="gaussSim" whenever a ClusteringField inherits it, even one
+ * with its own similarityScale; the spec makes it the default for every field
+ * without one and asks only for s on the field, so cPMML scores that.
+ *
+ * similarityScale is read strictly whenever it is present, as every numeric
+ * attribute is (6914ecd), so similarityScale="abc" is a load error even on a
+ * field that is not gaussSim and never uses it. JPMML 1.7.7 ignores it there
+ * and scores; that is a deliberate departure.
+ */
+inline ComparisonField read_comparison_field(const XmlNode& node, CompareFunc default_cf, bool has_similarity_scale) {
+  const char* element = has_similarity_scale ? "ClusteringField" : "KNNInput";
+  ComparisonField f;
+  f.field_name = node.get_attribute("field");
+  f.compare_func = read_compare_function(node, default_cf);
+  f.field_weight = node.get_double_attribute("fieldWeight", 1.0);
+  if (has_similarity_scale && node.exists_attribute("similarityScale"))
+    f.similarity_scale = node.required_double_attribute("similarityScale");
+  if (f.compare_func != CompareFunc::GAUSS_SIM) return f;
+
+  const std::string where = std::string(element) + " \"" + f.field_name + "\": compareFunction gaussSim" +
+                            (node.exists_attribute("compareFunction") ? "" : " (from ComparisonMeasure)");
+  if (!has_similarity_scale)
+    throw cpmml::ParsingException(where + " needs a similarityScale, which KNNInput does not have");
+  if (!node.exists_attribute("similarityScale"))
+    throw cpmml::ParsingException(where + " requires the similarityScale attribute");
+  // s*s, not s: a subnormal s such as 1e-320 squares to 0, and c would be
+  // 0/0 = NaN for an identical value.
+  if (!std::isfinite(f.similarity_scale) || !(f.similarity_scale * f.similarity_scale > 0.0))
+    throw cpmml::ParsingException(where + " needs a finite similarityScale whose square is not 0, got \"" +
+                                  node.get_attribute("similarityScale") + "\"");
+  return f;
 }
 
 /**
@@ -385,11 +460,31 @@ inline double apply_adjust(DistanceMetric metric, double distance, double adjust
   }
 }
 
-// Convenience overload without per-field similarityScale (scale = 1).
-template <typename GetQuery, typename GetRow, typename GetWeight, typename GetCF>
-double compute_distance(DistanceMetric metric, size_t n, double minkowski_p, GetQuery q, GetRow r, GetWeight w,
-                        GetCF cf) {
-  return compute_distance(metric, n, minkowski_p, q, r, w, cf, [](size_t) { return 1.0; });
+/**
+ * The dissimilarity of a query and one center or training instance, the one
+ * implementation ClusteringModel and NearestNeighborModel both rank by
+ * (smaller = closer). `row(i)` is the row's value for field i, typed like the
+ * query (see field_compare).
+ *
+ * The center-based measures run SumNM over the present fields with each
+ * field's compare function, fieldWeight and similarityScale, then AdjustM
+ * (apply_adjust). The binary measures are similarities s, ranked as 1 - s;
+ * callers reach them only with every field present, and they are NaN where s
+ * is undefined (binary_measure_similarity), which the callers turn into no
+ * prediction.
+ */
+template <typename GetRow>
+double query_dissimilarity(DistanceMetric metric, double minkowski_p, const BinarySimilarityParams& binary_params,
+                           const std::vector<ComparisonField>& fields, const Query& query, GetRow row) {
+  const std::vector<size_t>& present = query.present;
+  const auto q = [&](size_t j) { return query.values[static_cast<Eigen::Index>(present[j])]; };
+  const auto r = [&](size_t j) { return row(present[j]); };
+  if (is_binary_metric(metric)) return 1.0 - binary_measure_similarity(metric, binary_params, present.size(), q, r);
+  const double distance = compute_distance(
+      metric, present.size(), minkowski_p, q, r, [&](size_t j) { return fields[present[j]].field_weight; },
+      [&](size_t j) { return fields[present[j]].compare_func; },
+      [&](size_t j) { return fields[present[j]].similarity_scale; });
+  return apply_adjust(metric, distance, query.adjust, minkowski_p);
 }
 
 #endif  // CPMML_DISTANCE_H

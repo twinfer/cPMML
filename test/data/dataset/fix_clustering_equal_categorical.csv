@@ -1,0 +1,13 @@
+x,c,cluster
+0.2,red,C1
+0.2,green,C1
+0.4,blue,C1
+0.6,green,C2
+0.4,red,C1
+1.2,blue,C2
+1.6,green,C3
+1.4,red,C2
+2.1,blue,C3
+-1,green,C1
+0.9,,C2
+1.7,blue,C3
