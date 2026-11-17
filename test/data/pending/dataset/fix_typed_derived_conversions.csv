@@ -1,0 +1,6 @@
+d,i,f,b,s,t,y,o_ds,o_is,o_fs,o_bs,o_td,o_tf,o_fd,o_id,o_ncf,o_ncs,o_nds,o_ndi,o_mvd,e_ds30,e_ds3,e_s_c3,e_s_c30,e_d_s3,e_st,e_isin,e_mvd
+3,3,0.1,true,a,3,1.0,3.0,3,0.1,true,3.0,3.0,0.10000000149011612,3.0,14.5,0.3,1.0,1.0,3.0,true,false,false,false,true,false,false,true
+0.2,4,0.2,false,b,3.0,1.0,0.2,4,0.2,false,3.0,0.20000000298023224,0.20000000298023224,4.0,0.5,0.02,0.0,0.0,2.5,false,false,false,false,false,false,false,false
+3.5,3,0.1,true,3,+3,1.0,3.5,3,0.1,true,3.0,3.5,0.10000000149011612,3.0,17.0,0.35,0.0,1.0,9.0,false,false,true,false,false,false,true,false
+1,-2,1e-46,false,3.0,1e1,1.0,1.0,-2,0.0,false,10.0,1.0,0.0,-2.0,4.5,0.1,0.0,0.0,9.0,false,false,false,true,false,false,false,false
+1e300,2147483647,1e300,true,zz,INF,1.0,1.0E300,2147483647,Infinity,true,Infinity,Infinity,Infinity,2.147483647E9,Infinity,1.0E299,0.0,0.0,9.0,false,false,false,false,false,false,true,false

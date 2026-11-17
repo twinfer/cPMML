@@ -1,0 +1,7 @@
+b,s,y,pred,if_full,if_noelse,if_map,if_def,if_noelse_def,if_then_s,if_else_s_map,if_ismissing
+true,ab,0.25,0.25,T,T,T,T,T,ab,T,ab
+false,ab,0.25,0.25,E,N/A,E,E,DD,E,ab,ab
+,ab,0.25,0.25,N/A,N/A,MM,DD,DD,N/A,MM,ab
+true,,0.25,0.25,T,T,T,T,T,N/A,T,none
+false,,0.25,0.25,E,N/A,E,E,DD,E,MM,none
+,,0.25,0.25,N/A,N/A,MM,DD,DD,N/A,MM,none

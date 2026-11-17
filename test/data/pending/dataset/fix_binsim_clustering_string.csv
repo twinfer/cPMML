@@ -1,0 +1,8 @@
+a,b,c,cluster
+true,false,false,K2
+false,true,true,K3
+true,true,false,K1
+false,false,true,K4
+n,n,n,N/A
+1,0,0,N/A
+TRUE,false,false,N/A
