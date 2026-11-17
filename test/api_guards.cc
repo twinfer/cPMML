@@ -441,6 +441,89 @@ static void scoring_failures_are_evaluation_errors() {
   std::remove(path.c_str());
 }
 
+// An outer AnomalyDetectionModel MiningField with no invalidValueTreatment
+// is returnInvalid: an invalid value is refused there, even though the inner
+// MiningField would have treated it asMissing. JPMML 1.7.7 (the model nested
+// in a MiningModel Segment, since it cannot load AnomalyDetectionModel) throws
+// ValueCheckException 'Field "x" cannot accept invalid value 20.0' at the
+// outer MiningField for x=20 and x=-20, and scores x=1,z=1,w=1 as 2.0. Text
+// that is not a double is invalid too, not missing: x="abc" is refused at the
+// outer field ('Field "x" cannot accept invalid value "abc"'), though the inner
+// field would have replaced it.
+static const char* ANOMALY_OUTER_INVALID_PMML = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML version="4.4" xmlns="http://www.dmg.org/PMML-4_4">
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double"><Interval closure="closedClosed" leftMargin="-10" rightMargin="10"/></DataField>
+    <DataField name="z" optype="continuous" dataType="double"/>
+    <DataField name="w" optype="continuous" dataType="double"/>
+    <DataField name="anomalyScore" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <AnomalyDetectionModel functionName="regression" algorithmType="clusterMeanDist">
+    <MiningSchema>
+      <MiningField name="x"/><MiningField name="z"/><MiningField name="w"/>
+      <MiningField name="anomalyScore" usageType="predicted"/>
+    </MiningSchema>
+    <ClusteringModel functionName="clustering" modelClass="centerBased" numberOfClusters="2">
+      <MiningSchema>
+        <MiningField name="x" invalidValueTreatment="asMissing" missingValueReplacement="3"/><MiningField name="z"/><MiningField name="w"/>
+      </MiningSchema>
+      <ComparisonMeasure kind="distance"><cityBlock/></ComparisonMeasure>
+      <ClusteringField field="x"/><ClusteringField field="z" fieldWeight="2"/><ClusteringField field="w"/>
+      <MissingValueWeights><Array n="3" type="real">2 0 1</Array></MissingValueWeights>
+      <Cluster id="1"><Array n="3" type="real">0 0 0</Array></Cluster>
+      <Cluster id="2"><Array n="3" type="real">5 5 5</Array></Cluster>
+    </ClusteringModel>
+    <MeanClusterDistances><Array n="2" type="real">2 4</Array></MeanClusterDistances>
+  </AnomalyDetectionModel>
+</PMML>
+)";
+
+static void anomaly_outer_mining_field_defaults_to_return_invalid() {
+  const std::string path = "anomaly_outer_invalid.pmml";
+  {
+    FILE* out = std::fopen(path.c_str(), "w");
+    if (out == nullptr) {
+      std::cerr << "FAIL could not write " << path << "\n";
+      ++failures;
+      return;
+    }
+    std::fputs(ANOMALY_OUTER_INVALID_PMML, out);
+    std::fclose(out);
+  }
+
+  const auto throws = [](auto&& call) {
+    try {
+      call();
+    } catch (const cpmml::InvalidValueException&) {
+      return true;
+    } catch (...) {
+      return false;
+    }
+    return false;
+  };
+
+  try {
+    cpmml::Model model(path, false);
+    const cpmml::Input valid{{"x", "1"}, {"z", "1"}, {"w", "1"}};
+    const cpmml::Input high{{"x", "20"}, {"z", "1"}, {"w", "1"}};
+    const cpmml::Input low{{"x", "-20"}, {"z", "2"}, {"w", "2"}};
+    const cpmml::Input text{{"x", "abc"}, {"z", "1"}, {"w", "1"}};
+    CHECK(model.evaluate(valid).as_double() == 2.0);
+    CHECK(model.validate(valid));
+    CHECK(throws([&] { return model.evaluate(high); }));
+    CHECK(throws([&] { return model.evaluate(low); }));
+    CHECK(!model.validate(high));
+    CHECK(!model.validate(low));
+    CHECK(throws([&] { return model.evaluate(text); }));
+    CHECK(!model.validate(text));
+  } catch (const cpmml::Exception& e) {
+    std::cerr << "FAIL " << path << ": " << e.what() << "\n";
+    ++failures;
+  }
+
+  std::remove(path.c_str());
+}
+
 int main() {
   default_result_is_answerable();
   default_model_throws();
@@ -451,6 +534,7 @@ int main() {
   csvreader_reads_past_a_long_row();
   unrecognised_enum_tokens_are_rejected();
   scoring_failures_are_evaluation_errors();
+  anomaly_outer_mining_field_defaults_to_return_invalid();
 
   if (failures > 0) {
     std::cerr << failures << " assertion(s) failed\n";

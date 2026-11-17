@@ -11,15 +11,18 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "clusteringmodel/clusteringmodel.h"
 #include "core/internal_evaluator.h"
 #include "core/internal_model.h"
 #include "core/internal_score.h"
+#include "core/miningschema.h"
 #include "core/xmlnode.h"
 #include "ensemblemodel/ensemblemodel.h"
 #include "svmmodel/svmmodel.h"
+#include "utils/java_format.h"
 
 /**
  * @class AnomalyDetectionEvaluator
@@ -45,6 +48,9 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   double sample_data_size = 256.0;
   Algorithm algorithm = Algorithm::IFOREST;
   std::vector<double> mean_cluster_distances;
+  // The AnomalyDetectionModel's own MiningSchema, applied to the record
+  // before the inner model sees it. See apply_mining_schema().
+  MiningSchema mining_schema;
 
   explicit AnomalyDetectionEvaluator(const XmlNode& pmml_root) : InternalEvaluator(pmml_root) {
     XmlNode ad = pmml_root.get_child("AnomalyDetectionModel");
@@ -55,6 +61,10 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     // not a dropped feature but an invented one. Removed rather than wired up.
     sample_data_size = ad.get_double_attribute("sampleDataSize", 256.0);
     algorithm = read_enum(ad, "algorithmType", ALGORITHM_TYPE_TABLE);
+    // The schema requires it, as it does of every model element.
+    if (!ad.exists_child("MiningSchema"))
+      throw cpmml::ParsingException("AnomalyDetectionModel: MiningSchema is required");
+    mining_schema = MiningSchema(ad.get_child("MiningSchema"), data_dictionary);
 
     if (ad.exists_child("MiningModel")) {
       inner = std::make_unique<EnsembleModel>(ad.get_child("MiningModel"), data_dictionary, transformation_dictionary,
@@ -75,7 +85,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   }
 
   inline std::unique_ptr<InternalScore> evaluate(const Input& arguments) const override {
-    auto flat = flatten_input(arguments);
+    const auto flat = apply_mining_schema(flatten_input(arguments));
 
     // The anomaly score is a function of the inner model's result, so where
     // the inner model gives no prediction there is no score either: the
@@ -110,8 +120,16 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     throw cpmml::EvaluationException("AnomalyDetectionModel: unreachable algorithmType");
   }
 
+  // A record the outer MiningSchema refuses (an invalid value under
+  // returnInvalid) does not validate.
   inline bool validate(const Input& arguments) const override {
-    return inner->validate(flatten_input(arguments));
+    std::unordered_map<std::string, std::string> flat;
+    try {
+      flat = apply_mining_schema(flatten_input(arguments));
+    } catch (const cpmml::InvalidValueException&) {
+      return false;
+    }
+    return inner->validate(flat);
   }
 
   inline std::string get_target_name() const override { return inner->target_field.name; }
@@ -119,6 +137,97 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   inline std::string mining_function_name() const override { return "CLASSIFICATION"; }
 
  private:
+  /**
+   * The outer MiningSchema, applied before the inner model's own.
+   *
+   * It used to be read by nobody: the inner model was handed the raw record,
+   * so a missingValueReplacement, invalidValueTreatment or outlier treatment
+   * on an AnomalyDetectionModel MiningField was never used. JPMML 1.7.7
+   * cannot load AnomalyDetectionModel, but for a model nested in another (a
+   * MiningModel Segment) it applies the outer MiningField first and the inner
+   * one to the result: an outer replacement wins over an inner one, a field
+   * the outer schema leaves missing takes the inner replacement, an outer asIs
+   * leaves an invalid value for the inner MiningField to judge again, and a
+   * value clamped by asExtremeValues is what the inner model sees.
+   *
+   * Per field, with MiningField's own readers and treatments (those of
+   * MiningSchema::prepare): absent, empty or a DataDictionary missing marker
+   * is missing; text that is not a value of the dataType, or a NaN, goes to
+   * invalidValueTreatment; so does a value outside the DataField's Values or
+   * Intervals, whether or not the attribute is written (its default is
+   * returnInvalid, InvalidValueException, as for every other model); only a
+   * valid value takes the outlier treatment. MiningSchema::prepare itself is
+   * not called: it treats outliers after an asIs or asMissing invalid
+   * treatment, and it leaves an invalid value with no invalidValueTreatment
+   * attribute to MiningSchema::validate, which refuses asIs as well -- JPMML
+   * does neither here.
+   *
+   * The inner model reads the record as text again, so a value the outer
+   * schema changed is written back as text (java_format.h; a string as
+   * itself, a number as a double, an integer as a long, so that it reads back
+   * as the same value), missing as empty. A value it leaves alone is passed on
+   * exactly as given.
+   *
+   * Runs under this model's Indexer: reading a string value interns it, and
+   * there is no Indexer active outside a scoring entry point.
+   */
+  std::unordered_map<std::string, std::string> apply_mining_schema(
+      std::unordered_map<std::string, std::string> flat) const {
+    Value::ScopedIndexer scope(indexer.get());
+    using Invalid = InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue;
+
+    for (const MiningField& field : mining_schema.miningfields) {
+      if (field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET ||
+          field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::GROUP)
+        continue;
+
+      const auto found = flat.find(field.name);
+      const auto put = [&](const Value& value) {
+        if (value.missing) {
+          if (found != flat.end()) found->second.clear();
+        } else {
+          flat[field.name] = input_text(field, value);
+        }
+      };
+      // asIs keeps the input as given, for the inner MiningField to judge.
+      const auto treat_invalid = [&](const Value& value) {
+        if (field.invalidvalue_treatmentmethod.value != Invalid::AS_IS) put(field.handle_invalid(value));
+      };
+
+      if (found == flat.end() || found->second.empty() || field.is_missing_marker(found->second)) {
+        put(field.handle_missing());
+        continue;
+      }
+
+      Value value;
+      switch (field.parse_input(found->second, value)) {
+        case MiningField::InputStatus::MALFORMED:
+          put(field.handle_malformed(found->second));  // throws for returnInvalid and asIs
+          continue;
+        case MiningField::InputStatus::INVALID:
+          treat_invalid(value);
+          continue;
+        case MiningField::InputStatus::VALID:
+          break;
+      }
+
+      if (field.is_invalid(value))
+        treat_invalid(value);
+      else if (field.is_outlier(value))
+        put(field.handle_outlier(value));
+    }
+    return flat;
+  }
+
+  // A value of `field` as input text that reads back as the same value.
+  static std::string input_text(const MiningField& field, const Value& value) {
+    if (field.datatype.value == DataType::DataTypeValue::STRING) return value.svalue;
+    // A float is carried as a double (MiningField::parse_input), so it is
+    // written as one: Float.toString would round it.
+    const java::Kind kind = java_kind(field.datatype, field.integer);
+    return java::text({value.value, kind == java::Kind::FLOAT ? java::Kind::DOUBLE : kind});
+  }
+
   // The enumeration is iforest | ocsvm | clusterMeanDist | other. Everything
   // that was not "iforest" used to be scored as a raw inner prediction, so
   // clusterMeanDist and an unrecognised or absent algorithmType were all the
