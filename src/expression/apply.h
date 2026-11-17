@@ -50,6 +50,10 @@ class Apply : public Expression {
         exist_defaultvalue(node.exists_attribute("defaultValue")),
         defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()),
         invalidValueTreatmentMethod(node.get_attribute("invalidValueTreatment")) {
+    // asValue names MiningField/@invalidValueReplacement; an Apply has no
+    // replacement to give, so the token is refused rather than read as asIs.
+    if (invalidValueTreatmentMethod.value == InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_VALUE)
+      throw cpmml::ParsingException("Apply: invalidValueTreatment=\"asValue\" is only defined for a MiningField");
     std::shared_ptr<Expression> expression;
     for (const auto& n : node.get_childs()) {
       ExpressionType expression_type(n.name());
@@ -127,6 +131,7 @@ class Apply : public Expression {
           else
             return Value();
         case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_IS:
+        case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_VALUE:  // refused at load
           break;
       }
     }

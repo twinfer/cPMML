@@ -1,0 +1,7 @@
+d,y_pred
+5,7.0
+INF,Infinity
+-INF,-Infinity
+1.5e400,Infinity
+-1.5e400,-Infinity
+NaN,NaN

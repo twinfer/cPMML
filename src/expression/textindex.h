@@ -93,13 +93,12 @@ class TextIndex : public Expression {
                                       node.get_attribute("localTermWeights"));
     }
 
-    case_sensitive =
-        node.exists_attribute("isCaseSensitive") && to_lower(node.get_attribute("isCaseSensitive")) == "true";
+    case_sensitive = node.get_bool_attribute("isCaseSensitive", false);
 
-    if (node.exists_attribute("tokenize")) tokenize = to_lower(node.get_attribute("tokenize")) == "true";
+    tokenize = node.get_bool_attribute("tokenize", tokenize);
 
     if (node.exists_attribute("maxLevenshteinDistance") &&
-        to_double(node.get_attribute("maxLevenshteinDistance")) != 0.0)
+        node.required_double_attribute("maxLevenshteinDistance") != 0.0)
       throw cpmml::ParsingException("TextIndex: only maxLevenshteinDistance=\"0\" is supported, got " +
                                     node.get_attribute("maxLevenshteinDistance"));
 

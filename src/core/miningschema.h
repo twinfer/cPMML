@@ -90,30 +90,42 @@ class MiningSchema {
     for (const auto& miningfield : miningfields) {
       if (miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::TARGET &&
           miningfield.field_usage_type.value != FieldUsageType::FieldUsageTypeValue::GROUP) {
-        try {
-          const std::string& raw = input.at(miningfield.name);
-          // A token the DataDictionary declared as a missing marker is missing
-          // input, not data: it takes the same path as an absent field.
-          if (raw.empty() || miningfield.is_missing_marker(raw)) {
-            sample.change_value(miningfield.index, miningfield.handle_missing());
-          } else {
-            sample.change_value(miningfield.index, miningfield.createValue(raw));
-            if (miningfield.hasInvalidTreatment || miningfield.hasOutlierTreatment) {
-              Value tmp_value = sample.operator[](miningfield.index).value;
-              if (miningfield.hasInvalidTreatment)
-                if (miningfield.is_invalid(tmp_value))
-                  sample.change_value(miningfield.index, miningfield.handle_invalid(tmp_value));
+        const auto found = input.find(miningfield.name);
+        if (found == input.cend()) {  // field is absent
+          sample.change_value(miningfield.index, miningfield.handle_missing());
+          continue;
+        }
+        const std::string& raw = found->second;
+        // A token the DataDictionary declared as a missing marker is missing
+        // input, not data: it takes the same path as an absent field.
+        if (raw.empty() || miningfield.is_missing_marker(raw)) {
+          sample.change_value(miningfield.index, miningfield.handle_missing());
+          continue;
+        }
+        // Text that does not read as the field's dataType is an invalid value.
+        // It used to be caught here as a conversion failure and treated as
+        // missing -- and "3abc" read as 3 and was not caught at all. The same
+        // catch turned returnInvalid's exception into a missing value.
+        Value& slot = sample[miningfield.index].value;
+        switch (miningfield.parse_input(raw, slot)) {
+          case MiningField::InputStatus::MALFORMED:
+            slot = miningfield.handle_malformed(raw);
+            continue;
+          case MiningField::InputStatus::INVALID:
+            slot = miningfield.handle_invalid(slot);
+            continue;
+          case MiningField::InputStatus::VALID:
+            break;
+        }
+        if (miningfield.hasInvalidTreatment || miningfield.hasOutlierTreatment) {
+          Value tmp_value = sample.operator[](miningfield.index).value;
+          if (miningfield.hasInvalidTreatment)
+            if (miningfield.is_invalid(tmp_value))
+              sample.change_value(miningfield.index, miningfield.handle_invalid(tmp_value));
 
-              if (miningfield.hasOutlierTreatment)
-                if (miningfield.is_outlier(tmp_value))
-                  sample.change_value(miningfield.index, miningfield.handle_outlier(tmp_value));
-            }
-          }
-        } catch (const std::out_of_range& exception) {  // field is missing
-          sample.change_value(miningfield.index, miningfield.handle_missing());
-        } catch (const cpmml::Exception& exception) {  // field cannot be converted to double
-                                                       // because is missing
-          sample.change_value(miningfield.index, miningfield.handle_missing());
+          if (miningfield.hasOutlierTreatment)
+            if (miningfield.is_outlier(tmp_value))
+              sample.change_value(miningfield.index, miningfield.handle_outlier(tmp_value));
         }
       }
     }

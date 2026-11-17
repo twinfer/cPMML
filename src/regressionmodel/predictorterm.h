@@ -41,7 +41,7 @@ class PredictorTerm {
   PredictorTerm(const XmlNode& node,  // PredictorTerm node
                 const std::shared_ptr<Indexer>& indexer)
       : name(node.get_attribute("name")),
-        coefficient(node.get_double_attribute("coefficient")),
+        coefficient(node.required_double_attribute("coefficient")),
         fields(SimpleFieldRef::to_simplefields(node.get_childs("FieldRef"), indexer)) {}
 
   inline double get_term(const Sample& sample) const {

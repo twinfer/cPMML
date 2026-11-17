@@ -107,16 +107,16 @@ class TextEvaluator : public InternalEvaluator {
 
   void parse_matrix(const XmlNode& model) {
     XmlNode mat = model.get_child("DocumentTermMatrix").get_child("Matrix");
-    int n_rows = static_cast<int>(mat.get_long_attribute("nbRows"));
-    int n_cols = static_cast<int>(mat.get_long_attribute("nbCols"));
+    int n_rows = static_cast<int>(mat.required_long_attribute("nbRows"));
+    int n_cols = static_cast<int>(mat.required_long_attribute("nbCols"));
     std::string kind = to_lower(mat.get_attribute("kind"));
 
     doc_matrix = Eigen::MatrixXd::Zero(n_rows, n_cols);
 
     if (kind == "sparse") {
       for (const auto& cell : mat.get_childs("MatCell")) {
-        int r = static_cast<int>(cell.get_long_attribute("row")) - 1;  // 1-based → 0-based
-        int c = static_cast<int>(cell.get_long_attribute("col")) - 1;
+        int r = static_cast<int>(cell.required_long_attribute("row")) - 1;  // 1-based → 0-based
+        int c = static_cast<int>(cell.required_long_attribute("col")) - 1;
         doc_matrix(r, c) = to_double(cell.value());
       }
     } else {

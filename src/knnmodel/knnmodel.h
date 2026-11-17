@@ -84,7 +84,7 @@ class NearestNeighborModel : public InternalModel {
                        const TransformationDictionary& transformation_dictionary,
                        const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        k(static_cast<int>(node.get_long_attribute("numberOfNeighbors"))),
+        k(static_cast<int>(node.required_long_attribute("numberOfNeighbors"))),
         metric(DistanceMetric::EUCLIDEAN),
         minkowski_p(2.0),
         categorical_method(to_lower(node.get_attribute("categoricalScoringMethod") == "null"
@@ -279,7 +279,7 @@ class NearestNeighborModel : public InternalModel {
       input.field_index = indexer->get_index(input.field_name);
       input.compare_func =
           parse_compare_function(ki, default_compare_func, "KNNInput \"" + input.field_name + "\"");
-      input.field_weight = ki.exists_attribute("fieldWeight") ? to_double(ki.get_attribute("fieldWeight")) : 1.0;
+      input.field_weight = ki.get_double_attribute("fieldWeight", 1.0);
       knn_inputs.push_back(std::move(input));
     }
   }

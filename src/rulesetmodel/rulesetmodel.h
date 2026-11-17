@@ -59,9 +59,7 @@ class RuleSetModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     XmlNode ruleset_node = node.get_child("RuleSet");
     default_score = ruleset_node.exists_attribute("defaultScore") ? ruleset_node.get_attribute("defaultScore") : "";
-    default_confidence = ruleset_node.exists_attribute("defaultConfidence")
-                             ? to_double(ruleset_node.get_attribute("defaultConfidence"))
-                             : 0.0;
+    default_confidence = ruleset_node.get_double_attribute("defaultConfidence", 0.0);
 
     // Parse selection criterion (take first method if multiple present)
     if (ruleset_node.exists_child("RuleSelectionMethod")) {
@@ -111,8 +109,8 @@ class RuleSetModel : public InternalModel {
         SimpleRule rule;
         rule.id = child.exists_attribute("id") ? child.get_attribute("id") : "";
         rule.score = child.get_attribute("score");
-        rule.confidence = child.exists_attribute("confidence") ? to_double(child.get_attribute("confidence")) : 1.0;
-        rule.weight = child.exists_attribute("weight") ? to_double(child.get_attribute("weight")) : 1.0;
+        rule.confidence = child.get_double_attribute("confidence", 1.0);
+        rule.weight = child.get_double_attribute("weight", 1.0);
 
         // Build this rule's own predicate
         Predicate rule_pred = pb.build_from_parent(child);

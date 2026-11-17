@@ -87,7 +87,7 @@ class NeuralNetworkModel : public InternalModel {
                      const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         default_activation(parse_activation(node.get_attribute("activationFunction"))),
-        default_threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 0.0),
+        default_threshold(node.get_double_attribute("threshold", 0.0)),
         default_width(node.get_double_attribute("width", 1.0)),
         default_altitude(node.get_double_attribute("altitude", 1.0)),
         model_normalization(node.get_attribute("normalizationMethod", "none")) {
@@ -192,14 +192,14 @@ class NeuralNetworkModel : public InternalModel {
         output_ids.push_back(nid);
         curr_id_to_idx[nid] = i;
 
-        if (neuron.exists_attribute("bias")) b[i] = to_double(neuron.get_attribute("bias"));
+        if (neuron.exists_attribute("bias")) b[i] = neuron.required_double_attribute("bias");
         widths[i] = neuron.get_double_attribute("width", layer_width);
         altitudes[i] = neuron.get_double_attribute("altitude", layer_altitude);
 
         for (const auto& con : neuron.get_childs("Con")) {
           const std::string from = con.get_attribute("from");
           const auto it = prev_id_to_idx.find(from);
-          if (it != prev_id_to_idx.end()) W(i, it->second) = to_double(con.get_attribute("weight"));
+          if (it != prev_id_to_idx.end()) W(i, it->second) = con.required_double_attribute("weight");
           fan_ins[i] += 1.0;
         }
       }
@@ -223,8 +223,8 @@ class NeuralNetworkModel : public InternalModel {
         output.target_category = mining_schema.target.name;
         if (df.exists_child("NormContinuous"))
           for (const auto& linear_norm : df.get_child("NormContinuous").get_childs("LinearNorm")) {
-            output.orig.push_back(to_double(linear_norm.get_attribute("orig")));
-            output.norm.push_back(to_double(linear_norm.get_attribute("norm")));
+            output.orig.push_back(linear_norm.required_double_attribute("orig"));
+            output.norm.push_back(linear_norm.required_double_attribute("norm"));
           }
       }
 

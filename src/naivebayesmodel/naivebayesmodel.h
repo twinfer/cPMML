@@ -64,7 +64,7 @@ class NaiveBayesModel : public InternalModel {
   NaiveBayesModel(const XmlNode& node, const DataDictionary& data_dictionary,
                   const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 1e-6) {
+        threshold(node.get_double_attribute("threshold", 1e-6)) {
     parse_output(node);
     parse_inputs(node, data_dictionary, indexer);
   }
@@ -93,7 +93,7 @@ class NaiveBayesModel : public InternalModel {
     std::vector<std::pair<std::string, double>> counts;
     for (const auto& tvc : bo.get_child("TargetValueCounts").get_childs("TargetValueCount")) {
       const std::string cls = tvc.get_attribute("value");
-      const double cnt = to_double(tvc.get_attribute("count"));
+      const double cnt = tvc.required_double_attribute("count");
       classes.push_back(cls);
       counts.emplace_back(cls, cnt);
       total += cnt;
@@ -114,7 +114,7 @@ class NaiveBayesModel : public InternalModel {
         for (const auto& pvc : bi.get_childs("PairCounts")) {
           const Value input_val(pvc.get_attribute("value"), data_dictionary.at(field).datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
-            di.counts[input_val.value][tvc.get_attribute("value")] = to_double(tvc.get_attribute("count"));
+            di.counts[input_val.value][tvc.get_attribute("value")] = tvc.required_double_attribute("count");
         }
         di.class_totals.assign(classes.size(), 0.0);
         for (const auto& [v, cls_map] : di.counts)
@@ -134,7 +134,7 @@ class NaiveBayesModel : public InternalModel {
           const std::string cls = tvs.get_attribute("value");
           if (tvs.exists_child("GaussianDistribution")) {
             const XmlNode gd = tvs.get_child("GaussianDistribution");
-            gi.params[cls] = {to_double(gd.get_attribute("mean")), to_double(gd.get_attribute("variance"))};
+            gi.params[cls] = {gd.required_double_attribute("mean"), gd.required_double_attribute("variance")};
           }
         }
         gaussian_inputs.push_back(std::move(gi));

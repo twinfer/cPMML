@@ -39,7 +39,7 @@ class ScoreDistribution {
   ScoreDistribution(XmlNode node, DataType dataType)
       : value(Value(node.get_attribute("value"), dataType)),
         value_string(node.get_attribute("value")),
-        record_count(node.get_double_attribute("recordCount")),
+        record_count(node.required_double_attribute("recordCount")),
         has_confidence(node.exists_attribute("confidence")),
         confidence(node.get_double_attribute("confidence")),
         confidence_string(node.get_attribute("confidence")),
@@ -49,7 +49,7 @@ class ScoreDistribution {
 
   ScoreDistribution(XmlNode node, DataType dataType, double total_record_count)
       : value(Value(node.get_attribute("value"), dataType)),
-        record_count(node.get_double_attribute("recordCount")),
+        record_count(node.required_double_attribute("recordCount")),
         has_confidence(node.exists_attribute("confidence")),
         confidence(total_record_count > 0 ? record_count / total_record_count
                                           : 1),  // confidence should be computed with laplace correction,

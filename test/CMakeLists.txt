@@ -21,6 +21,17 @@ target_link_libraries(api_guards.exe ${PROJECT_NAME} pugixml::pugixml miniz Eige
 add_dependencies(unit_tests api_guards.exe)
 add_test(api_guards api_guards.exe)
 
+# The strict lexical reader, XmlNode's typed getters, documents that must not
+# load, and invalid input values that end the record (returnInvalid, asIs) --
+# the cases a fixture CSV cannot express.
+add_executable(strict_parse.exe strict_parse.cc)
+target_include_directories(strict_parse.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(strict_parse.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(strict_parse.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(strict_parse.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests strict_parse.exe)
+add_test(strict_parse strict_parse.exe)
+
 # Concurrent scoring: a data race does not fail a single-threaded fixture, so
 # nothing else in the suite would notice if R3 regressed. Two models, one with
 # categorical string inputs (the string-interning path) and one ensemble (the

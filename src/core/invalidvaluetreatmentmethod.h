@@ -23,12 +23,13 @@
  */
 class InvalidValueTreatmentMethod {
  public:
-  enum class InvalidValueTreatmentMethodValue { RETURN_INVALID, AS_IS, AS_MISSING };
+  enum class InvalidValueTreatmentMethodValue { RETURN_INVALID, AS_IS, AS_MISSING, AS_VALUE };
 
   static constexpr EnumEntry<InvalidValueTreatmentMethodValue> TABLE[] = {
       {"returninvalid", InvalidValueTreatmentMethodValue::RETURN_INVALID, "returnInvalid"},
       {"asis", InvalidValueTreatmentMethodValue::AS_IS, "asIs"},
       {"asmissing", InvalidValueTreatmentMethodValue::AS_MISSING, "asMissing"},
+      {"asvalue", InvalidValueTreatmentMethodValue::AS_VALUE, "asValue"},
   };
 
   InvalidValueTreatmentMethodValue value = InvalidValueTreatmentMethodValue::RETURN_INVALID;

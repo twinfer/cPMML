@@ -64,14 +64,7 @@ class Category {
  private:
   bool is_float = false;
 
-  // The whole string must be the number: try_to_double ignores trailing text.
-  inline static bool parse(const std::string& value, double& parsed) {
-    const char* const last = value.data() + value.size();
-    const char* const first = skip_numeric_prefix(value.data(), last);
-    if (first == last) return false;
-    const auto result = std::from_chars(first, last, parsed);
-    return result.ec == std::errc() && result.ptr == last;
-  }
+  inline static bool parse(const std::string& value, double& parsed) { return lexical::parse_double(value, parsed); }
 };
 
 /**

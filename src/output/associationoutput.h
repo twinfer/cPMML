@@ -50,7 +50,7 @@ class AssociationOutput : public OutputExpression {
       : OutputExpression(output_index, output_type, indexer),
         rule_feature(feature),
         algorithm_key(to_lower(node.exists_attribute("algorithm") ? node.get_attribute("algorithm") : "recommendation")),
-        rank(node.exists_attribute("rank") ? static_cast<int>(node.get_long_attribute("rank")) : 1),
+        rank(static_cast<int>(node.get_long_attribute("rank", 1))),
         rank_basis(parse_rank_basis(node.exists_attribute("rankBasis") ? node.get_attribute("rankBasis") : "confidence")),
         descending(to_lower(node.exists_attribute("rankOrder") ? node.get_attribute("rankOrder") : "descending") ==
                    "descending"),

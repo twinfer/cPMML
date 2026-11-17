@@ -66,10 +66,10 @@ class ScorecardModel : public InternalModel {
   ScorecardModel(const XmlNode& node, const DataDictionary& data_dictionary,
                  const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
-        initial_score(node.exists_attribute("initialScore") ? to_double(node.get_attribute("initialScore")) : 0.0),
-        use_reason_codes(node.exists_attribute("useReasonCodes") ? node.get_bool_attribute("useReasonCodes") : true),
+        initial_score(node.get_double_attribute("initialScore", 0.0)),
+        use_reason_codes(node.get_bool_attribute("useReasonCodes", true)),
         points_below(to_lower(node.get_attribute("reasonCodeAlgorithm")) != "pointsabove"),
-        model_baseline(node.exists_attribute("baselineScore") ? to_double(node.get_attribute("baselineScore")) : 0.0) {
+        model_baseline(node.get_double_attribute("baselineScore", 0.0)) {
     classes.push_back(mining_schema.target.name);
     parse_characteristics(node, indexer);
   }
@@ -106,13 +106,12 @@ class ScorecardModel : public InternalModel {
       Characteristic ch;
       ch.name = ch_node.get_attribute("name");
       ch.reason_code = ch_node.get_attribute("reasonCode");
-      ch.baseline_score = ch_node.exists_attribute("baselineScore") ? to_double(ch_node.get_attribute("baselineScore"))
-                                                                    : model_baseline;
+      ch.baseline_score = ch_node.get_double_attribute("baselineScore", model_baseline);
 
       for (const auto& attr_node : ch_node.get_childs("Attribute")) {
         Attribute attr;
         attr.partial_score =
-            attr_node.exists_attribute("partialScore") ? to_double(attr_node.get_attribute("partialScore")) : 0.0;
+            attr_node.get_double_attribute("partialScore", 0.0);
         attr.reason_code = attr_node.exists_attribute("reasonCode") ? attr_node.get_attribute("reasonCode") : "";
 
         // ComplexPartialScore: expression-computed partial score

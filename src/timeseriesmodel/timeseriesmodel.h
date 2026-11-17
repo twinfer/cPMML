@@ -822,8 +822,8 @@ class TimeSeriesModel {
       for (const auto& oe : ts.get_childs("OutlierEffect")) {
         if (!oe.exists_attribute("time")) continue;
         int t = static_cast<int>(oe.get_long_attribute("time"));
-        double value = oe.exists_attribute("value") ? oe.get_double_attribute("value") : 0.0;
-        double delta = oe.exists_attribute("delta") ? oe.get_double_attribute("delta") : 0.0;
+        double value = oe.get_double_attribute("value", 0.0);
+        double delta = oe.get_double_attribute("delta", 0.0);
         std::string type = oe.exists_attribute("type") ? to_lower(oe.get_attribute("type")) : "additive";
 
         for (auto& [idx, val] : pts) {
@@ -904,7 +904,7 @@ class TimeSeriesModel {
 
     // Level (required by spec)
     XmlNode lv = node.get_child("Level");
-    ets.alpha = lv.exists_attribute("alpha") ? lv.get_double_attribute("alpha") : 0.0;
+    ets.alpha = lv.get_double_attribute("alpha", 0.0);
     ets.l = lv.get_double_attribute("smoothedValue");
 
     // Trend_ExpoSmooth (optional)
@@ -924,8 +924,8 @@ class TimeSeriesModel {
       if (ets.trend != "additive" && ets.trend != "damped_additive" && ets.trend != "multiplicative" &&
           ets.trend != "damped_multiplicative")
         throw cpmml::ParsingException("ExponentialSmoothing trend=\"" + ets.trend + "\" is not supported");
-      ets.gamma = tr.exists_attribute("gamma") ? tr.get_double_attribute("gamma") : 0.0;
-      ets.phi = tr.exists_attribute("phi") ? tr.get_double_attribute("phi") : 1.0;
+      ets.gamma = tr.get_double_attribute("gamma", 0.0);
+      ets.phi = tr.get_double_attribute("phi", 1.0);
       ets.b = tr.get_double_attribute("smoothedValue");
     }
 
@@ -933,9 +933,9 @@ class TimeSeriesModel {
     if (node.exists_child("Seasonality_ExpoSmooth")) {
       XmlNode se = node.get_child("Seasonality_ExpoSmooth");
       ets.seasonal = se.exists_attribute("type") ? to_lower(se.get_attribute("type")) : "additive";
-      ets.delta = se.exists_attribute("delta") ? se.get_double_attribute("delta") : 0.0;
+      ets.delta = se.get_double_attribute("delta", 0.0);
       ets.period = static_cast<int>(se.get_long_attribute("period"));
-      ets.phase = se.exists_attribute("phase") ? static_cast<int>(se.get_long_attribute("phase")) : ets.period;
+      ets.phase = static_cast<int>(se.get_long_attribute("phase", ets.period));
       if (se.exists_child("Array")) {
         ets.s = parse_array(se.get_child("Array"));
       } else {
@@ -1034,9 +1034,9 @@ class TimeSeriesModel {
 
     if (node.exists_child("NonseasonalComponent")) {
       XmlNode ns = node.get_child("NonseasonalComponent");
-      p = ns.exists_attribute("p") ? static_cast<int>(ns.get_long_attribute("p")) : 0;
-      d = ns.exists_attribute("d") ? static_cast<int>(ns.get_long_attribute("d")) : 0;
-      q = ns.exists_attribute("q") ? static_cast<int>(ns.get_long_attribute("q")) : 0;
+      p = static_cast<int>(ns.get_long_attribute("p", 0));
+      d = static_cast<int>(ns.get_long_attribute("d", 0));
+      q = static_cast<int>(ns.get_long_attribute("q", 0));
 
       if (ns.exists_child("AR") && ns.get_child("AR").exists_child("Array"))
         phi = parse_array(ns.get_child("AR").get_child("Array"));
@@ -1054,10 +1054,10 @@ class TimeSeriesModel {
     int P = 0, D = 0, Q = 0, m = 1;
     if (node.exists_child("SeasonalComponent")) {
       XmlNode sc = node.get_child("SeasonalComponent");
-      P = sc.exists_attribute("P") ? static_cast<int>(sc.get_long_attribute("P")) : 0;
-      D = sc.exists_attribute("D") ? static_cast<int>(sc.get_long_attribute("D")) : 0;
-      Q = sc.exists_attribute("Q") ? static_cast<int>(sc.get_long_attribute("Q")) : 0;
-      m = sc.exists_attribute("period") ? static_cast<int>(sc.get_long_attribute("period")) : 1;
+      P = static_cast<int>(sc.get_long_attribute("P", 0));
+      D = static_cast<int>(sc.get_long_attribute("D", 0));
+      Q = static_cast<int>(sc.get_long_attribute("Q", 0));
+      m = static_cast<int>(sc.get_long_attribute("period", 1));
 
       std::vector<double> phi_s, theta_s;
       if (sc.exists_child("AR") && sc.get_child("AR").exists_child("Array"))
@@ -1078,7 +1078,7 @@ class TimeSeriesModel {
     (void)Q;  // orders now encoded in phi/theta sizes
 
     // --- Shared attributes ---
-    double constant_val = node.exists_attribute("constantTerm") ? node.get_double_attribute("constantTerm") : 0.0;
+    double constant_val = node.get_double_attribute("constantTerm", 0.0);
     bool include_const = (constant_val != 0.0);
 
     Transform tr = Transform::NONE;
@@ -1426,9 +1426,9 @@ class TimeSeriesModel {
     // --- ARMAPart (conditional mean) ---
     if (node.exists_child("ARMAPart")) {
       XmlNode ap = node.get_child("ARMAPart");
-      garch.p_mean = ap.exists_attribute("p") ? static_cast<int>(ap.get_long_attribute("p")) : 0;
-      garch.q_mean = ap.exists_attribute("q") ? static_cast<int>(ap.get_long_attribute("q")) : 0;
-      garch.constant_mean = ap.exists_attribute("constant") ? ap.get_double_attribute("constant") : 0.0;
+      garch.p_mean = static_cast<int>(ap.get_long_attribute("p", 0));
+      garch.q_mean = static_cast<int>(ap.get_long_attribute("q", 0));
+      garch.constant_mean = ap.get_double_attribute("constant", 0.0);
 
       if (ap.exists_child("AR") && ap.get_child("AR").exists_child("Array"))
         garch.phi = parse_array(ap.get_child("AR").get_child("Array"));
@@ -1453,9 +1453,9 @@ class TimeSeriesModel {
     // --- GARCHPart (conditional variance) ---
     if (node.exists_child("GARCHPart")) {
       XmlNode gp_node = node.get_child("GARCHPart");
-      garch.gp = gp_node.exists_attribute("gp") ? static_cast<int>(gp_node.get_long_attribute("gp")) : 0;
-      garch.gq = gp_node.exists_attribute("gq") ? static_cast<int>(gp_node.get_long_attribute("gq")) : 0;
-      garch.omega = gp_node.exists_attribute("constant") ? gp_node.get_double_attribute("constant") : 0.0;
+      garch.gp = static_cast<int>(gp_node.get_long_attribute("gp", 0));
+      garch.gq = static_cast<int>(gp_node.get_long_attribute("gq", 0));
+      garch.omega = gp_node.get_double_attribute("constant", 0.0);
 
       if (gp_node.exists_child("ResidualSquareCoefficients")) {
         XmlNode rsc = gp_node.get_child("ResidualSquareCoefficients");
@@ -1490,7 +1490,7 @@ class TimeSeriesModel {
     for (const auto& dr_node : ts_node.get_childs("DynamicRegressor")) {
       DynamicRegressorState dr;
       dr.field = dr_node.get_attribute("field");
-      dr.delay = dr_node.exists_attribute("delay") ? static_cast<int>(dr_node.get_long_attribute("delay")) : 0;
+      dr.delay = static_cast<int>(dr_node.get_long_attribute("delay", 0));
       if (dr_node.exists_attribute("transformation"))
         dr.transform = parse_transform(to_lower(dr_node.get_attribute("transformation")));
 

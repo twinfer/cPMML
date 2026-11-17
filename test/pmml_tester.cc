@@ -16,6 +16,7 @@
 #include <clocale>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <locale>
 #include <pugixml.hpp>
 #include <stdexcept>
@@ -36,9 +37,23 @@ static bool within_tolerance(double actual, double expected) {
   // predictive variance reports NaN rather than inventing a number, and the
   // fixture asserts exactly that.
   if (std::isnan(expected)) return std::isnan(actual);
+  // An infinite expectation has no relative error: inf - inf is NaN.
+  if (std::isinf(expected)) return actual == expected;
   double err = std::abs(actual - expected);
   double rel = (std::abs(expected) > ABS_TOL) ? (err / std::abs(expected)) : err;
   return rel <= REL_TOL;
+}
+
+// An expected value as the oracle printed it. ::to_double reads the XSD
+// lexical form only, which is right for PMML text and inputs but not for the
+// fixtures: they carry what Java ("Infinity", "-Infinity") or Python ("nan",
+// "inf") printed. Throws ParsingException for text that is not a number, which
+// the callers catch to mean "compare as a string".
+static double expected_double(const std::string& text) {
+  if (text == "nan" || text == "NaN") return std::numeric_limits<double>::quiet_NaN();
+  if (text == "inf" || text == "Infinity") return std::numeric_limits<double>::infinity();
+  if (text == "-inf" || text == "-Infinity") return -std::numeric_limits<double>::infinity();
+  return to_double(text);
 }
 
 // Convert CSV row (string map) to cpmml::Input
@@ -95,7 +110,7 @@ static bool check_other_outputs(const cpmml::Result& result,
 
     if (nit != nout.end()) {
       try {
-        if (!within_tolerance(nit->second, to_double(expected_val))) {
+        if (!within_tolerance(nit->second, expected_double(expected_val))) {
           std::cerr << "output '" << col << "': predicted: " << nit->second << "  expected: " << expected_val
                     << "  sample: " << to_string(row) << std::endl;
           return false;
@@ -172,7 +187,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
     bool ok = (result.as_string() == expected);
     if (!ok && !is_double_min(result.as_double())) {
       try {
-        ok = within_tolerance(result.as_double(), to_double(expected));
+        ok = within_tolerance(result.as_double(), expected_double(expected));
       } catch (const cpmml::ParsingException&) {}
     }
 
@@ -182,7 +197,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
       auto nit = nout.find(out_col);
       if (nit != nout.end()) {
         try {
-          ok = within_tolerance(nit->second, to_double(expected));
+          ok = within_tolerance(nit->second, expected_double(expected));
         } catch (const cpmml::ParsingException&) {}
       }
     }
@@ -297,7 +312,7 @@ static int run_transactional(cpmml::Model& model, CSVReader& reader,
       auto nit = nout.find(out_col);
       if (nit != nout.end()) {
         try {
-          ok = within_tolerance(nit->second, to_double(tx.expected));
+          ok = within_tolerance(nit->second, expected_double(tx.expected));
         } catch (const cpmml::ParsingException&) {}
       }
     }
@@ -330,8 +345,8 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
     if (kv.first != "forecast" && kv.first != "variance") reg_cols.push_back(kv.first);
 
   while (!row.empty()) {
-    expected.push_back(to_double(row.at("forecast")));
-    if (with_variance) expected_variance.push_back(to_double(row.at("variance")));
+    expected.push_back(expected_double(row.at("forecast")));
+    if (with_variance) expected_variance.push_back(expected_double(row.at("variance")));
     for (const auto& col : reg_cols) regressors[col].push_back(to_double(row.at(col)));
     row = reader.read();
   }

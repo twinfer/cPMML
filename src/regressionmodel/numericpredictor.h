@@ -42,8 +42,8 @@ class NumericPredictor {
       : name(node.get_attribute("name")),
         index(indexer->get_index(name)),
         datatype(indexer->get_type(name)),
-        coefficient(node.get_double_attribute("coefficient")),
-        exponent(node.exists_attribute("exponent") ? node.get_double_attribute("exponent") : 1) {}
+        coefficient(node.required_double_attribute("coefficient")),
+        exponent(node.get_double_attribute("exponent", 1)) {}
 
   inline double get_term(const Sample& sample) const {
     const Value& value = sample[index].value;

@@ -37,7 +37,7 @@ class RegressionTable {
   RegressionTable() = default;
 
   RegressionTable(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
-      : intercept(node.get_double_attribute("intercept")),
+      : intercept(node.required_double_attribute("intercept")),
         target_category(node.get_attribute("targetCategory")),
         numeric_predictors(NumericPredictor::to_numericpredictors(node.get_childs("NumericPredictor"), indexer)),
         categorical_predictors(CategoricalPredictor::to_categoricalpredictors(node, indexer)),

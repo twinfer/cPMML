@@ -87,7 +87,7 @@ struct SvmKernel {
  private:
   // Absent → the schema default; present but not a number → load error (to_double throws).
   static double attribute_or(const XmlNode& n, const char* name, double default_value) {
-    return n.exists_attribute(name) ? to_double(n.get_attribute(name)) : default_value;
+    return n.get_double_attribute(name, default_value);
   }
 };
 

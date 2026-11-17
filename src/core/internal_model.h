@@ -312,9 +312,26 @@ class InternalModel {
       // A blank cell is an absent actual value, not a value of "". Converting it
       // threw for any numeric target, so a dataset carrying an empty target
       // column -- an ordinary thing to score against -- failed outright.
-      if (it != sample.end() && !it->second.empty())
-        internal_sample.change_value(mining_schema.target_index,
-                                     Value(it->second, mining_schema.target.datatype));
+      //
+      // The actual value is read as an input of the target's dataType. Only
+      // feature="residual" uses it, so as in JPMML 1.7.7 text that is not a
+      // value of that type fails the record (or takes the target's
+      // invalidValueTreatment) only when the model declares a residual; a
+      // model that never reads the column does not reject it.
+      if (it != sample.end() && !it->second.empty()) {
+        const MiningField& actual_field = mining_schema.target;
+        Value& actual = internal_sample[mining_schema.target_index].value;
+        switch (actual_field.parse_input(it->second, actual)) {
+          case MiningField::InputStatus::VALID:
+            break;
+          case MiningField::InputStatus::INVALID:
+            actual = declares_residual() ? actual_field.handle_invalid(actual) : Value();
+            break;
+          case MiningField::InputStatus::MALFORMED:
+            actual = declares_residual() ? actual_field.handle_malformed(it->second) : Value();
+            break;
+        }
+      }
     }
 
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
@@ -375,8 +392,14 @@ class InternalModel {
 
   bool is_scorable = true;
 
+  inline bool declares_residual() const {
+    for (const auto& of : output.raw_outputfields)
+      if (of.expression_type.value == OutputExpressionType::OutputExpressionTypeValue::RESIDUAL) return true;
+    return false;
+  }
+
   static inline bool check_scorable(const XmlNode& node) {
-    return !(node.exists_attribute("isScorable") && node.get_bool_attribute("isScorable") == false);
+    return node.get_bool_attribute("isScorable", true);
   }
 
   static inline bool add_local_transformations(const XmlNode& node, TransformationDictionary& transformation_dictionary,

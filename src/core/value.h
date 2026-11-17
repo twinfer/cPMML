@@ -137,31 +137,31 @@ class Value {
   inline static Value min(const std::set<Value>& other) { return *other.cbegin(); }
   inline static Value max(const std::set<Value>& other) { return *other.crbegin(); }
 
+  // A Constant with no dataType: a number if the text is one, else a string.
+  // The int range check is the existing rule (review M-X4 questions it); what
+  // changed is the reader -- stod honoured LC_NUMERIC, accepted "inf"/"0x10",
+  // and threw out_of_range past DBL_MAX instead of answering "not an int".
   inline static double infer_value(const std::string& value) {
-    size_t char_index;
-    double double_value;
-
-    try {
-      double_value = stod(value, &char_index);
-      if (char_index != value.size() || !(double_value > std::numeric_limits<int>::min() &&
-                                          double_value < std::numeric_limits<int>::max()))  // second condition is
-                                                                                            // checking overflow
-        return to_double(value, DataType::DataTypeValue::STRING);
-    } catch (const std::invalid_argument& exception) {
+    double double_value = 0.0;
+    if (!lexical::parse_double(value, double_value) ||
+        !(double_value > std::numeric_limits<int>::min() && double_value < std::numeric_limits<int>::max()))
       return to_double(value, DataType::DataTypeValue::STRING);
-    }
 
-    if ((double_value - int(double_value)) > 0 || value.find('.') != std::string::npos)
-      return to_double(value, DataType::DataTypeValue::DOUBLE);
-
-    return to_double(value, DataType::DataTypeValue::INTEGER);
+    return double_value;
   }
 
+  // Document text (attributes, Array members, table cells) read as `datatype`.
+  // Malformed text throws ParsingException, which at load time is a load error.
+  // Input values do not come here: MiningField::parse_input reads them and
+  // hands a malformed one to invalidValueTreatment.
   inline static double to_double(const std::string& value, const DataType& datatype) {
     switch (datatype.value) {
-      case DataType::DataTypeValue::BOOLEAN:
-        if (to_lower(value) == "true" || value == "1") return 1;  // only case in which tolower is needed on value
-        return 0;
+      case DataType::DataTypeValue::BOOLEAN: {
+        bool parsed = false;
+        if (!lexical::parse_boolean(value, parsed))
+          throw cpmml::ParsingException("\"" + value + "\" is not a valid boolean (true, false, 1 or 0)");
+        return parsed ? 1 : 0;
+      }
       case DataType::DataTypeValue::FLOAT:
         return ::to_double(value);
       case DataType::DataTypeValue::INTEGER:

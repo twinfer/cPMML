@@ -41,46 +41,60 @@ class XmlNode {
     return attr.value();
   }
 
-  // Overloads taking an explicit default: return it when the attribute is
-  // absent or unparsable, so PMML attribute defaults are not clobbered by the
-  // legacy "null"/DBL_MIN sentinels of the no-default overloads above/below.
   std::string get_attribute(const std::string& attribute_name, const std::string& default_value) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
     if (!attr) return default_value;
     return attr.value();
   }
 
+  // ---- typed attributes ------------------------------------------------------
+  //
+  // Each reads the attribute through the strict lexical rules (lexical.h). An
+  // attribute that is present but malformed is a load error in every one of
+  // them -- coefficient="3abc" used to read as 3, and coefficient="abc" as the
+  // default or a sentinel, so a corrupt document loaded and scored. They
+  // differ only in what an absent attribute means:
+  //   required_*            absent is a load error (use="required");
+  //   get_*(name, default)  absent takes the PMML default;
+  //   get_*(name)           absent gives the legacy sentinel (DBL_MIN for a
+  //                         double, LONG_MAX for an integer), for the readers
+  //                         that still test for it.
+
+  double required_double_attribute(const std::string& attribute_name) const {
+    return parse_double(required(attribute_name), attribute_name);
+  }
+
   double get_double_attribute(const std::string& attribute_name, const double default_value) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
-    if (!attr) return default_value;
-    double parsed = 0.0;
+    return attr ? parse_double(attr, attribute_name) : default_value;
+  }
 
-    return try_to_double(attr.value(), parsed) ? parsed : default_value;
+  double get_double_attribute(const std::string& attribute_name) const {
+    return get_double_attribute(attribute_name, std::numeric_limits<double>::min());
+  }
+
+  long required_long_attribute(const std::string& attribute_name) const {
+    return parse_long(required(attribute_name), attribute_name);
   }
 
   long get_long_attribute(const std::string& attribute_name, const long default_value) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
-    if (!attr) return default_value;
-    long parsed = 0;
-
-    return try_to_long(attr.value(), parsed) ? parsed : default_value;
-  }
-
-  double get_double_attribute(const std::string& attribute_name) const {
-    double parsed = 0.0;
-
-    return try_to_double(get_attribute(attribute_name), parsed) ? parsed : std::numeric_limits<double>::min();
-  }
-
-  bool get_bool_attribute(const std::string& attribute_name) const {
-    std::string tmp = get_attribute(attribute_name);
-    return to_lower(tmp) == "true" || tmp == "1";
+    return attr ? parse_long(attr, attribute_name) : default_value;
   }
 
   long get_long_attribute(const std::string& attribute_name) const {
-    long parsed = 0;
+    return get_long_attribute(attribute_name, std::numeric_limits<long>::max());
+  }
 
-    return try_to_long(get_attribute(attribute_name), parsed) ? parsed : std::numeric_limits<long>::max();
+  bool required_bool_attribute(const std::string& attribute_name) const {
+    return parse_bool(required(attribute_name), attribute_name);
+  }
+
+  // There is no sentinel overload: every boolean PMML attribute has a default,
+  // and the old one answered false for an absent attribute and for "yes".
+  bool get_bool_attribute(const std::string& attribute_name, const bool default_value) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    return attr ? parse_bool(attr, attribute_name) : default_value;
   }
 
   XmlNode get_child(const std::string& child_name) const { return XmlNode(node.child(child_name.c_str())); }
@@ -155,6 +169,38 @@ class XmlNode {
 
  private:
   pugi::xml_node node;
+
+  pugi::xml_attribute required(const std::string& attribute_name) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr)
+      throw cpmml::ParsingException(std::string(node.name()) + ": required attribute " + attribute_name +
+                                    " is missing");
+    return attr;
+  }
+
+  [[noreturn]] void malformed(const pugi::xml_attribute& attr, const std::string& attribute_name,
+                              const char* type) const {
+    throw cpmml::ParsingException(std::string(node.name()) + "@" + attribute_name + ": \"" + attr.value() +
+                                  "\" is not a valid " + type);
+  }
+
+  double parse_double(const pugi::xml_attribute& attr, const std::string& attribute_name) const {
+    double parsed = 0.0;
+    if (!lexical::parse_double(attr.value(), parsed)) malformed(attr, attribute_name, "double");
+    return parsed;
+  }
+
+  long parse_long(const pugi::xml_attribute& attr, const std::string& attribute_name) const {
+    long parsed = 0;
+    if (!lexical::parse_long(attr.value(), parsed)) malformed(attr, attribute_name, "integer");
+    return parsed;
+  }
+
+  bool parse_bool(const pugi::xml_attribute& attr, const std::string& attribute_name) const {
+    bool parsed = false;
+    if (!lexical::parse_boolean(attr.value(), parsed)) malformed(attr, attribute_name, "boolean (true, false, 1 or 0)");
+    return parsed;
+  }
 };
 
 #endif

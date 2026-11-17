@@ -53,7 +53,7 @@ class CategoricalPredictor {
                                                                               const DataType& datatype) {
     std::unordered_map<Value, double, Value::ValueHash> result;
     for (const auto& node : nodes)
-      result[Value(node.get_attribute("value"), datatype)] = ::to_double(node.get_attribute("coefficient"));
+      result[Value(node.get_attribute("value"), datatype)] = node.required_double_attribute("coefficient");
 
     return result;
   }

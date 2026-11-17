@@ -7,6 +7,7 @@
 #ifndef CPMML_TIMESERIESEVALUATOR_H
 #define CPMML_TIMESERIESEVALUATOR_H
 
+#include <climits>
 #include <vector>
 
 #include "core/internal_evaluator.h"
@@ -37,11 +38,10 @@ class TimeSeriesEvaluator : public InternalEvaluator {
       if (std::holds_alternative<int>(it->second))
         horizon = std::get<int>(it->second);
       else if (std::holds_alternative<std::string>(it->second)) {
-        try {
-          horizon = std::stoi(std::get<std::string>(it->second));
-        } catch (const std::exception&) {
+        long parsed = 0;
+        if (!lexical::parse_long(std::get<std::string>(it->second), parsed) || parsed > INT_MAX || parsed < INT_MIN)
           throw cpmml::EvaluationException("TimeSeriesModel: 'horizon' is not a valid integer");
-        }
+        horizon = static_cast<int>(parsed);
       }
     }
     if (horizon <= 0)
@@ -50,8 +50,10 @@ class TimeSeriesEvaluator : public InternalEvaluator {
     // Check for "_variance" flag
     bool with_variance = false;
     if (auto it = arguments.find("_variance"); it != arguments.end()) {
-      if (std::holds_alternative<std::string>(it->second))
-        with_variance = (std::get<std::string>(it->second) == "true");
+      if (std::holds_alternative<std::string>(it->second)) {
+        if (!lexical::parse_boolean(std::get<std::string>(it->second), with_variance))
+          throw cpmml::EvaluationException("TimeSeriesModel: '_variance' is not a boolean (true, false, 1 or 0)");
+      }
       else if (std::holds_alternative<int>(it->second))
         with_variance = (std::get<int>(it->second) != 0);
     }

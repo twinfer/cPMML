@@ -192,7 +192,7 @@ class AssociationModel : public InternalModel {
       item.field        = n.exists_attribute("field")        ? n.get_attribute("field")        : "";
       item.category     = n.exists_attribute("category")     ? n.get_attribute("category")     : "";
       item.mapped_value = n.exists_attribute("mappedValue")  ? n.get_attribute("mappedValue")  : "";
-      item.weight       = n.exists_attribute("weight")       ? to_double(n.get_attribute("weight")) : 1.0;
+      item.weight       = n.get_double_attribute("weight", 1.0);
       items[item.id]    = std::move(item);
     }
   }
@@ -215,11 +215,11 @@ class AssociationModel : public InternalModel {
       rule.id         = n.exists_attribute("id") ? n.get_attribute("id") : std::to_string(rule_index);
       rule.antecedent = n.get_attribute("antecedent");
       rule.consequent = n.get_attribute("consequent");
-      rule.support    = to_double(n.get_attribute("support"));
-      rule.confidence = to_double(n.get_attribute("confidence"));
-      rule.lift       = n.exists_attribute("lift")      ? to_double(n.get_attribute("lift"))      : 1.0;
-      rule.leverage   = n.exists_attribute("leverage")  ? to_double(n.get_attribute("leverage"))  : 0.0;
-      rule.affinity   = n.exists_attribute("affinity")  ? to_double(n.get_attribute("affinity"))  : 0.0;
+      rule.support    = n.required_double_attribute("support");
+      rule.confidence = n.required_double_attribute("confidence");
+      rule.lift       = n.get_double_attribute("lift", 1.0);
+      rule.leverage   = n.get_double_attribute("leverage", 0.0);
+      rule.affinity   = n.get_double_attribute("affinity", 0.0);
       rules.push_back(std::move(rule));
     }
   }

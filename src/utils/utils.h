@@ -11,6 +11,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "cPMML.h"
+#include "lexical.h"
 #include "miniz.h"
 
 /**
@@ -42,45 +44,15 @@ inline std::string to_lower(std::string value) {
 }
 
 /**
- * Locale-independent numeric parsing.
- *
- * `std::stod`/`std::stol` honour LC_NUMERIC: a host application that installs
- * a comma-decimal locale would silently mis-parse every PMML coefficient
- * ("1.5" -> 1). `std::from_chars` is locale-independent by definition, but is
- * also stricter than `stod` — it rejects leading whitespace and a leading '+',
- * both of which XSD permits — so those are handled here. Trailing characters
- * are ignored, as `stod` ignores them.
+ * Strict, locale-independent conversion of an XSD double: the whole text,
+ * less leading/trailing XML whitespace, must be the number (lexical.h). Throws
+ * ParsingException otherwise -- InternalScore and the tester catch it by type
+ * to mean "not a number".
  */
-inline const char* skip_numeric_prefix(const char* first, const char* const last) {
-  while (first != last && std::isspace(static_cast<unsigned char>(*first))) first++;
-  if (first != last && *first == '+') first++;
-
-  return first;
-}
-
-inline bool try_to_double(const std::string_view value, double& parsed) {
-  const char* const last = value.data() + value.size();
-  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
-
-  return result.ec == std::errc();
-}
-
-inline bool try_to_long(const std::string_view value, long& parsed) {
-  const char* const last = value.data() + value.size();
-  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
-
-  return result.ec == std::errc();
-}
-
-inline static double to_double(const std::string& value) {
-  const char* const last = value.data() + value.size();
+inline double to_double(const std::string_view value) {
   double parsed = 0.0;
-  const auto result = std::from_chars(skip_numeric_prefix(value.data(), last), last, parsed);
-
-  if (result.ec == std::errc::result_out_of_range)
-    throw cpmml::ParsingException(value + " cannot be converted to double (overflow)");
-  if (result.ec != std::errc())
-    throw cpmml::ParsingException(value + " cannot be converted to double (invalid argument)");
+  if (!lexical::parse_double(value, parsed))
+    throw cpmml::ParsingException("\"" + std::string(value) + "\" is not a valid double");
 
   return parsed;
 }
@@ -88,22 +60,21 @@ inline static double to_double(const std::string& value) {
 /**
  * Locale-independent equivalent of `std::to_string(double)`, which formats
  * through `sprintf("%f")` and therefore honours LC_NUMERIC. Same output as
- * `std::to_string` under the classic locale: fixed notation, six decimals.
+ * `std::to_string` under the classic locale for a finite value: fixed
+ * notation, six decimals. A non-finite value is written in its XSD form --
+ * INF, -INF, NaN -- not as to_chars' "inf"/"-nan": predictions travel between
+ * evaluators as this text (ensemble combination, Targets, KNN, anomaly
+ * detection) and are read back with the strict ::to_double, which takes only
+ * the XSD spellings.
  */
 inline std::string double_to_string(const double value) {
+  if (std::isnan(value)) return "NaN";
+  if (std::isinf(value)) return value > 0 ? "INF" : "-INF";
   std::array<char, 512> buffer{};
   const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::fixed, 6);
   if (result.ec != std::errc()) return std::to_string(value);  // unreachable for finite doubles
 
   return std::string(buffer.data(), result.ptr);
-}
-
-template <class T>
-T parse_string(const std::string& value) {
-  std::istringstream is(to_lower(value));
-  T parsed_value;
-  is >> parsed_value;
-  return parsed_value;
 }
 
 template <class T>
@@ -285,8 +256,6 @@ inline std::string remove_all(std::string value, char to_remove) {
 
   return value;
 }
-
-inline bool parse_boolstring(const std::string& value) { return value == "true"; }
 
 // Sentinel value indicating "missing/uninitialized".
 // Must NOT be NaN (undefined under -ffast-math) and must NOT be a large magnitude

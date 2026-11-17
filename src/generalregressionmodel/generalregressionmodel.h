@@ -104,12 +104,12 @@ class GeneralRegressionModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         model_type(to_lower(node.get_attribute("modelType"))),
         link(parse_link(node, model_type)),
-        link_parameter(node.exists_attribute("linkParameter") ? to_double(node.get_attribute("linkParameter")) : 1.0),
+        link_parameter(node.get_double_attribute("linkParameter", 1.0)),
         reference_category(node.get_attribute("targetReferenceCategory")) {
     // Offset
     if (node.exists_attribute("offsetValue")) {
       has_offset_value = true;
-      offset_value = to_double(node.get_attribute("offsetValue"));
+      offset_value = node.required_double_attribute("offsetValue");
     }
     if (node.exists_attribute("offsetVariable")) {
       has_offset_variable = true;
@@ -268,7 +268,7 @@ class GeneralRegressionModel : public InternalModel {
       // A PCell without targetCategory is a shared beta: it applies to every
       // target category (ordinal slope terms, common covariates). Key it "".
       const std::string cat = cell.exists_attribute("targetCategory") ? cell.get_attribute("targetCategory") : "";
-      const double beta_val = to_double(cell.get_attribute("beta"));
+      const double beta_val = cell.required_double_attribute("beta");
       param_matrix[param][cat] = beta_val;
 
       if (cat.empty()) {

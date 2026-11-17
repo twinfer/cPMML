@@ -164,7 +164,7 @@ inline double parse_minkowski_p(const XmlNode& minkowski) {
     throw cpmml::ParsingException("minkowski: required attribute p-parameter is missing" + hint);
   }
   const std::string text = minkowski.get_attribute("p-parameter");
-  const double p = to_double(text);
+  const double p = minkowski.required_double_attribute("p-parameter");
   if (!std::isfinite(p) || !(p > 0.0))
     throw cpmml::ParsingException("minkowski: p-parameter must be a finite number > 0, got \"" + text + "\"");
   return p;

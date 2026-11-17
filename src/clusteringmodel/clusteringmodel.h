@@ -197,19 +197,13 @@ class ClusteringModel : public InternalModel {
   // throws IndexOutOfBoundsException when scoring such a model.
   void parse_clustering_fields(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& cf : node.get_childs("ClusteringField")) {
-      if (cf.exists_attribute("isCenterField")) {
-        const std::string is_center = cf.get_attribute("isCenterField");
-        if (is_center == "false") continue;
-        if (is_center != "true")
-          throw cpmml::ParsingException("ClusteringModel: invalid isCenterField \"" + is_center +
-                                        "\" on ClusteringField \"" + cf.get_attribute("field") + "\"");
-      }
+      if (!cf.get_bool_attribute("isCenterField", true)) continue;
       ClusteringField f;
       f.field_name = cf.get_attribute("field");
       f.field_index = indexer->get_index(f.field_name);
       f.compare_func = parse_compare_func(to_lower(cf.get_attribute("compareFunction")), default_compare_func);
-      f.field_weight = cf.exists_attribute("fieldWeight") ? to_double(cf.get_attribute("fieldWeight")) : 1.0;
-      f.similarity_scale = cf.exists_attribute("similarityScale") ? to_double(cf.get_attribute("similarityScale")) : 1.0;
+      f.field_weight = cf.get_double_attribute("fieldWeight", 1.0);
+      f.similarity_scale = cf.get_double_attribute("similarityScale", 1.0);
       fields.push_back(std::move(f));
     }
     // With no center field there is no distance: every cluster would tie at 0

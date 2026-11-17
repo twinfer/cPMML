@@ -102,8 +102,8 @@ class SupportVectorMachineModel : public InternalModel {
         kernel(SvmKernel::from_node(node)),
         use_support_vectors(to_lower(node.get_attribute("svmRepresentation")) != "coefficients"),
         is_ovo(to_lower(node.get_attribute("classificationMethod")) == "oneagainstone"),
-        max_wins(node.get_bool_attribute("maxWins")),
-        model_threshold(node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : 0.0) {
+        max_wins(node.get_bool_attribute("maxWins", false)),
+        model_threshold(node.get_double_attribute("threshold", 0.0)) {
     // The Coefficients form is the hyperplane w.x + b, which only exists for the
     // linear kernel; scoring it with any other declared kernel would ignore that kernel.
     if (!use_support_vectors && kernel.type != SvmKernelType::LINEAR)
@@ -320,9 +320,9 @@ class SupportVectorMachineModel : public InternalModel {
     if (vi.exists_child("REAL-SparseArray")) {
       const XmlNode sa = vi.get_child("REAL-SparseArray");
       // Entries not listed take defaultValue (schema default 0).
-      const double fill = sa.exists_attribute("defaultValue") ? to_double(sa.get_attribute("defaultValue")) : 0.0;
+      const double fill = sa.get_double_attribute("defaultValue", 0.0);
       Eigen::VectorXd vec = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(n), fill);
-      if (sa.exists_attribute("n") && to_double(sa.get_attribute("n")) != double(n))
+      if (sa.exists_attribute("n") && sa.required_long_attribute("n") != static_cast<long>(n))
         throw fail("REAL-SparseArray n=" + sa.get_attribute("n") + " but VectorFields has " + std::to_string(n));
 
       const std::vector<std::string> raw_indices =
@@ -346,7 +346,7 @@ class SupportVectorMachineModel : public InternalModel {
       // REAL-ARRAY is an Array of type "real"; its optional n must match its entries.
       if (arr.get_attribute("type") != "real") throw fail("Array type must be \"real\", got \"" + arr.get_attribute("type") + "\"");
       const std::vector<std::string> entries = parse_array(arr.value());
-      if (arr.exists_attribute("n") && to_double(arr.get_attribute("n")) != double(entries.size()))
+      if (arr.exists_attribute("n") && arr.required_long_attribute("n") != static_cast<long>(entries.size()))
         throw fail("Array n=" + arr.get_attribute("n") + " but it has " + std::to_string(entries.size()) + " entries");
       if (entries.size() != n)
         throw fail("Array has " + std::to_string(entries.size()) + " entries but VectorFields has " +
@@ -366,10 +366,10 @@ class SupportVectorMachineModel : public InternalModel {
     SvmMachine m;
     m.target_category = node.get_attribute("targetCategory");
     m.alternate_category = node.get_attribute("alternateTargetCategory");
-    m.threshold = node.exists_attribute("threshold") ? to_double(node.get_attribute("threshold")) : model_threshold;
+    m.threshold = node.get_double_attribute("threshold", model_threshold);
 
     const XmlNode coeff_node = node.get_child("Coefficients");
-    m.bias = coeff_node.exists_attribute("absoluteValue") ? to_double(coeff_node.get_attribute("absoluteValue")) : 0.0;
+    m.bias = coeff_node.get_double_attribute("absoluteValue", 0.0);
 
     if (use_support_vectors) {
       // Build (αᵢ, xᵢ) pairs from SupportVectors + Coefficients

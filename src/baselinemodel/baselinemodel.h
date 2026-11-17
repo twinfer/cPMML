@@ -70,16 +70,16 @@ class BaselineModel : public InternalModel {
 
     if (base_node.exists_child("GaussianDistribution")) {
       XmlNode g = base_node.get_child("GaussianDistribution");
-      baseline.mean = g.get_double_attribute("mean");
-      baseline.variance = g.get_double_attribute("variance");
+      baseline.mean = g.required_double_attribute("mean");
+      baseline.variance = g.required_double_attribute("variance");
     } else if (base_node.exists_child("PoissonDistribution")) {
       XmlNode p = base_node.get_child("PoissonDistribution");
-      baseline.mean = p.get_double_attribute("mean");
+      baseline.mean = p.required_double_attribute("mean");
       baseline.variance = baseline.mean;  // Poisson: variance = mean
     } else if (base_node.exists_child("UniformDistribution")) {
       XmlNode u = base_node.get_child("UniformDistribution");
-      double lower = u.get_double_attribute("lower");
-      double upper = u.get_double_attribute("upper");
+      double lower = u.required_double_attribute("lower");
+      double upper = u.required_double_attribute("upper");
       baseline.mean = (lower + upper) / 2.0;
       baseline.variance = (upper - lower) * (upper - lower) / 12.0;
     } else {
