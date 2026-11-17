@@ -11,10 +11,13 @@
 #     checkout's test/pmml_tester.cc is copied over the revision's, so both
 #     sides dump through the same driver and only the library differs (as
 #     tools/bench-ab.sh does with the benchmark driver); --tester own keeps
-#     the revision's own tester. Builds are kept under --work and reused;
-#     worktrees are removed on exit.
+#     the revision's own tester. Worktrees are removed on exit; build
+#     directories stay under --work, so a later run skips configure, but the
+#     fresh checkout's new mtimes make it rebuild most of the library.
 # Both sides score the same fixtures, --fixtures (default: this checkout's
-# test/data), with `pmml_tester.exe <zip> <inputs> --dump <csv>`: the
+# test/data), with `pmml_tester.exe <zip> <inputs> --dump <csv>`, the inputs
+# being every column of the fixture as ctest passes them (target included, so
+# residual OutputFields are scored; an empty or N/A cell is left out): the
 # predicted value and every OutputField of every row, as JPMML would write
 # them, "N/A" for no value, "ERROR: ..." for a row that throws, and for a
 # time-series fixture the forecast (and variance) of every step. A model that
