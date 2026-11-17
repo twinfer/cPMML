@@ -15,10 +15,12 @@ with side "base" or "head"; build is "seq", "omp" or "build" and mode "eval" or
     evaluate time, and its 95% bootstrap interval (4 000 resamples, each side
     resampled independently). FAIL when the lower bound exceeds 1.03;
   * load time the same way, FAIL when the lower bound exceeds 1.10;
-  * the geometric mean of the evaluate ratios over every model, with an
-    interval from resampling rounds jointly (one draw of round numbers is
-    applied to every model and to both sides, so noise shared by a round
-    stays paired). FAIL when it exceeds 1.01 and its lower bound exceeds 1.00.
+  * the geometric mean of the evaluate ratios over every model, with a 95%
+    interval (4 000 resamples) from resampling rounds jointly: both sides of a
+    model share each draw, every model draws uniformly over its own rounds,
+    and the draws that fall in the rounds all models have are shared across
+    models, so noise shared by a sweep stays paired (see joint_geomean). FAIL
+    when it exceeds 1.01 and its lower bound exceeds 1.00.
 
 A model that fails in RAW is judged again on RERUN alone when RERUN holds
 fresh rounds for it ("re-run once; it fails the gate only if it fails again"),
@@ -87,11 +89,17 @@ def ratio_ci(base, head, rng, n):
 
 
 def joint_geomean(models, rng, n):
-    """Geomean of eval ratios; bootstrap draws one set of round indices per
-    resample and applies it to every model and both sides. A model with fewer
-    rounds than the longest uses the first len(rounds) draws, mapped onto its
-    own rounds by index modulo its count (rounds 1..15 of every model ran in the
-    same sweeps, so the draws stay time-aligned there)."""
+    """Geomean of eval ratios and its 95% interval, rounds resampled jointly.
+
+    A model with k paired rounds draws k of them per resample, uniformly over
+    its own k, and base and head always use the same draws. Across models the
+    draws are coupled: let c be the fewest rounds any model has (15; the first
+    c rounds of every model ran in the same sweeps). Draw j of a model picks,
+    with probability c/k, the shared round s_j (uniform over the first c,
+    the same s_j for every model), and otherwise round c + floor(t_j (k - c))
+    with t_j uniform in [0, 1). Each round thus has probability 1/k, and noise
+    shared by a sweep stays paired across models wherever their draws fall in
+    the common rounds."""
 
     def geo(sample_of):
         logs = []
@@ -100,12 +108,19 @@ def joint_geomean(models, rng, n):
             logs.append(math.log(med([head[rounds[i]] for i in idx]) / med([base[rounds[i]] for i in idx])))
         return math.exp(sum(logs) / len(logs))
 
+    common = min(len(rounds) for rounds, _, _ in models)
     longest = max(len(rounds) for rounds, _, _ in models)
     point = geo(lambda k: range(k))
     rs = []
     for _ in range(n):
-        draw = [rng.randrange(longest) for _ in range(longest)]
-        rs.append(geo(lambda k, draw=draw: [d % k for d in draw[:k]]))
+        shared = [rng.randrange(common) for _ in range(longest)]
+        coin = [rng.random() for _ in range(longest)]
+        tail = [rng.random() for _ in range(longest)]
+
+        def sample(k, shared=shared, coin=coin, tail=tail):
+            return [shared[j] if coin[j] * k < common else common + int(tail[j] * (k - common)) for j in range(k)]
+
+        rs.append(geo(sample))
     rs.sort()
     return point, rs[int(0.025 * n)], rs[int(0.975 * n)]
 
@@ -208,7 +223,7 @@ def main():
                 f"[{elo:.3f},{ehi:.3f}]  {lr:7.3f} [{llo:.3f},{lhi:.3f}]  {verdict}"
                 + ("  " + "; ".join(notes) if notes else "")
             )
-        g, glo, ghi = joint_geomean(geo_input, rng, args.resamples // 2)
+        g, glo, ghi = joint_geomean(geo_input, rng, args.resamples)
         geo_fail = g > GEO_LIMIT and glo > GEO_LOWER
         failed |= geo_fail
         print(

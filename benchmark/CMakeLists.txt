@@ -7,10 +7,11 @@ file(COPY data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 # The two lists below are also the model list of tools/bench-ab.sh, which reads
 # the add_model_benchmark / add_fixture_benchmark lines of this file: one entry
 # per line, arguments separated by spaces. NOISY marks a model whose A/A 95%
-# interval is wider than ±5%; the gate gives it 31 rounds instead of 15. For
-# the 23 Audit/Iris/Housing models that is the list of §6.4; for the fixtures it
-# is those wider than ±5% in at least two of the four groups (sequential and
-# OpenMP builds, eval and --read-all) of the 15-round A/A run made with P0.1.
+# interval is wider than ±5%; the gate gives it 31 rounds instead of 15. One
+# rule for all 36 models: the five of §6.4 item 1 (from the design's sequential
+# A/A study), plus every model wider than ±5% in at least two of the four groups
+# (sequential and OpenMP builds, eval and --read-all) of the A/A run made with
+# P0.1.
 add_custom_target(benchmark)
 add_custom_target(benchmark_all)
 
@@ -52,11 +53,11 @@ add_model_benchmark(AuditBinaryReg Audit)
 add_model_benchmark(AuditRandomForest Audit NOISY)
 add_model_benchmark(AuditTree Audit)
 add_model_benchmark(ensemble_audit_dectree Audit)
-add_model_benchmark(ensemble_iris_dectree Iris)
+add_model_benchmark(ensemble_iris_dectree Iris NOISY)
 add_model_benchmark(IrisLinearReg Iris NOISY)
 add_model_benchmark(IrisMultinomReg Iris NOISY)
 add_model_benchmark(IrisRandomForest Iris)
-add_model_benchmark(IrisTree Iris)
+add_model_benchmark(IrisTree Iris NOISY)
 add_model_benchmark(single_audit_dectree Audit)
 add_model_benchmark(single_iris_dectree Iris NOISY)
 
@@ -65,13 +66,13 @@ add_model_benchmark(HousingRFClassifier Housing ALL_ONLY)
 add_model_benchmark(HousingLRClassifier Housing ALL_ONLY)
 add_model_benchmark(HousingGBTlassifier_PCA Housing ALL_ONLY)
 add_model_benchmark(HousingRFClassifier_PCA Housing ALL_ONLY)
-add_model_benchmark(HousingLRClassifier_PCA Housing ALL_ONLY)
+add_model_benchmark(HousingLRClassifier_PCA Housing NOISY ALL_ONLY)
 add_model_benchmark(HousingGBTRegressor Housing ALL_ONLY)
 add_model_benchmark(HousingRFRegressor Housing ALL_ONLY)
 add_model_benchmark(HousingLinearRegressor Housing ALL_ONLY)
 add_model_benchmark(HousingGBTRegressor_PCA Housing ALL_ONLY)
 add_model_benchmark(HousingRFRegressor_PCA Housing NOISY ALL_ONLY)
-add_model_benchmark(HousingLinearRegressor_PCA Housing ALL_ONLY)
+add_model_benchmark(HousingLinearRegressor_PCA Housing NOISY ALL_ONLY)
 
 # One model per family; REPEAT brings each to roughly 10 000 evaluate calls.
 add_fixture_benchmark(fix_nn_missing_classification 700 NOISY)

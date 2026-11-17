@@ -28,6 +28,7 @@
 // an empty CSV cell is passed as an empty string, as pmml_tester does. The
 // tools/bench-ab.sh gate parses this line; keep its format.
 
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -64,8 +65,10 @@ int main(int argc, char** argv) {
       if (i + 1 >= argc) usage("--repeat needs a value");
       const std::string value = argv[++i];
       char* end = nullptr;
+      errno = 0;
       repeat = std::strtol(value.c_str(), &end, 10);
-      if (value.empty() || *end != '\0' || repeat < 1) usage("--repeat needs a positive integer, got '" + value + "'");
+      if (value.empty() || *end != '\0' || errno == ERANGE || repeat < 1)
+        usage("--repeat needs a positive integer that fits a long, got '" + value + "'");
     } else if (arg.rfind("--", 0) == 0) {
       usage("unknown option " + arg);
     } else {

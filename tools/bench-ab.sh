@@ -32,8 +32,10 @@
 # ...) line (test/data/model/NAME.zip over test/data/dataset/NAME.csv, scored
 # REPEAT times). Both sides read the models and datasets of this checkout.
 #
-# Each round runs, for every model and mode, base and head back to back, base
-# first in odd rounds and head first in even ones. tools/bench-compare.py then
+# A warm-up round (every model, build, mode and side once, discarded) comes
+# first, so that round 1 does not pay for cold caches. Each round then runs,
+# for every model and mode, base and head back to back, base first in odd
+# rounds and head first in even ones. tools/bench-compare.py then
 # applies the gate; a model that fails is re-run once with fresh rounds and
 # fails only if it fails again. Output: OUT/raw.txt, OUT/rerun.txt and
 # OUT/report.txt. Exit status 0 when the gate passes, 1 when it fails.
@@ -96,6 +98,7 @@ fi
 # Worktrees are removed on exit (the builds stay under WORK for the next run).
 WORKTREES=$OUT/worktrees.txt
 : > "$WORKTREES"
+# shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() {
   local src
   while read -r src; do
@@ -104,6 +107,7 @@ cleanup() {
   git -C "$REPO" worktree prune
 }
 trap cleanup EXIT
+# shellcheck disable=SC2329  # invoked through eval below
 build_rev() {  # REV BUILD -> prints the build directory
   local rev=$1 build=$2 sha src dir threads extra=()
   sha=$(git -C "$REPO" rev-parse --verify --quiet "$rev^{commit}") || die "not a revision or build directory: $rev"
@@ -182,6 +186,20 @@ run_one() {  # BUILD MODE ROUND SIDE NAME ARGS...
   [[ $out == *"Evaluate time:"* ]] || die "$name ($build $mode $side): unexpected output: $out"
   echo "$build $mode $round $side $name $out"
 }
+warm_up() {  # one discarded run of every model, build, mode and side
+  local name noisy args b m
+  while read -r name noisy args; do
+    for b in ${BUILDS//,/ }; do
+      for m in ${MODES//,/ }; do
+        # shellcheck disable=SC2086
+        run_one "$b" "$m" 0 base "$name" $args > /dev/null
+        # shellcheck disable=SC2086
+        run_one "$b" "$m" 0 head "$name" $args > /dev/null
+      done
+    done
+  done < "$SPEC"
+  echo "warm-up done" >&2
+}
 run_rounds() {
   local log=$1 first=$2 last=$3 filter=${4:-} r name noisy args top n=$(( $3 - $2 + 1 ))
   top=$(( first + 2 * n ))
@@ -207,6 +225,7 @@ run_rounds() {
 }
 
 : > "$OUT/raw.txt"
+warm_up
 run_rounds "$OUT/raw.txt" 1 "$ROUNDS"
 status=0
 python3 "$REPO/tools/bench-compare.py" "$OUT/raw.txt" --fail-list "$OUT/failed.txt" > "$OUT/first-report.txt" || status=$?
