@@ -156,9 +156,6 @@ class InternalModel {
     if (shown == Shown::NUMBER) {
       if (is_double_min(score.double_score)) return;  // not a number: nothing to rewrite
       score.score = java::text({score.double_score, shown_kind});
-      double raw = 0;
-      if (!score.raw_score.empty() && java::parse(score.raw_score, raw))
-        score.raw_score = java::text({raw, shown_kind});
       return;
     }
     if (score.raw_score.empty() || score.raw_score == score.score) {
@@ -379,20 +376,8 @@ class InternalModel {
   // on its own: JPMML 1.7.7 does so for selectFirst, selectAll and modelChain
   // segments, while the MiningModel's prediction stays the raw class.
   inline void add_outputs(const Sample& sample, InternalScore& score) const {
-    output.add_output(sample, score);
     const std::unique_ptr<InternalScore> shown = displayed(score);
-    if (!shown) return;
-    for (const auto& of : output.dag) {
-      if (of.expression_type.value != OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE)
-        continue;
-      score.str_outputs.erase(of.name);
-      score.num_outputs.erase(of.name);
-      shown->str_outputs.clear();
-      shown->num_outputs.clear();
-      of.add_output(sample, *shown);
-      score.str_outputs.insert(shown->str_outputs.begin(), shown->str_outputs.end());
-      score.num_outputs.insert(shown->num_outputs.begin(), shown->num_outputs.end());
-    }
+    output.add_output(sample, score, shown.get());
   }
 
   // `score`, a raw-class prediction, named by its displayValue; nullptr when no
@@ -484,8 +469,6 @@ class InternalModel {
     }
 
     std::unique_ptr<InternalScore> score = score_raw(internal_sample);
-    // Preserve the pre-Target prediction, unless the model recorded one itself.
-    if (score->raw_score.empty()) score->raw_score = score->score;
     finish(*score);
     output.add_output(internal_sample, *score);
 

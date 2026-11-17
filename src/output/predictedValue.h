@@ -36,12 +36,21 @@ class PredictedValue : public OutputExpression {
 
   inline Value eval(const Sample& sample) const override { return sample[index].value; }
 
+  // The prediction after the Target: rescaled, clamped and cast for a
+  // regression, and the class value, not the displayValue the Target names it
+  // by, for a classification (raw_score holds the class when score is a
+  // displayValue).
   inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const override {
     return score.raw_score.empty() ? score.score : score.raw_score;
   };
 
+  // The number of that class. Reading double_score, the number of the
+  // displayValue, gave a numeric predictedValue no value whenever a
+  // TargetValue renamed the class (JPMML 1.7.7: class 1 shown as "one" is
+  // predictedValue 1 as integer and 1.0 as double).
   inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
-    return score.double_score;
+    return score.raw_score.empty() || score.raw_score == score.score ? score.double_score
+                                                                     : InternalScore::value_of(score.raw_score);
   };
 };
 

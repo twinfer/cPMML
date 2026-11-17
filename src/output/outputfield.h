@@ -79,27 +79,37 @@ class OutputField {
 
   inline void prepare(Sample& sample) const { sample.change_value_if_missing(index, expression->eval(sample)); }
 
-  inline void add_output(const Sample& sample, InternalScore& score) const {
+  inline Value add_output(const Sample& sample, InternalScore& score) const { return add_output(sample, score, score); }
+
+  // Evaluates the field for the prediction `from` and records it in `into`'s
+  // outputs. Returns the value, missing when the field has none, so that an
+  // OutputField after it can read it (OutputDictionary::add_output).
+  inline Value add_output(const Sample& sample, const InternalScore& from, InternalScore& into) const {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING: {
-        std::string sv = expression->eval_str(sample, score);
+        std::string sv = expression->eval_str(sample, from);
         // A string OutputField over a number (a probability, a
         // transformedValue over a numeric expression): the number as JPMML
         // writes its type.
         if (sv.empty() && expression->value_kind) {
-          const double v = expression->eval_double(sample, score);
+          const double v = expression->eval_double(sample, from);
           if (!is_double_min(v)) sv = java::text({v, *expression->value_kind});
         }
-        if (!sv.empty()) score.str_outputs[name] = sv;
-        break;
+        if (sv.empty()) return Value();
+        into.str_outputs[name] = sv;
+        return Value(sv, datatype);
       }
       default: {
-        double v = expression->eval_double(sample, score);
-        if (!is_double_min(v))
-          score.num_outputs[name] = v;
-        break;
+        const double v = expression->eval_double(sample, from);
+        if (is_double_min(v)) return Value();
+        into.num_outputs[name] = v;
+        return Value(v, datatype);
       }
     }
+  }
+
+  inline bool is_display_value() const {
+    return expression_type.value == OutputExpressionType::OutputExpressionTypeValue::PREDICTED_DISPLAY_VALUE;
   }
 
   inline static std::vector<OutputField> to_outputfields(const std::vector<XmlNode>& nodes,

@@ -36,7 +36,10 @@ class InternalScore {
 
   bool empty = true;
   std::string score;
-  std::string raw_score;  // pre-Target-transform prediction (predictedValue uses this)
+  // The class value when `score` is the displayValue a Target names it by
+  // (predictedValue, probability and residual read the class); empty or equal
+  // to `score` otherwise. Never the prediction from before the Target.
+  std::string raw_score;
   double double_score = double_min();
   std::unordered_map<std::string, double> probabilities;
   std::unordered_map<std::string, double> num_outputs;

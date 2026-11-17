@@ -37,7 +37,8 @@ class OutputDictionary {
   OutputDictionary(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
       : empty(false),
         raw_outputfields(OutputField::to_outputfields(node.get_childs("OutputField"), indexer, model_target)),
-        dag(build_dag(raw_outputfields)) {}
+        dag(build_dag(raw_outputfields)),
+        reads_outputs(any_reads_outputs(raw_outputfields)) {}
 
   inline bool contains(const std::string& field_name) const {
     for (const auto& of : raw_outputfields)
@@ -85,8 +86,41 @@ class OutputDictionary {
     for (const auto& outputfield : dag) outputfield.prepare(sample);
   }
 
-  inline void add_output(const Sample& sample, InternalScore& score) const {
-    for (const auto& outputfield : dag) outputfield.add_output(sample, score);
+  // Every OutputField for the prediction `score`, in dependency order. A
+  // transformedValue may read another OutputField of the model (PMML 4.4.1
+  // Output, Example 1: NormContinuous field="RawResult", a predictedValue
+  // OutputField; JPMML 1.7.7 evaluates it): each value is put into a copy of
+  // the sample as it is computed, so a FieldRef to it reads the post-Target
+  // value the field reports. They used to be read from the sample, where
+  // nothing had written them, so such a field had no value.
+  //
+  // `shown`, when given, is the prediction named by its displayValue: what
+  // the predictedDisplayValue fields of a segment report (InternalModel::
+  // add_outputs), and what a field reading them sees.
+  inline void add_output(const Sample& sample, InternalScore& score, const InternalScore* shown = nullptr) const {
+    if (!reads_outputs) {
+      for (const auto& outputfield : dag)
+        outputfield.add_output(sample, shown && outputfield.is_display_value() ? *shown : score, score);
+      return;
+    }
+    Sample local = sample;
+    for (const auto& outputfield : dag) {
+      const Value value =
+          outputfield.add_output(local, shown && outputfield.is_display_value() ? *shown : score, score);
+      local.change_value(outputfield.index, value);
+    }
+  }
+
+ private:
+  // Whether an OutputField reads another one: only then does add_output
+  // need a copy of the sample to put the values in.
+  bool reads_outputs = false;
+
+  static bool any_reads_outputs(const std::vector<OutputField>& fields) {
+    for (const auto& field : fields)
+      for (const auto& other : fields)
+        if (field.expression->inputs.count(other.name)) return true;
+    return false;
   }
 };
 

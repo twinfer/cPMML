@@ -265,6 +265,13 @@ class Target {
         }
         // score string representation must be updated accordingly
         score.score = java::double_text(score.double_score);
+        // A number has no raw value apart from its displayed one: the
+        // predictedValue of a regression is the value after min/max,
+        // rescaleFactor, rescaleConstant and castInteger, whatever its
+        // dataType (JPMML 1.7.7: 0 * 3 + 0.5 gives predictedValue 0.5 as
+        // double and as string). A string predictedValue used to report the
+        // value from before the Target.
+        score.raw_score.clear();
         break;
 
       default:
