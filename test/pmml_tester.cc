@@ -9,6 +9,10 @@
  *   "ASSOCIATION_RULES"  →  transactional or scoring mode (auto-detected)
  *   otherwise            →  scoring mode
  *
+ * In scoring mode the fixture's output_name() column, its target column (the
+ * predicted value, as JPMML writes it; an input when the model has a residual
+ * OutputField) and every OutputField column are checked.
+ *
  * --locale installs a host locale before scoring: results must be identical
  * under a comma-decimal locale. Exits 77 (ctest SKIP) if it is unavailable.
  *
@@ -177,6 +181,68 @@ static bool predicts_number(const std::string& model_zip) {
   return false;
 }
 
+// The model element of the document (the first child of PMML with a
+// functionName) and its target field: the MiningField with
+// usageType="target" (or the deprecated "predicted"), "" when there is none
+// (clustering, say).
+static pugi::xml_node model_element(const pugi::xml_node& pmml) {
+  for (const auto& child : pmml.children())
+    if (child.attribute("functionName")) return child;
+  return {};
+}
+
+static std::string target_name(const pugi::xml_node& top) {
+  for (const auto& field : top.child("MiningSchema").children("MiningField")) {
+    const std::string usage = field.attribute("usageType").value();
+    if (usage == "target" || usage == "predicted") return field.attribute("name").value();
+  }
+  return "";
+}
+
+// The fixture column that holds the predicted value of the target field, as
+// JPMML's EvaluationExample writes it ("the values expected to be computed by
+// the model", MiningSchema.html), or "" when no such column is asserted. A
+// model with a residual OutputField at any depth needs the actual value of
+// the target as an input ("in order for residual values to be computed the
+// input data must include target values", Output.html), so in its fixture the
+// target column is that input, not a prediction, and is not checked.
+static std::string target_column(const std::string& model_zip) {
+  const std::vector<char> document = read_file(model_zip, true);
+  pugi::xml_document xml;
+  if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
+  const pugi::xml_node pmml = xml.child("PMML");
+  if (pmml.select_node("//Output/OutputField[@feature='residual']")) return "";
+  return target_name(model_element(pmml));
+}
+
+// Checks the target column of a fixture row against the predicted value.
+//   - empty cell: not asserted;
+//   - "N/A": the model must give no prediction;
+//   - anything else: the prediction's text must be the cell's exactly, or,
+//     for a model that predicts a number, its value within tolerance.
+static bool check_target(const cpmml::Result& result, const std::unordered_map<std::string, std::string>& row,
+                         const std::string& target_col, const bool numeric_prediction) {
+  const auto it = row.find(target_col);
+  if (it == row.end() || it->second.empty()) return true;
+  const std::string& expected = it->second;
+  const std::string predicted = result.as_string();
+  bool ok;
+  if (expected == "N/A") {
+    ok = predicted.empty();
+  } else {
+    ok = (predicted == expected);
+    if (!ok && numeric_prediction && !predicted.empty() && !is_double_min(result.as_double())) {
+      try {
+        ok = within_tolerance(result.as_double(), expected_double(expected));
+      } catch (const cpmml::ParsingException&) {}
+    }
+  }
+  if (!ok)
+    std::cerr << "target '" << target_col << "': predicted: " << (predicted.empty() ? "no prediction" : predicted)
+              << "  expected: " << expected << "  sample: " << to_string(row) << std::endl;
+  return ok;
+}
+
 static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<std::string, std::string> row,
                      const std::string& model_zip) {
   const std::string out_col = model.output_name();
@@ -184,6 +250,10 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
   const auto names = model.output_names();
   std::unordered_set<std::string> declared_outputs(names.cbegin(), names.cend());
   for (const auto& name : segment_output_names(model_zip)) declared_outputs.insert(name);
+  // The target column, when the fixture has one and it is not the predicted
+  // column already checked below.
+  std::string target_col = target_column(model_zip);
+  if (target_col == out_col || !row.count(target_col)) target_col.clear();
 
   if (!row.count(out_col)) {
     std::cerr << "output column '" << out_col << "' not found in fixture CSV" << std::endl;
@@ -206,6 +276,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
                   << "  sample: " << to_string(row) << std::endl;
         return -1;
       }
+      if (!target_col.empty() && !check_target(result, row, target_col, numeric_prediction)) return -1;
       if (!check_other_outputs(result, row, out_col, declared_outputs)) return -1;
       row = reader.read();
       continue;
@@ -244,6 +315,8 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
                 << std::endl;
       return -1;
     }
+
+    if (!target_col.empty() && !check_target(result, row, target_col, numeric_prediction)) return -1;
 
     // Verify every other oracle column the model claims to produce
     // (probability/transformedValue/... OutputFields keyed by name).
@@ -504,23 +577,11 @@ static int run_dump(cpmml::Model& model, const std::string& model_zip, const std
   pugi::xml_document xml;
   if (!xml.load_string(document.data())) throw std::runtime_error("cannot parse " + model_zip);
   const pugi::xml_node pmml = xml.child("PMML");
-  pugi::xml_node top;
-  for (const auto& child : pmml.children())
-    if (child.attribute("functionName")) {
-      top = child;
-      break;
-    }
+  const pugi::xml_node top = model_element(pmml);
   std::unordered_map<std::string, std::string> types;
   for (const auto& field : pmml.child("DataDictionary").children("DataField"))
     types[field.attribute("name").value()] = field.attribute("dataType").value();
-  std::string target;
-  for (const auto& field : top.child("MiningSchema").children("MiningField")) {
-    const std::string usage = field.attribute("usageType").value();
-    if (usage == "target" || usage == "predicted") {
-      target = field.attribute("name").value();
-      break;
-    }
-  }
+  const std::string target = target_name(top);
   // No target field (clustering, say): JPMML names the predicted column "".
 
   std::vector<std::string> columns{target};
