@@ -8,6 +8,8 @@
 #define CPMML_MODEL_H
 
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -50,6 +52,14 @@ class InternalModel {
   OutputDictionary output;
   Sample base_sample;
   std::vector<std::string> derivedfields_dag;
+  // The names this model's own LocalTransformations define.
+  std::unordered_set<std::string> local_derivedfields;
+  // The DerivedFields this model evaluates itself when it runs as a Segment,
+  // in dependency order: its own LocalTransformations, and any field of its
+  // derivedfields_dag that the enclosing MiningModel does not evaluate. Set by
+  // scope_under(); empty for a top-level model, which evaluates its whole
+  // derivedfields_dag in score().
+  std::vector<std::string> segment_dag;
 
   InternalModel() = default;
 
@@ -72,6 +82,7 @@ class InternalModel {
         output(get_output(node, indexer, target_field.name)),
         base_sample(create_basesample(indexer)),
         derivedfields_dag(DagBuilder::build(mining_schema, this->transformation_dictionary)),
+        local_derivedfields(get_local_derivedfields(node)),
         is_scorable(check_scorable(node)) {}
 
   std::string output_name() const {
@@ -111,6 +122,74 @@ class InternalModel {
     return mining_schema.validate(internal_sample);
   }
 
+  // ---- this model as a Segment ---------------------------------------------
+  //
+  // A segment model's LocalTransformations are evaluated as when the model is
+  // scored on its own, and stay local to it, as in JPMML 1.7.7: a sibling
+  // segment, a later modelChain segment, or the enclosing MiningModel's
+  // OutputFields do not see them. The enclosing MiningModel has already
+  // evaluated its own derivedfields_dag (in score(), or as a segment itself),
+  // so a segment evaluates only what that leaves out: its own
+  // LocalTransformations (which may shadow an outer field of the same name)
+  // and an outer field whose inputs only this model's MiningSchema provides.
+  // These used to be evaluated only for the first segment a modelChain ran,
+  // and there on the shared sample, so every other segment read its own
+  // LocalTransformations as missing (no prediction), and later modelChain
+  // segments read the first one's.
+  void scope_under(const std::vector<std::string>& parent_dag) {
+    const std::unordered_set<std::string> evaluated(parent_dag.cbegin(), parent_dag.cend());
+    segment_dag.clear();
+    for (const auto& name : derivedfields_dag)
+      if (local_derivedfields.count(name) || !evaluated.count(name)) segment_dag.push_back(name);
+  }
+
+  // Runs f on the sample as this segment sees it. A model with nothing to
+  // evaluate reads the enclosing sample directly; otherwise on a private copy,
+  // so that segments scored in parallel (MULTITHREADING) never share one.
+  template <class F>
+  inline auto in_segment_scope(const Sample& sample, F&& f) const {
+    if (segment_dag.empty()) return f(sample);
+    Sample local = sample;
+    for (const auto& name : segment_dag) transformation_dictionary[name].prepare(local);
+    return f(static_cast<const Sample&>(local));
+  }
+
+  // The same for a modelChain step, which writes its target and OutputFields
+  // into the chain's sample: segment_dag is evaluated in place and the
+  // previous values put back when the step ends, so only what the step writes
+  // outlives it.
+  class ChainScope {
+   public:
+    ChainScope(const InternalModel& model, Sample& sample) : model(model), sample(sample) {
+      saved.reserve(model.segment_dag.size());
+      for (const auto& name : model.segment_dag) {
+        const DerivedField& field = model.transformation_dictionary[name];
+        saved.emplace_back(field.index, sample[field.index].value);
+        field.prepare(sample);
+      }
+    }
+    ~ChainScope() {
+      for (auto it = saved.rbegin(); it != saved.rend(); ++it)
+        if (!model.writes(it->first)) sample.change_value(it->first, it->second);
+    }
+    ChainScope(const ChainScope&) = delete;
+    ChainScope& operator=(const ChainScope&) = delete;
+
+   private:
+    const InternalModel& model;
+    Sample& sample;
+    std::vector<std::pair<size_t, Value>> saved;
+  };
+
+  // Whether a modelChain step writes the sample slot: its target or one of its
+  // OutputFields.
+  inline bool writes(const size_t index) const {
+    if (index == indexer->get_index(target_field.name)) return true;
+    for (const auto& of : output.dag)
+      if (of.index == index) return true;
+    return false;
+  }
+
   // Model-chain steps. Each returns whether the model made a prediction, after
   // its own Targets: a step with no prediction of its own but a
   // priorProbability or defaultValue predicts that, as a standalone model does.
@@ -118,15 +197,8 @@ class InternalModel {
   // OutputField, so the segments after it see missing inputs, rather than
   // converting "" to a number and throwing. The value written for the next
   // steps is the raw class, not its displayValue, as in JPMML 1.7.7.
-  inline bool augment_first(Sample& sample) const {
-    if (!transformation_dictionary.empty)
-      for (const auto& derivedfield_name : derivedfields_dag)
-        transformation_dictionary[derivedfield_name].prepare(sample);
-
-    return augment(sample);
-  };
-
   inline bool augment(Sample& sample) const {
+    ChainScope scope(*this, sample);
     std::unique_ptr<InternalScore> score = score_raw(sample);
     target(*score, false);
     if (score->empty) {
@@ -139,6 +211,7 @@ class InternalModel {
   };
 
   inline std::unique_ptr<InternalScore> augment_last(Sample& sample) const {
+    ChainScope scope(*this, sample);
     std::unique_ptr<InternalScore> score = score_raw(sample);
     target(*score);
     output.add_output(sample, *score);
@@ -267,6 +340,14 @@ class InternalModel {
     }
 
     return false;
+  }
+
+  static inline std::unordered_set<std::string> get_local_derivedfields(const XmlNode& node) {
+    std::unordered_set<std::string> names;
+    if (node.exists_child("LocalTransformations"))
+      for (auto const& n : node.get_child("LocalTransformations").get_childs("DerivedField"))
+        names.insert(n.get_attribute("name"));
+    return names;
   }
 
   static Sample create_basesample(const std::shared_ptr<Indexer>& indexer) {

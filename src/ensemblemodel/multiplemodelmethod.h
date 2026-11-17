@@ -504,6 +504,9 @@ class MultipleModelMethod {
   // The segment last in the document is final whenever it is selected and runs
   // only once.
   //
+  // Each step evaluates its own LocalTransformations, which are gone again when
+  // the step ends: the next segments read its target and OutputFields only.
+  //
   // A segment without a prediction leaves its target and OutputFields missing
   // for the segments after it (continue), or voids the chain (returnMissing).
   // skipSegment, which JPMML refuses here, acts as continue. JPMML also throws
@@ -521,7 +524,7 @@ class MultipleModelMethod {
       if (i + 1 == ensemble.size()) return segment.model->augment_last(tmp_sample);
 
       before_last = tmp_sample;
-      const bool predicted = last ? segment.model->augment(tmp_sample) : segment.model->augment_first(tmp_sample);
+      const bool predicted = segment.model->augment(tmp_sample);
       if (!predicted && mp.treatment == MissingPredictionTreatment::RETURN_MISSING)
         return std::make_unique<InternalScore>();
       last = &segment;

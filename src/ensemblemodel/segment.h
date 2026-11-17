@@ -45,13 +45,22 @@ class Segment {
   // prediction but has a prior or a default is not empty, and
   // missingPredictionTreatment never sees it. Classes stay raw values, not
   // displayValues, as in JPMML 1.7.7 (see Target::operator()).
+  //
+  // The model reads its own LocalTransformations, evaluated on a copy of the
+  // enclosing sample (InternalModel::in_segment_scope). The predicate does
+  // not: it belongs to the enclosing MiningModel and is evaluated there.
   inline std::unique_ptr<InternalScore> score(const Sample& sample) const {
-    std::unique_ptr<InternalScore> result = model->score_raw(sample);
-    model->target(*result, false);
-    return result;
+    return model->in_segment_scope(sample, [this](const Sample& s) {
+      std::unique_ptr<InternalScore> result = model->score_raw(s);
+      model->target(*result, false);
+      return result;
+    });
   }
 
-  inline std::string predict(const Sample& sample) const { return model->target(model->predict_raw(sample), false); }
+  inline std::string predict(const Sample& sample) const {
+    return model->in_segment_scope(sample,
+                                   [this](const Sample& s) { return model->target(model->predict_raw(s), false); });
+  }
 };
 
 #endif

@@ -67,7 +67,9 @@ class DagBuilder {
       if (transformation_dictionary.contains(input)) {
         buildR(transformation_dictionary[input], dag, visited, removed, in_progress, minining_schema,
                transformation_dictionary);
-      } else if (!minining_schema.contains(input)) {
+      } else if (!minining_schema.references(input)) {
+        // A MiningField that is no DataField (an earlier modelChain segment's
+        // OutputField, say) is an input too: references(), not contains().
         removed.insert(derived_field.name);
         visited.insert(derived_field.name);
         in_progress.erase(derived_field.name);

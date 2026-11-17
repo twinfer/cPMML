@@ -8,6 +8,7 @@
 #define CPMML_MININGSCHEMA_H
 
 #include <unordered_map>
+#include <unordered_set>
 
 #include "datafield.h"
 #include "miningfield.h"
@@ -32,6 +33,11 @@ class MiningSchema {
   std::vector<MiningField> miningfields;
   MiningField target;
   size_t target_index = std::numeric_limits<size_t>::max();
+  // MiningFields naming no DataField: in a Segment, the OutputFields of the
+  // modelChain segments before it, or the DerivedFields of the enclosing
+  // MiningModel. They carry no MiningField treatment, but they are in the
+  // model's scope, so a LocalTransformations DerivedField may read them.
+  std::unordered_set<std::string> other_fields;
 
   MiningSchema() = default;
 
@@ -39,7 +45,18 @@ class MiningSchema {
       : raw_miningfields(MiningField::to_miningfields(node.get_childs("MiningField"), data_dictionary)),
         miningfields(to_values<std::string, MiningField>(raw_miningfields)),
         target(get_target(miningfields)),
-        target_index(target.index) {}
+        target_index(target.index),
+        other_fields(get_other_fields(node, data_dictionary)) {}
+
+  inline static std::unordered_set<std::string> get_other_fields(const XmlNode& node,
+                                                                const DataDictionary& data_dictionary) {
+    std::unordered_set<std::string> result;
+    for (const auto& child : node.get_childs("MiningField")) {
+      const std::string name = child.get_attribute("name");
+      if (data_dictionary.datafields.find(name) == data_dictionary.datafields.cend()) result.insert(name);
+    }
+    return result;
+  }
 
   inline static MiningField get_target(const std::vector<MiningField>& miningfields) {
     for (const auto& miningfield : miningfields) {
@@ -57,6 +74,11 @@ class MiningSchema {
 
   inline bool contains(const std::string& feature_name) const {
     return raw_miningfields.find(feature_name) != raw_miningfields.cend();
+  }
+
+  // Whether the MiningSchema lists the field at all, DataField or not.
+  inline bool references(const std::string& feature_name) const {
+    return contains(feature_name) || other_fields.find(feature_name) != other_fields.cend();
   }
 
   inline const MiningField& at(const std::string& feature_name) const { return raw_miningfields.at(feature_name); }

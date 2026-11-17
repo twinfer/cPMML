@@ -52,10 +52,14 @@ class EnsembleModel : public InternalModel {
                             MultipleModelMethod::missing_prediction_from(node.get_child("Segmentation")),
                             MultipleModelMethod::classes_of(InternalModel::target_field)) {
     PredicateBuilder predicate_builder(indexer);
-    for (const auto& child : node.get_child("Segmentation").get_childs("Segment"))
-      ensemble.push_back(Segment(child, predicate_builder,
-                                 build_segment_model(child, data_dictionary, InternalModel::transformation_dictionary,
-                                                     predicate_builder, indexer)));
+    for (const auto& child : node.get_child("Segmentation").get_childs("Segment")) {
+      std::shared_ptr<InternalModel> model = build_segment_model(
+          child, data_dictionary, InternalModel::transformation_dictionary, predicate_builder, indexer);
+      // What this MiningModel's scope has evaluated by the time a segment runs:
+      // its whole derivedfields_dag (see InternalModel::scope_under).
+      model->scope_under(InternalModel::derivedfields_dag);
+      ensemble.push_back(Segment(child, predicate_builder, model));
+    }
 
     score_ensemble = std::bind(multiplemodelmethod.function, std::placeholders::_1, ensemble);
     base_sample = create_basesample(indexer);
