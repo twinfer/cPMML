@@ -244,13 +244,14 @@
           "kinds": [
             "ERROR_CPMML_ONLY"
           ],
-          "cpmml": "Invalid value for field \\w+: \"\"?[^\"]*\"\"? is not a valid (boolean|integer|double|float)"
+          "cpmml": "Invalid value for field \\w+: \"((?!true\"|false\")(?i:true|false)\" is not a valid boolean|[+-]?(\\d+\\.\\d*|\\.\\d+|\\d+(\\.\\d*)?[eE][+-]?\\d+)\" is not a valid integer|(?!-?INF\"|NaN\")[+-]?(?i:inf|infinity|nan)\" is not a valid (double|float)|[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?[dDfF]\" is not a valid (double|float))"
         },
         {
           "kinds": [
-            "LOAD_CPMML_ONLY"
+            "LOAD_CPMML_ONLY",
+            "LOAD_CPMML_ROWS_JPMML"
           ],
-          "cpmml": "\"[^\"]*\" is not a valid (boolean|integer|double|float)"
+          "cpmml": "\"(?!(true|false|1|0)\" is not a valid boolean)(?![+-]?\\d+\" is not a valid integer)(?!([+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?|-?INF|NaN)\" is not a valid (double|float))[^\"]*\" is not a valid (boolean|integer|double|float)"
         }
       ]
     },

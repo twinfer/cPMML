@@ -2,7 +2,7 @@
  * JpmmlOracle -- the JPMML 1.7.7 side of the differential fuzzer
  * (docs/design/typed-core.md §8.2). One JVM scores every case of a corpus.
  *
- * Build and run (tools/fuzz/run.sh does both):
+ * Build and run (tools/fuzz/run.py does both):
  *   javac -cp tools/pmml-evaluator-example-executable-1.7.7.jar -d OUT tools/fuzz/JpmmlOracle.java
  *   java -cp OUT:tools/pmml-evaluator-example-executable-1.7.7.jar JpmmlOracle MANIFEST
  *

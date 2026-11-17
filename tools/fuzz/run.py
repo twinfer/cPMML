@@ -9,7 +9,8 @@ cPMML through test/fuzz_runner.cc (one process for every case).
 
 If fuzz_runner dies on a case (a crash is a finding, not a reason to stop),
 that case's output is a one-column file "CRASH" and the run resumes with the
-next case.
+next case. A fuzz_runner that stops before any case or exits 2 (its
+usage or manifest error) stops run.py instead.
 
 Usage:
   tools/fuzz/run.py --corpus DIR --runner BUILD/test/fuzz_runner.exe
@@ -63,7 +64,12 @@ def run_cpmml(corpus: Path, ids, runner: str) -> None:
         done = 0
         while done < len(remaining) and (corpus / "cpmml" / f"{remaining[done]}.csv").exists():
             done += 1
-        crashed = remaining[done - 1] if done else remaining[0]
+        if not done or proc.returncode == 2:
+            # Exit 2 is fuzz_runner refusing its arguments or a manifest
+            # line, and with no output file no case started: neither is a
+            # crash of a case, so stop rather than blame one.
+            sys.exit(f"run.py: fuzz_runner exited {proc.returncode} on manifest {m} (not a case crash)")
+        crashed = remaining[done - 1]
         print(f"run.py: fuzz_runner exited {proc.returncode} on {crashed}", file=sys.stderr)
         with open(corpus / "cpmml" / f"{crashed}.csv", "w") as f:
             f.write(f"CRASH\nCRASH: exit {proc.returncode}\n")

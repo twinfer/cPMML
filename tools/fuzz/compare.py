@@ -4,10 +4,13 @@ compare.py -- classify every cell of a fuzz run (docs/design/typed-core.md
 §8.4) and match the disagreements against tools/fuzz/departures.json.
 
 Per case (outputs written by tools/fuzz/run.py):
-  LOAD_BOTH          neither loads the document (pass); also when cPMML
-                     refuses it at load and JPMML loads it but fails every
-                     row (both refuse it, JPMML only later)
+  LOAD_BOTH          neither loads the document (pass)
   LOAD_CPMML_ONLY    cPMML refuses a document JPMML scores
+  LOAD_CPMML_ROWS_JPMML
+                     cPMML refuses a document JPMML loads but fails on every
+                     row; a finding like LOAD_CPMML_ONLY, kept apart because
+                     JPMML's row errors are often unrelated to cPMML's load
+                     error (an edge value in the row, a missing argument)
   LOAD_JPMML_ONLY    JPMML refuses a document cPMML scores
   CRASH              fuzz_runner died on the case (always a finding)
 Per cell of every column JPMML writes (a column cPMML lacks is MISSING_COLUMN):
@@ -131,10 +134,15 @@ def compare_case(meta, corpus: Path):
         if jload and cload:
             kind = "LOAD_BOTH"
         elif cload and len(j) > 1 and all(is_error(r[0]) for r in j[1:]):
-            kind = "LOAD_BOTH"
+            kind = "LOAD_CPMML_ROWS_JPMML"
         else:
             kind = "LOAD_CPMML_ONLY" if cload else "LOAD_JPMML_ONLY"
-        jtext = j[1][0] if jload else ("(every row: " + j[1][0] + ")" if kind == "LOAD_BOTH" else "(scores)")
+        if jload:
+            jtext = j[1][0]
+        elif kind == "LOAD_CPMML_ROWS_JPMML":
+            jtext = "(every row) " + j[1][0]
+        else:
+            jtext = "(scores)"
         yield dict(base, kind=kind, row=-1, inrow={}, column="", jpmml=jtext, cpmml=c[1][0] if cload else "(scores)")
         return
     jhead, chead = j[0], c[0]
@@ -170,6 +178,8 @@ def group_key(cell):
     difference by the context, the declared type of x and the outermost
     element of the expression."""
     j, c = cell["jpmml"], cell["cpmml"]
+    if j.startswith("(every row) "):
+        j = j[len("(every row) "):]
     j_err = is_error(j) or j.startswith("LOAD-ERROR")
     c_err = is_error(c) or c.startswith(("LOAD-ERROR", "CRASH"))
     if j_err or c_err:
