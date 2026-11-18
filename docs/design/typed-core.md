@@ -1322,6 +1322,21 @@ each round; `design/aab_stats.txt`) shows:
    lower bound exceeds 1.00, i.e. a broad 1% slowdown that is statistically
    real. The A/A geomean, 0.994, sits within that band's noise.
 4. Load: same method, per-model threshold 1.10.
+   **Waiver W1 (decided 2026-11-18, expires at P7a.2).** From P2.1 the
+   binder runs at every load in front of today's Indexer, which it does not
+   yet replace. On models that load in under about 0.3 ms that adds a mostly
+   fixed cost (measured in P2.1: 33–50 µs for the first bind in a process,
+   8 µs warm, 30–40 ns per resolved reference), which fails item 4 on its
+   own: IrisMultinomReg 1.28–1.35, the Housing linear models and IrisTree
+   1.21–1.29, ensemble_iris_dectree 1.15–1.20. Until P7a.2 deletes the
+   Indexer, P2.1 may fail item 4 only on models whose load is
+   below 1 ms, and only by the binder's fixed cost; its message gives the
+   ratios. The waiver covers load time only: items 2, 3 and 5–7 apply
+   unchanged, and every commit after P2.1 still passes item 4 against its
+   own predecessor (the waiver covers the binder's arrival, not later
+   growth). **At P7a.2 the waiver ends and the load gate compares P7a.2
+   against 425b709, the last commit before the binder ran at load; it must
+   pass item 4 there with no waiver.**
 5. Both benchmark modes: `evaluate` only, and `--read-all` (also calls
    `as_string`, `distribution`, `num_outputs`, `str_outputs`), so that P8's
    lazy result maps are not counted as a win they are not.
