@@ -232,6 +232,43 @@ void rule_cases() {
                         "</Segment></Segmentation></MiningModel>\n"),
          {"E-NAME-DUPLICATE"});
 
+  expect("chain-output-duplicates-parent-output",
+         "FieldScope.html: segment Outputs \"become part of the enclosing mining model scope\"; OutputField names "
+         "\"must be unique from any other names in their scope\"",
+         pmml(kNum, "<MiningModel functionName=\"regression\"><MiningSchema>" + kMining +
+                        "</MiningSchema><Output><OutputField name=\"o\" dataType=\"double\" "
+                        "feature=\"predictedValue\"/></Output><Segmentation multipleModelMethod=\"modelChain\">"
+                        "<Segment id=\"1\"><True/>" +
+                        regression(kMining,
+                                   "<Output><OutputField name=\"o\" dataType=\"double\" feature=\"predictedValue\"/>"
+                                   "</Output>",
+                                   "s1") +
+                        "</Segment></Segmentation></MiningModel>\n"),
+         {"E-NAME-DUPLICATE"});
+  expect("ensemble-output-same-as-parent-output",
+         "FieldScope.html: outside a chain, Outputs \"are generally local to a model\"",
+         pmml(kNum, "<MiningModel functionName=\"regression\"><MiningSchema>" + kMining +
+                        "</MiningSchema><Output><OutputField name=\"o\" dataType=\"double\" "
+                        "feature=\"predictedValue\"/></Output><Segmentation multipleModelMethod=\"sum\">"
+                        "<Segment id=\"1\"><True/>" +
+                        regression(kMining,
+                                   "<Output><OutputField name=\"o\" dataType=\"double\" feature=\"predictedValue\"/>"
+                                   "</Output>",
+                                   "s1") +
+                        "</Segment></Segmentation></MiningModel>\n"),
+         {});
+  expect("output-named-like-unlisted-datafield",
+         "FieldScope.html: DataField names unique only from DataFields and TD DerivedFields; \"In general, field "
+         "names in PMML should be unique\"",
+         pmml(kNum + field("z", "double"),
+              regression(kMining, "<Output><OutputField name=\"z\" dataType=\"double\" "
+                                  "feature=\"predictedValue\"/></Output>")),
+         {"W-NAME-SHADOWS-DATAFIELD"});
+  expect("local-named-like-unlisted-datafield",
+         "FieldScope.html: the LocalTransformations-vs-DataFields rule is quoted as PMML 3.0 history",
+         pmml(kNum + field("z", "double"), regression(kMining, lt(derived("z", "double", ref("x"))))),
+         {"W-NAME-SHADOWS-DATAFIELD"});
+
   // ---- order (§3.5)
   expect("forward-local",
          "FieldScope.html: \"Forward referencing of fields is not allowed\" (Q4); B12: the later "
@@ -279,6 +316,21 @@ void rule_cases() {
          in_model(derived("u", "double", call("+", constant("inf", "double") + ref("x")))), {});
   expect("constant-typed-malformed", "a typed Constant's text is a value of its dataType",
          in_model(derived("u", "double", call("+", constant("2.5", "integer") + ref("x")))), {"E-VALUE-MALFORMED"});
+  expect("constant-untyped-blank-is-string",
+         "pmml-4-4.xsd: Constant extends xs:string (whiteSpace preserve); \"The presence of any non-numeric "
+         "characters ... will result in the Constant being treated as a string\"; §2.5 no arithmetic on string",
+         in_model(derived("u", "double", call("+", constant(" 1") + ref("x")))), {"E-TYPE-PARAM"});
+  expect("constant-untyped-blank-concat", "an untyped \" 1\" is the string \" 1\"",
+         in_model(derived("u", "string", call("concat", constant(" 1") + constant("x")), "categorical")), {});
+  expect("constant-typed-blank-collapsed", "xs:double whiteSpace collapse: a typed \" 1 \" is 1",
+         in_model(derived("u", "double", call("+", constant(" 1 ", "double") + ref("x")))), {});
+  expect("constant-typed-blanks-only",
+         "\"If the content is empty\" is the xs:string content: blanks are not empty, and collapse to \"\", "
+         "outside xs:double",
+         in_model(derived("u", "double", call("+", constant(" ", "double") + ref("x")))), {"E-VALUE-MALFORMED"});
+  expect("constant-typed-empty-missing",
+         "\"If the content is empty ... unless dataType is something besides \"string\", ... a missing value\"",
+         in_model(derived("u", "double", call("+", constant("", "double") + ref("x")))), {});
   expect("constant-overflow", "§3.4: \"integer beyond int64 -> load error\" (D4)",
          in_model(derived("u", "double", call("+", constant("99999999999999999999") + ref("x")))),
          {"E-VALUE-MALFORMED"});

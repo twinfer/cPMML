@@ -192,7 +192,14 @@ class Binder {
   explicit Binder(std::string_view text) {
     for (std::size_t i = 0; i < text.size(); i++)
       if (text[i] == '\n') newlines_.push_back(i);
-    const pugi::xml_parse_result parsed = doc_.load_buffer(text.data(), text.size());
+    // pugixml's default drops whitespace-only PCDATA, which would make
+    // <Constant dataType="double"> </Constant> read as empty content (a
+    // missing value) when its xs:string content is " " (bind_constant). The
+    // binder keeps a lone blanks-only text child; blanks between elements
+    // (which have siblings) are still dropped. The engine's reader
+    // (core/modelbuilder.h) keeps the default; P2 aligns it.
+    const pugi::xml_parse_result parsed =
+        doc_.load_buffer(text.data(), text.size(), pugi::parse_default | pugi::parse_ws_pcdata_single);
     if (!parsed) {
       add(Severity::Error, code::kXml, nullptr, pugi::xml_node(),
           std::string("the document is not well-formed XML: ") + parsed.description(),
@@ -954,8 +961,14 @@ class Binder {
     if (typed) {
       // "If the content is empty ... unless dataType is something besides
       // "string", in which case, it will be taken as a missing value of the
-      // specified type."
-      if (lexical::trim(text).empty() && *type != TypeId::String) return {type};
+      // specified type." Empty is the xs:string content (pmml-4-4.xsd:
+      // Constant extends xs:string, whiteSpace "preserve"), so blanks-only
+      // text is not empty: it is read as a value of the type, whose
+      // whiteSpace facet collapses it to "", not in that type's lexical
+      // space (E-VALUE-MALFORMED; JPMML 1.7.7 also refuses it). The same
+      // facet lets a typed " 1" read as 1, as it does for an untyped one
+      // only through the string rule (typing.h infer_constant).
+      if (text.empty() && *type != TypeId::String) return {type};
       if (attr(node, "dataType") && parse_datatype(*attr(node, "dataType"))->temporal) return {type};
       types::Value v;
       switch (*type) {
@@ -1790,6 +1803,7 @@ class Binder {
                   "scope\")");
         continue;
       }
+      warn_shadowed_datafield(fctx, df, key, "LocalTransformations DerivedField");
       Binding& b = declare(key, Origin::DerivedField, Container::LocalTransformations, type, m, df, index++);
       m.local.emplace(key, &b);
       out.push_back(&b);
@@ -1803,8 +1817,25 @@ class Binder {
     if (document_->td_fields.count(key)) return "a TransformationDictionary DerivedField";
     if (m.chain_outputs.count(key)) return "an OutputField of an earlier segment of the model chain";
     if (outputs && m.outputs.count(key)) return "an OutputField of this model";
-    if (document_->data_fields.count(key)) return "a DataField";
     return {};
+  }
+
+  // A LocalTransformations DerivedField or OutputField named like a DataField
+  // that is not one of this model's MiningFields (the MiningField case is a
+  // name_clash). FieldScope.html bounds a model's scope at its MiningSchema
+  // ("all data must flow in through its MiningSchema"), and its naming rules
+  // make DataField names unique only "from the names of any other DataFields
+  // and the names of DerivedFields in the TransformationDictionary"; the
+  // stricter "DerivedFields in the TransformationDictionary or
+  // LocalTransformations together with DataFields in the DataDictionary must
+  // have unique names" is quoted there as PMML 3.0 history. What remains is
+  // "In general, field names in PMML should be unique": a warning.
+  void warn_shadowed_datafield(const Ctx& ctx, pugi::xml_node node, const std::string& key, std::string_view what) {
+    if (!document_->data_fields.count(key)) return;
+    warning(code::kNameShadowsDataField, ctx, node,
+            std::string(what) + " name " + detail::quoted(key) +
+                " is also a DataField this model does not list in its MiningSchema (FieldScope.html: \"In "
+                "general, field names in PMML should be unique\")");
   }
 
   static bool is_feature(std::string_view f) {
@@ -1868,6 +1899,7 @@ class Binder {
                   " (FieldScope.html: OutputField names \"must be unique from any other names in their scope\")");
         continue;
       }
+      warn_shadowed_datafield(fctx, of, key, "OutputField");
       StaticType type;
       if (attr(of, "dataType")) {
         type = declared_type(fctx, of, false);
@@ -2063,7 +2095,11 @@ class Binder {
         const auto found = child_scope.outputs.find(ordered->name);
         if (found == child_scope.outputs.end()) continue;
         Binding* o = found->second;
-        if (m.chain_outputs.count(o->name) || m.mining.count(o->name) || m.local.count(o->name)) {
+        // "The names of OutputFields must be unique from any other names in
+        // their scope": the chain's scope also holds the MiningModel's own
+        // OutputFields, declared before its segments are bound.
+        if (m.chain_outputs.count(o->name) || m.mining.count(o->name) || m.local.count(o->name) ||
+            m.outputs.count(o->name)) {
           Ctx octx = sctx;
           error(code::kNameDuplicate, octx, o->declaration,
                 "OutputField " + detail::quoted(o->name) +

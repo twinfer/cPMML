@@ -219,10 +219,14 @@ enum class ConstantKind : std::uint8_t { Integer, IntegerOverflow, Double, Strin
 // The inferred type of an untyped Constant's text. "Solely of numbers":
 // [+-]? digits; with a decimal point or an exponent it is a double if it is
 // an xs:double literal made of digits, '.', e, E, -, + only (so NaN and INF
-// are strings). Leading and trailing XML blanks do not make a number a
-// string (xs:integer and xs:double collapse whitespace).
-inline ConstantKind infer_constant(std::string_view raw) {
-  const std::string_view text = lexical::trim(raw);
+// are strings). The text is not trimmed: Constant is simpleContent of
+// base xs:string (pmml-4-4.xsd, element Constant), whose whiteSpace facet is
+// "preserve" (XML Schema Part 2, 4.3.6), and Transformations.html says "The
+// presence of any non-numeric characters ... will result in the Constant
+// being treated as a string", so " 1" is the string " 1" (JPMML 1.7.7
+// agrees: concat gives " 1x", + over a double is refused). Only a declared
+// or inherited numeric dataType collapses the blanks (bind_constant).
+inline ConstantKind infer_constant(std::string_view text) {
   if (text.empty()) return ConstantKind::String;
   for (char c : text)
     if (!(lexical::is_digit(c) || c == '.' || c == 'e' || c == 'E' || c == '-' || c == '+'))

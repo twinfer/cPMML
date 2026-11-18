@@ -125,6 +125,10 @@ inline constexpr std::string_view kTextWidened = "W-TEXT-WIDENED";
 inline constexpr std::string_view kCastNarrowing = "W-CAST-NARROWING";
 // §2.6: double into a float declaration rounds (never fails).
 inline constexpr std::string_view kCastLossy = "W-CAST-LOSSY";
+// A LocalTransformations DerivedField or OutputField named like a DataField
+// outside the model's MiningSchema (FieldScope.html: "In general, field names
+// in PMML should be unique"; no naming rule forbids it).
+inline constexpr std::string_view kNameShadowsDataField = "W-NAME-SHADOWS-DATAFIELD";
 // OutputField without the XSD-required dataType (§3.4: "inferred with
 // warning when absent, as today").
 inline constexpr std::string_view kOutputNoDataType = "W-OUTPUT-NO-DATATYPE";
