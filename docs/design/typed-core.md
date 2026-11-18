@@ -1674,6 +1674,7 @@ Departures from JPMML that follow the spec, and departures from the spec
 | D24 | a missing argument of any built-in gives missing (then mapMissingTo/defaultValue), except where the spec says otherwise; D3 is the case of `if` | `+` and `-` give missing; `abs`, `equal`, `threshold`, `floor`, `ceil`, `round`, `sqrt`, `uppercase`, `substring`, `replace`, … throw MissingArgumentException | BuiltinFunctions.html: "Except as noted below, any missing inputs to a built-in function will result in a missing value being returned" (P0-missing-argument) |
 | D25 | an invalid value in any MiningField with returnInvalid makes the record invalid, read or not | checks only fields the model reads | MiningSchema.html returnInvalid: "when an invalid input is encountered, the model should return a value indicating an invalid result" (P0-unread-invalid-input) |
 | D26 | a `NaN` key in a hashed table (MapValues InlineTable, large SimpleSetPredicate) is a load error (§2.7) | loads; the row never matches | spec silent; a NaN key can match nothing, so the row is dead text and most likely an export error. Until P2.2 cPMML loads it like JPMML (B35) |
+| D27 | `+`, `-`, `*`, `/` over infinities follow Transformations.html's "Brief Summary of Operations Involving Infinite Numbers": `INF + -INF`, `INF - INF`, `INF * 0` and `INF / INF` of one sign give missing; `INF / -INF` gives the numerator | fails the record (`Function "+" returned invalid value`; measured in P1.1) | the spec's table; IEEE would give NaN (decided 2026-11-18) |
 
 ---
 
@@ -1786,6 +1787,22 @@ fixture dumps byte-identical under sequential, OpenMP and forced-parallel
 builds. The OpenMP build can therefore join the base-vs-head gate (§6.4
 item 6). The threshold is tuned on one machine (Apple M-series, Homebrew
 libomp); libgomp on Linux should be re-measured when P7 records both builds.
+
+**Q13. Text of negative zero** (new, from P1.1) [P5]. D18 keeps an input
+`-0` as `-0.0`, whose Java text is `-0.0`; JPMML writes `0.0`, and the XSD
+float/double description says there is "only one zero" in some readings and
+distinguishes ±0 in others. *Decide before P5, when inputs are parsed into
+typed values: keep −0 (D18) or normalise it to +0 on input.*
+
+**Decided 2026-11-18 after P1.** D27 is accepted (spec over IEEE and
+JPMML). An OutputField, LocalTransformations or DerivedField name equal to
+a MiningField of the same model (AuditTree, IrisTree, IrisMultinomReg) is
+reported as a **warning**, not a load error, when the binder becomes
+authoritative in P2.1: FieldScope.html forbids it, but real exporters write
+it and JPMML scores those documents. The P1 agents' doc notes (the
+Unsupported severity and codes, the ColdPath friends, the comparison
+Purpose, NaN probes, the §3.4 table rows) are accepted as written in the P1
+section.
 
 ---
 
