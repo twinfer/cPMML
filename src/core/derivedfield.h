@@ -35,11 +35,21 @@ class DerivedField {
   DerivedField() = default;
 
   explicit DerivedField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
-      : name(node.get_attribute("name")),
+      // pmml-4-4.xsd: DerivedField@name is optional; it is unnamed only inside
+      // a NeuralInput/NeuralOutput, and DerivedField::declared requires it
+      // everywhere else.
+      : name(node.get_attribute("name", "")),
         optype(OpType::read(node)),
         datatype(DataType::read(node)),
         index(indexer->get_or_set(name, datatype).first),
         expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)) {}
+
+  // A DerivedField of a TransformationDictionary or LocalTransformations: its
+  // name is how it is referenced, so an absent one is a load error.
+  static DerivedField declared(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
+    node.required_attribute("name");
+    return DerivedField(node, indexer);
+  }
 
   inline void prepare(Sample& sample) const {
     Value v = expression->eval(sample);
@@ -54,7 +64,7 @@ class DerivedField {
       const std::vector<XmlNode>& nodes, const std::shared_ptr<Indexer>& indexer) {
     std::unordered_map<std::string, DerivedField> result;
     for (const auto& node : nodes)
-      result.insert(std::make_pair(node.get_attribute("name"), DerivedField(node, indexer)));
+      result.insert(std::make_pair(node.required_attribute("name"), declared(node, indexer)));
 
     return result;
   }

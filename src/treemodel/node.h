@@ -27,12 +27,17 @@
  * It is a node of the decision tree, containing a Predicate and a TreeScore.
  * The score represents the prediction associated to a sample matching the
  * predicate.
+ *
+ * Scoring walks the children vectors per record, so each Node starts on a
+ * cache line (alignas(64)): its size then stays a whole number of lines
+ * when a member is added or removed (the base layout was 512 bytes by
+ * accident; 504 without recordCount measured 4-6% slower on the small
+ * benchmark trees, docs/design/typed-core.md P2.0).
  */
-class Node {
+class alignas(64) Node {
  public:
   std::string id;
   std::string simple_score;
-  double record_count = double_min();
   std::string default_child;
   std::vector<Node> children;
   PredicateFunction predicate;
@@ -44,15 +49,19 @@ class Node {
 
   Node(const XmlNode& node, bool root, const PredicateBuilder& predicate_builder,
        const DataType& target_datatype)
-      : id(node.exists_attribute("id") ? node.get_attribute("id") : ""),
-        simple_score(node.exists_attribute("score") ? node.get_attribute("score") : ""),
-        record_count(node.get_double_attribute("recordCount")),
-        default_child(node.exists_attribute("defaultChild") ? node.get_attribute("defaultChild") : ""),
+      : id(node.get_attribute("id", "")),
+        simple_score(node.get_attribute("score", "")),
+        default_child(node.get_attribute("defaultChild", "")),
         children(to_nodes(node.get_childs("Node"), predicate_builder, target_datatype)),
         predicate(to_function(predicate_builder.build_from_parent(node))),
         root(root),
         leaf(children.size() == 0),
-        score(simple_score, id, target_datatype, node.get_childs("ScoreDistribution")) {};
+        score(simple_score, id, target_datatype, node.get_childs("ScoreDistribution")) {
+    // pmml-4-4.xsd: recordCount is an optional NUMBER without a default. No
+    // scoring rule reads it, so it is checked and not kept: a member here
+    // makes every Node, which scoring walks per record, larger.
+    (void)node.optional_double_attribute("recordCount");
+  };
 
   inline PredicateResult evaluate(const Sample& sample) const { return predicate(sample); }
 

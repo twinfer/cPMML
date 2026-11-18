@@ -42,7 +42,7 @@ class Probability : public OutputExpression {
   Probability(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const size_t& output_index,
               const DataType& output_type, const DataType& target_type)
       : OutputExpression(output_index, output_type, indexer),
-        target_value(node.exists_attribute("value") ? node.get_attribute("value") : ""),
+        target_value(node.get_attribute("value", "")),
         category(target_type) {}
 
   inline virtual double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {

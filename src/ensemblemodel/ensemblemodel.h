@@ -58,7 +58,7 @@ class EnsembleModel : public InternalModel {
       // What this MiningModel's scope has evaluated by the time a segment runs:
       // its whole derivedfields_dag (see InternalModel::scope_under).
       model->scope_under(InternalModel::derivedfields_dag);
-      ensemble.push_back(Segment(child, predicate_builder, model));
+      ensemble.push_back(Segment(child, predicate_builder, model, ensemble.size() + 1));
       ensemble.back().has_outputs = declares_outputs(*model);
     }
 

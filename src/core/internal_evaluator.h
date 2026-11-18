@@ -56,7 +56,7 @@ class InternalEvaluator {
   InternalEvaluator(const XmlNode& node)
       : indexer(make_and_activate_indexer()),
         name(node.name()),
-        version(node.get_attribute("version")),
+        version(node.required_attribute("version")),
         header(node.get_child("Header")),
         data_dictionary(node.get_child("DataDictionary"), indexer),
         hasPreprocessing(node.exists_child("TransformationDictionary")),

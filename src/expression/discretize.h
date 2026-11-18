@@ -39,17 +39,17 @@ class Discretize : public Expression {
       : Expression(output_index, output_type, indexer),
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
-        field_name(node.get_attribute("field")),
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
+        field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name,
                                   DataType::DataTypeValue::DOUBLE)
                   .first),  // discretize makes sense only on numeric fields
         datatype(indexer->get(field_name).second),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()) {
+        defaultValue(exist_defaultvalue ? Value(node.required_attribute("defaultValue"), output_type) : Value()) {
     inputs.insert(field_name);
     for (const auto& child : raw_node.get_childs("DiscretizeBin")) {
-      discretizebin_values.push_back(Value(child.get_attribute("binValue"), output_type));
+      discretizebin_values.push_back(Value(child.required_attribute("binValue"), output_type));
       discretizebin_intervals.push_back(IntervalBuilder::build(child.get_child("Interval"), index, datatype));
     }
   }

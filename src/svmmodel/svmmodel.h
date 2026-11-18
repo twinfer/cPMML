@@ -136,15 +136,14 @@ class SupportVectorMachineModel : public InternalModel {
     // alternateBinaryTargetCategory is not a PMML 4.4 attribute (JPMML reads it
     // from its own schema); here it only supplies a missing alternateTargetCategory.
     // Must be resolved before collecting the class list below.
-    if (node.exists_attribute("alternateBinaryTargetCategory"))
+    if (const auto alternate = node.optional_attribute("alternateBinaryTargetCategory"))
       for (auto& m : machines)
-        if (m.alternate_category == "null" || m.alternate_category.empty())
-          m.alternate_category = node.get_attribute("alternateBinaryTargetCategory");
+        if (m.alternate_category.empty()) m.alternate_category = *alternate;
 
     // Binary model without alternateTargetCategory: take the other value the
     // target's DataDictionary declares. Must run before the class list below.
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && machines.size() == 1 &&
-        machines[0].alternate_category == "null") {
+        machines[0].alternate_category.empty()) {
       auto it = data_dictionary.datafields.find(mining_schema.target.name);
       if (it != data_dictionary.datafields.end()) {
         const Predicate& c = it->second.constraints;
@@ -169,7 +168,7 @@ class SupportVectorMachineModel : public InternalModel {
       // ONLY as an alternate (machines (A,B),(A,C),(B,C) → C is never a
       // target_category) and would otherwise be unpredictable.
       auto add_class = [this](const std::string& cls) {
-        if (cls.empty() || cls == "null") return;
+        if (cls.empty()) return;
         if (std::find(classes.begin(), classes.end(), cls) == classes.end()) classes.push_back(cls);
       };
       for (const auto& m : machines) {
@@ -182,8 +181,9 @@ class SupportVectorMachineModel : public InternalModel {
 
     // Every machine of a classifier names its targetCategory, and a binary or
     // one-against-one machine its alternateTargetCategory too: without them the
-    // model would "predict" the string "null".
-    const auto absent = [](const std::string& v) { return v.empty() || v == "null"; };
+    // model would predict the empty text. A category may be the text "null":
+    // only an absent (or empty) attribute is "no category".
+    const auto absent = [](const std::string& v) { return v.empty(); };
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION) {
       for (const auto& m : machines) {
         if (absent(m.target_category))
@@ -281,11 +281,11 @@ class SupportVectorMachineModel : public InternalModel {
     for (const auto& child : vf.get_childs()) {
       const std::string kind = child.name();
       if (kind == "FieldRef") {
-        vector_fields.push_back({indexer->get_index(child.get_attribute("field")), false, Value()});
+        vector_fields.push_back({indexer->get_index(child.required_attribute("field")), false, Value()});
       } else if (kind == "CategoricalPredictor") {
-        const std::string field = child.get_attribute("name");
+        const std::string field = child.required_attribute("name");
         vector_fields.push_back(
-            {indexer->get_index(field), true, Value(child.get_attribute("value"), indexer->get_type(field))});
+            {indexer->get_index(field), true, Value(child.required_attribute("value"), indexer->get_type(field))});
       } else if (kind != "Extension" && !kind.empty()) {
         throw cpmml::ParsingException("SupportVectorMachineModel: unexpected element " + kind + " in VectorFields");
       }
@@ -316,7 +316,7 @@ class SupportVectorMachineModel : public InternalModel {
     const size_t n_fields = vector_fields.size();
 
     for (const auto& vi : dict_node.get_childs("VectorInstance")) {
-      const std::string id = vi.get_attribute("id");
+      const std::string id = vi.required_attribute("id");
       result[id] = parse_vector_instance(vi, n_fields);
     }
     return result;
@@ -325,7 +325,7 @@ class SupportVectorMachineModel : public InternalModel {
   // Parse a VectorInstance element. PMML 4.4 allows exactly one of
   // REAL-SparseArray or the REAL-ARRAY group, i.e. <Array type="real">.
   static Eigen::VectorXd parse_vector_instance(const XmlNode& vi, size_t n) {
-    const std::string id = vi.get_attribute("id");
+    const std::string id = vi.required_attribute("id");
     const auto fail = [&id](const std::string& what) {
       return cpmml::ParsingException("SupportVectorMachineModel: VectorInstance '" + id + "': " + what);
     };
@@ -336,7 +336,7 @@ class SupportVectorMachineModel : public InternalModel {
       const double fill = sa.get_double_attribute("defaultValue", 0.0);
       Eigen::VectorXd vec = Eigen::VectorXd::Constant(static_cast<Eigen::Index>(n), fill);
       if (sa.exists_attribute("n") && sa.required_long_attribute("n") != static_cast<long>(n))
-        throw fail("REAL-SparseArray n=" + sa.get_attribute("n") + " but VectorFields has " + std::to_string(n));
+        throw fail("REAL-SparseArray n=" + sa.required_attribute("n") + " but VectorFields has " + std::to_string(n));
 
       const std::vector<std::string> raw_indices =
           sa.exists_child("Indices") ? parse_array(sa.get_child("Indices").value()) : std::vector<std::string>{};
@@ -357,10 +357,11 @@ class SupportVectorMachineModel : public InternalModel {
     if (vi.exists_child("Array")) {
       const XmlNode arr = vi.get_child("Array");
       // REAL-ARRAY is an Array of type "real"; its optional n must match its entries.
-      if (arr.get_attribute("type") != "real") throw fail("Array type must be \"real\", got \"" + arr.get_attribute("type") + "\"");
+      const std::string type = arr.required_attribute("type");
+      if (type != "real") throw fail("Array type must be \"real\", got \"" + type + "\"");
       const std::vector<std::string> entries = parse_array(arr.value());
       if (arr.exists_attribute("n") && arr.required_long_attribute("n") != static_cast<long>(entries.size()))
-        throw fail("Array n=" + arr.get_attribute("n") + " but it has " + std::to_string(entries.size()) + " entries");
+        throw fail("Array n=" + arr.required_attribute("n") + " but it has " + std::to_string(entries.size()) + " entries");
       if (entries.size() != n)
         throw fail("Array has " + std::to_string(entries.size()) + " entries but VectorFields has " +
                    std::to_string(n));
@@ -377,8 +378,10 @@ class SupportVectorMachineModel : public InternalModel {
   SvmMachine parse_machine(const XmlNode& node,
                            const std::unordered_map<std::string, Eigen::VectorXd>& vector_dict) const {
     SvmMachine m;
-    m.target_category = node.get_attribute("targetCategory");
-    m.alternate_category = node.get_attribute("alternateTargetCategory");
+    // pmml-4-4.xsd: both are optional xs:string without a default; absent is
+    // the empty text, which the checks above read as "no category".
+    m.target_category = node.get_attribute("targetCategory", "");
+    m.alternate_category = node.get_attribute("alternateTargetCategory", "");
     m.threshold = node.get_double_attribute("threshold", model_threshold);
 
     const XmlNode coeff_node = node.get_child("Coefficients");
@@ -397,7 +400,7 @@ class SupportVectorMachineModel : public InternalModel {
                                       " SupportVector but " + std::to_string(coeff_refs.size()) + " Coefficient");
 
       for (size_t i = 0; i < sv_refs.size(); i++) {
-        const std::string vid = sv_refs[i].get_attribute("vectorId");
+        const std::string vid = sv_refs[i].required_attribute("vectorId");
         const auto it = vector_dict.find(vid);
         if (it == vector_dict.end())
           throw cpmml::ParsingException("SupportVectorMachineModel: SupportVector references unknown vectorId '" +

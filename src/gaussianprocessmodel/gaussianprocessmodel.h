@@ -224,7 +224,7 @@ class GaussianProcessModel : public InternalModel {
     std::vector<std::string> feat_cols;
     std::string target_col;
     for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
-      std::string field = f.get_attribute("field");
+      std::string field = f.required_attribute("field");
       std::string col = instance_field_column(f);
       if (field == target_name) {
         target_col = col;

@@ -40,7 +40,6 @@ class MiningField : public DataField {
   // The spec has MiningField/@optype *override* the DataField's, not replace
   // it, so the ctor overwrites the inherited one only when the attribute is
   // there.
-  double importance = double_min();
   bool hasOutlierTreatment = false;
   OutlierTreatmentMethod outliertreatmentmethod;
   bool hasLowValue = false;
@@ -62,15 +61,14 @@ class MiningField : public DataField {
       : DataField(data_field),
         empty(false),
         field_usage_type(FieldUsageType::read(node)),
-        importance(node.get_double_attribute("importance")),
         hasOutlierTreatment(node.exists_attribute("outliers")),
         outliertreatmentmethod(OutlierTreatmentMethod::read(node)),
         hasLowValue(node.exists_attribute("lowValue")),
-        low_value(hasOutlierTreatment && hasLowValue ? Value(node.get_attribute("lowValue"), datatype) : Value()),
+        low_value(hasOutlierTreatment && hasLowValue ? Value(node.required_attribute("lowValue"), datatype) : Value()),
         hasHighValue(node.exists_attribute("highValue")),
-        high_value(hasOutlierTreatment && hasHighValue ? Value(node.get_attribute("highValue"), datatype) : Value()),
+        high_value(hasOutlierTreatment && hasHighValue ? Value(node.required_attribute("highValue"), datatype) : Value()),
         hasMissingReplacement(node.exists_attribute("missingValueReplacement")),
-        missingvalue_replacement(hasMissingReplacement ? Value(node.get_attribute("missingValueReplacement"), datatype)
+        missingvalue_replacement(hasMissingReplacement ? Value(node.required_attribute("missingValueReplacement"), datatype)
                                                        : Value()),  //, data_dictionary.datafields[name].datatype)),
         // missingValueTreatment is not consulted while scoring (the replacement
         // is missingValueReplacement), except that returnInvalid, which cPMML
@@ -86,18 +84,23 @@ class MiningField : public DataField {
       if (!node.exists_attribute("invalidValueReplacement"))
         throw cpmml::ParsingException("MiningField " + name +
                                       ": invalidValueTreatment=\"asValue\" needs invalidValueReplacement");
-      invalidvalue_replacement = Value(node.get_attribute("invalidValueReplacement"), datatype);
+      invalidvalue_replacement = Value(node.required_attribute("invalidValueReplacement"), datatype);
     }
+    // pmml-4-4.xsd: importance is an optional PROB-NUMBER without a default.
+    // No scoring rule reads it, so it is checked and not kept (a member
+    // would grow every MiningField, which scoring reads per record).
+    (void)node.optional_double_attribute("importance");
   };
 
   static std::unordered_map<std::string, MiningField> to_miningfields(std::vector<XmlNode> nodes,
                                                                       const DataDictionary& data_dictionary) {
     std::unordered_map<std::string, MiningField> result;
     for (auto it = nodes.cbegin(); it != nodes.cend(); it++) {
-      if (data_dictionary.datafields.find(it->get_attribute("name")) == data_dictionary.datafields.cend())
+      const std::string name = it->required_attribute("name");
+      if (data_dictionary.datafields.find(name) == data_dictionary.datafields.cend())
         continue;  // this field is an output
 
-      MiningField mining_field(*it, data_dictionary[it->get_attribute("name")]);
+      MiningField mining_field(*it, data_dictionary[name]);
       result.insert(std::make_pair(mining_field.name, mining_field));
     }
 

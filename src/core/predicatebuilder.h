@@ -68,19 +68,20 @@ class PredicateBuilder {
       case PredicateType::PredicateTypeValue::SIMPLE: {
         const Op op = read_enum(node, "operator", PredicateOpType::SIMPLE_OPERATOR_TABLE);
         // isMissing / isNotMissing have no value attribute
-        if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING)
-          return Predicate(indexer->get_index(node.get_attribute("field")), op, Value());
-        return Predicate(indexer->get_index(node.get_attribute("field")), op,
-                         Value(node.get_attribute("value"), indexer->get_type(node.get_attribute("field"))));
+        const std::string field = node.required_attribute("field");
+        if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(indexer->get_index(field), op, Value());
+        // Every other operator compares with value (Predicates.html).
+        return Predicate(indexer->get_index(field), op,
+                         Value(node.required_attribute("value"), indexer->get_type(field)));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
         std::vector<std::string> values = parse_array(node.get_child("Array").value());
+        const std::string field = node.required_attribute("field");
         if (values.size() > SET_THRESHOLD)
-          return Predicate(indexer->get_index(node.get_attribute("field")), op,
-                           Value::createUnorderedValues(values, indexer->get_type(node.get_attribute("field"))));
-        return Predicate(indexer->get_index(node.get_attribute("field")), op,
-                         Value::createValues(values, indexer->get_type(node.get_attribute("field"))));
+          return Predicate(indexer->get_index(field), op,
+                           Value::createUnorderedValues(values, indexer->get_type(field)));
+        return Predicate(indexer->get_index(field), op, Value::createValues(values, indexer->get_type(field)));
       }
       case PredicateType::PredicateTypeValue::COMPOUND: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::COMPOUND_OPERATOR_TABLE);

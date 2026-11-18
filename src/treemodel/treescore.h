@@ -37,27 +37,27 @@ class TreeScore : public InternalScore {
     std::unordered_map<std::string, double> probabilities;
 
     // Explicit probability attributes take precedence over recordCount ratios
-    // (recordCount may even be absent when probability is given).
+    // (recordCount is still required: pmml-4-4.xsd use="required").
     bool all_explicit = !score_distributions.empty();
     for (const auto& score_distribution : score_distributions)
-      if (!score_distribution.has_probability) {
+      if (!score_distribution.probability) {
         all_explicit = false;
         break;
       }
     if (all_explicit) {
       for (const auto& score_distribution : score_distributions)
-        probabilities[score_distribution.value_string] = score_distribution.probability;
+        probabilities[score_distribution.value_string] = *score_distribution.probability;
       return probabilities;
     }
 
     double total = 0;
     for (const auto& score_distribution : score_distributions)
-      if (!is_double_min(score_distribution.record_count)) total += score_distribution.record_count;
-    if (total <= 0) return probabilities;  // all-zero/absent recordCounts: no distribution, not NaN
+      total += score_distribution.record_count;  // use="required": read at load, never absent
+    if (total <= 0) return probabilities;  // all-zero recordCounts: no distribution, not NaN
 
     for (const auto& score_distribution : score_distributions)
       probabilities[score_distribution.value_string] =
-          is_double_min(score_distribution.record_count) ? 0.0 : score_distribution.record_count / total;
+          score_distribution.record_count / total;
 
     return probabilities;
   }

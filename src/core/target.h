@@ -11,6 +11,7 @@
 
 #include <charconv>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -121,27 +122,20 @@ class TargetValue {
   std::string value;
   bool has_display_value;
   std::string display_value;
-  bool has_prior_probability;
-  double prior_probability;
-  bool has_default_value;
-  double default_value;
+  // pmml-4-4.xsd TargetValue: value, displayValue, priorProbability and
+  // defaultValue are all optional without a default; absent is "not stated".
+  std::optional<double> prior_probability;
+  std::optional<double> default_value;
   // TODO: Partition
 
-  TargetValue()
-      : has_display_value(false),
-        has_prior_probability(false),
-        prior_probability(double_min()),
-        has_default_value(false),
-        default_value(double_min()) {}
+  TargetValue() : has_display_value(false) {}
 
   TargetValue(const XmlNode& node)
-      : value(node.get_attribute("value")),
+      : value(node.get_attribute("value", "")),
         has_display_value(node.exists_attribute("displayValue")),
-        display_value(node.get_attribute("displayValue")),
-        has_prior_probability(node.exists_attribute("priorProbability")),
-        prior_probability(node.get_double_attribute("priorProbability")),
-        has_default_value(node.exists_attribute("defaultValue")),
-        default_value(node.get_double_attribute("defaultValue")) {}
+        display_value(node.get_attribute("displayValue", "")),
+        prior_probability(node.optional_double_attribute("priorProbability")),
+        default_value(node.optional_double_attribute("defaultValue")) {}
 
   inline const std::string& label() const { return has_display_value ? display_value : value; }
 
@@ -159,14 +153,16 @@ class Target {
   bool has_field_name = false;
   std::string field_name;
   CastInteger cast;
-  bool has_min = false;
-  double min = double_min();
-  bool has_max = false;
-  double max = double_min();
+  // pmml-4-4.xsd Target: min and max are optional without a default;
+  // rescaleConstant defaults to 0 and rescaleFactor to 1. The has_ flags keep
+  // applying the rescale only when it is written, as before (x + 0 turns -0.0
+  // into 0.0).
+  std::optional<double> min;
+  std::optional<double> max;
   bool has_rescale_constant = false;
-  double rescale_constant = double_min();
+  double rescale_constant = 0.0;
   bool has_rescale_factor = false;
-  double rescale_factor = double_min();
+  double rescale_factor = 1.0;
   OpType optype;
   std::vector<TargetValue> target_values;
   Category category;  // compares the TargetValue classes with the model's
@@ -178,16 +174,14 @@ class Target {
                   const TransformationDictionary& transformation_dictionary, const MiningFunction& mining_fuction)
       : mining_function(mining_fuction),
         has_field_name(node.exists_attribute("field")),
-        field_name(node.get_attribute("field")),
+        field_name(node.get_attribute("field", "")),
         cast(node),
-        has_min(node.exists_attribute("min")),
-        min(node.get_double_attribute("min")),
-        has_max(node.exists_attribute("max")),
-        max(node.get_double_attribute("max")),
+        min(node.optional_double_attribute("min")),
+        max(node.optional_double_attribute("max")),
         has_rescale_constant(node.exists_attribute("rescaleConstant")),
-        rescale_constant(node.get_double_attribute("rescaleConstant")),
+        rescale_constant(node.get_double_attribute("rescaleConstant", 0.0)),
         has_rescale_factor(node.exists_attribute("rescaleFactor")),
-        rescale_factor(node.get_double_attribute("rescaleFactor")),
+        rescale_factor(node.get_double_attribute("rescaleFactor", 1.0)),
         target_values(TargetValue::to_targetvalues(node.get_childs("TargetValue"))),
         category(mining_schema.target.datatype) {}
 
@@ -246,9 +240,9 @@ class Target {
               // probability is 0. Priors apply only when there is no prediction;
               // filling them in here made the probabilities sum past 1.
               score.probabilities[target_value.value] = 0.0;
-            } else if (target_value.has_prior_probability) {
+            } else if (target_value.prior_probability) {
               // A prediction without any distribution: the prior is all there is.
-              score.probabilities[target_value.value] = target_value.prior_probability;
+              score.probabilities[target_value.value] = *target_value.prior_probability;
             }
           }
         }
@@ -259,7 +253,7 @@ class Target {
           const TargetValue* default_value = find_default_value();
           if (default_value == nullptr) break;
           score.empty = false;
-          score.double_score = transform(default_value->default_value);
+          score.double_score = transform(*default_value->default_value);
         } else {
           score.double_score = transform(score.double_score);
         }
@@ -296,7 +290,7 @@ class Target {
         // throws, which made the defaultValue branch unreachable.
         if (predicted.empty()) {
           const TargetValue* default_value = find_default_value();
-          return default_value == nullptr ? predicted : java::double_text(transform(default_value->default_value));
+          return default_value == nullptr ? predicted : java::double_text(transform(*default_value->default_value));
         }
         // score string representation must be updated accordingly
         {
@@ -336,10 +330,10 @@ class Target {
   // min/max, then rescaleFactor, rescaleConstant and castInteger, in the order
   // the spec prescribes.
   inline double transform(double value) const {
-    if (has_min && value < min)
-      value = min;
-    else if (has_max && value > max)
-      value = max;
+    if (min && value < *min)
+      value = *min;
+    else if (max && value > *max)
+      value = *max;
 
     if (has_rescale_factor) value *= rescale_factor;
     if (has_rescale_constant) value += rescale_constant;
@@ -350,7 +344,7 @@ class Target {
 
   inline const TargetValue* find_default_value() const {
     for (const auto& target_value : target_values)
-      if (target_value.has_default_value) return &target_value;
+      if (target_value.default_value) return &target_value;
     return nullptr;
   }
 
@@ -358,8 +352,8 @@ class Target {
   inline const TargetValue* top_prior() const {
     const TargetValue* best = nullptr;
     for (const auto& target_value : target_values)
-      if (target_value.has_prior_probability &&
-          (best == nullptr || target_value.prior_probability > best->prior_probability))
+      if (target_value.prior_probability &&
+          (best == nullptr || *target_value.prior_probability > *best->prior_probability))
         best = &target_value;
     return best;
   }
@@ -372,13 +366,13 @@ class Target {
 
     double total = 0;
     for (const auto& target_value : target_values)
-      if (target_value.has_prior_probability) total += target_value.prior_probability;
+      if (target_value.prior_probability) total += *target_value.prior_probability;
 
     score.probabilities.clear();
     for (const auto& target_value : target_values)
-      if (target_value.has_prior_probability)
+      if (target_value.prior_probability)
         score.probabilities[target_value.value] =
-            total > 0 ? target_value.prior_probability / total : target_value.prior_probability;
+            total > 0 ? *target_value.prior_probability / total : *target_value.prior_probability;
 
     return best;
   }

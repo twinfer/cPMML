@@ -134,7 +134,7 @@ inline double field_compare(double xi, double yi, CompareFunc cf, double scale) 
 inline ComparisonField read_comparison_field(const XmlNode& node, CompareFunc default_cf, bool has_similarity_scale) {
   const char* element = has_similarity_scale ? "ClusteringField" : "KNNInput";
   ComparisonField f;
-  f.field_name = node.get_attribute("field");
+  f.field_name = node.required_attribute("field");
   f.compare_func = read_compare_function(node, default_cf);
   f.field_weight = node.get_double_attribute("fieldWeight", 1.0);
   if (has_similarity_scale && node.exists_attribute("similarityScale"))
@@ -151,7 +151,7 @@ inline ComparisonField read_comparison_field(const XmlNode& node, CompareFunc de
   // 0/0 = NaN for an identical value.
   if (!std::isfinite(f.similarity_scale) || !(f.similarity_scale * f.similarity_scale > 0.0))
     throw cpmml::ParsingException(where + " needs a finite similarityScale whose square is not 0, got \"" +
-                                  node.get_attribute("similarityScale") + "\"");
+                                  node.required_attribute("similarityScale") + "\"");
   return f;
 }
 
@@ -244,7 +244,7 @@ inline double parse_minkowski_p(const XmlNode& minkowski) {
     const std::string hint = minkowski.exists_attribute("p") ? " (the attribute is p-parameter, not p)" : "";
     throw cpmml::ParsingException("minkowski: required attribute p-parameter is missing" + hint);
   }
-  const std::string text = minkowski.get_attribute("p-parameter");
+  const std::string text = minkowski.required_attribute("p-parameter");
   const double p = minkowski.required_double_attribute("p-parameter");
   if (!std::isfinite(p) || !(p > 0.0))
     throw cpmml::ParsingException("minkowski: p-parameter must be a finite number > 0, got \"" + text + "\"");
@@ -271,7 +271,7 @@ inline BinarySimilarityParams parse_binary_similarity(const XmlNode& node) {
   const auto read = [&](const char* name) {
     if (!node.exists_attribute(name))
       throw cpmml::ParsingException(std::string("binarySimilarity: required attribute ") + name + " is missing");
-    const std::string text = node.get_attribute(name);
+    const std::string text = node.required_attribute(name);
     double v = 0.0;
     try {
       v = to_double(text);

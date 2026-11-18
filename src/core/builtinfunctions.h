@@ -139,7 +139,7 @@ class BuiltInFunction {  // inputs are mapped by position
         function(get_function(function_type)) {}
 
   // The function an Apply element names, typed by its arguments.
-  explicit BuiltInFunction(const XmlNode& apply) : BuiltInFunction(apply.get_attribute("function")) {
+  explicit BuiltInFunction(const XmlNode& apply) : BuiltInFunction(apply.required_attribute("function")) {
     const bool comparison = compares_numbers(function_type);
     if (!is_numeric(function_type) && !comparison) return;
     for (const auto& argument : arguments_of(apply.xml())) argument_kinds.push_back(expression_kind(argument));

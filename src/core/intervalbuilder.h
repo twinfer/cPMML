@@ -7,6 +7,10 @@
 #ifndef CPMML_INTERVALBUILDER_H
 #define CPMML_INTERVALBUILDER_H
 
+#include <limits>
+#include <optional>
+#include <string>
+
 #include "predicate.h"
 #include "xmlnode.h"
 
@@ -25,10 +29,10 @@ class IntervalBuilder {
 
     Closure closure(node);
     // An absent margin means the interval is unbounded on that side.
-    Value left_margin = node.exists_attribute("leftMargin") ? Value(node.get_attribute("leftMargin"), dataType)
-                                                            : Value(std::numeric_limits<double>::lowest(), dataType);
-    Value right_margin = node.exists_attribute("rightMargin") ? Value(node.get_attribute("rightMargin"), dataType)
-                                                              : Value(std::numeric_limits<double>::max(), dataType);
+    const std::optional<std::string> left = node.optional_attribute("leftMargin");
+    const std::optional<std::string> right = node.optional_attribute("rightMargin");
+    Value left_margin = left ? Value(*left, dataType) : Value(std::numeric_limits<double>::lowest(), dataType);
+    Value right_margin = right ? Value(*right, dataType) : Value(std::numeric_limits<double>::max(), dataType);
     switch (closure.value) {
       case Closure::ClosureValue::CLOSED_CLOSED:
         tmp_constraints.push_back(Predicate(index, Op::GREATER_OR_EQUAL, left_margin));

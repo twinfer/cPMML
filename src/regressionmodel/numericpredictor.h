@@ -30,8 +30,8 @@ class NumericPredictor {
   std::string name;
   size_t index = std::numeric_limits<size_t>::max();
   DataType datatype;
-  double coefficient = double_min();
-  double exponent = double_min();
+  double coefficient = 0.0;
+  double exponent = 1.0;
 
   std::function<double(const Value&)> numeric_predictor;
 
@@ -39,7 +39,7 @@ class NumericPredictor {
 
   NumericPredictor(const XmlNode& node,  // NumericPredictor node
                    const std::shared_ptr<Indexer>& indexer)
-      : name(node.get_attribute("name")),
+      : name(node.required_attribute("name")),
         index(indexer->get_index(name)),
         datatype(indexer->get_type(name)),
         coefficient(node.required_double_attribute("coefficient")),

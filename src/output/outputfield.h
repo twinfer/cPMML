@@ -39,11 +39,10 @@ class OutputField {
   OutputField() : derived(false), index(std::numeric_limits<size_t>::max()) {}
 
   OutputField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target)
-      : name(node.get_attribute("name")),
+      : name(node.required_attribute("name")),
         optype(OpType::read_optional(node)),
         expression_type(OutputExpressionType::read(node)),
         derived(expression_type.value == OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE)
-  //      target_field(node.get_attribute("targetField")),
   {
     if (!node.exists_attribute("dataType")) {
       // Probability features are always numeric; entityId is always string —

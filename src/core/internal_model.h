@@ -538,7 +538,7 @@ class InternalModel {
                                                const std::shared_ptr<Indexer>& indexer) {
     if (node.exists_child("LocalTransformations")) {
       for (auto const& n : node.get_child("LocalTransformations").get_childs("DerivedField"))
-        transformation_dictionary.add_derived_field(DerivedField(n, indexer));
+        transformation_dictionary.add_derived_field(DerivedField::declared(n, indexer));
       return true;
     }
 
@@ -549,7 +549,7 @@ class InternalModel {
     std::unordered_set<std::string> names;
     if (node.exists_child("LocalTransformations"))
       for (auto const& n : node.get_child("LocalTransformations").get_childs("DerivedField"))
-        names.insert(n.get_attribute("name"));
+        names.insert(n.required_attribute("name"));
     return names;
   }
 

@@ -119,7 +119,10 @@ class GeneralRegressionModel : public InternalModel {
         model_type(read_enum(node, "modelType", MODEL_TYPE_TABLE)),
         link(parse_link(node, model_type)),
         link_parameter(node.get_double_attribute("linkParameter", 1.0)),
-        reference_category(node.get_attribute("targetReferenceCategory")) {
+        // pmml-4-4.xsd: targetReferenceCategory is optional without a default;
+        // absent is the empty text (and the category is then recovered from the
+        // DataDictionary). A category may be the text "null".
+        reference_category(node.get_attribute("targetReferenceCategory", "")) {
     // Offset
     if (node.exists_attribute("offsetValue")) {
       has_offset_value = true;
@@ -127,7 +130,7 @@ class GeneralRegressionModel : public InternalModel {
     }
     if (node.exists_attribute("offsetVariable")) {
       has_offset_variable = true;
-      offset_variable_index = indexer->get_index(node.get_attribute("offsetVariable"));
+      offset_variable_index = indexer->get_index(node.required_attribute("offsetVariable"));
     }
 
     parse_factors(node);
@@ -241,12 +244,12 @@ class GeneralRegressionModel : public InternalModel {
   void parse_factors(const XmlNode& node) {
     if (!node.exists_child("FactorList")) return;
     for (const auto& fr : node.get_child("FactorList").get_childs("Predictor"))
-      factors.insert(fr.get_attribute("name"));
+      factors.insert(fr.required_attribute("name"));
   }
 
   void parse_parameters(const XmlNode& node) {
     for (const auto& p : node.get_child("ParameterList").get_childs("Parameter"))
-      parameters.push_back(p.get_attribute("name"));
+      parameters.push_back(p.required_attribute("name"));
   }
 
   void parse_pp_matrix(const XmlNode& node, const DataDictionary& data_dictionary,
@@ -254,9 +257,9 @@ class GeneralRegressionModel : public InternalModel {
     for (const auto& param_name : parameters) pp_matrix[param_name] = {};
 
     for (const auto& cell : node.get_child("PPMatrix").get_childs("PPCell")) {
-      const std::string pred = cell.get_attribute("predictorName");
-      const std::string param = cell.get_attribute("parameterName");
-      const std::string val = cell.get_attribute("value");
+      const std::string pred = cell.required_attribute("predictorName");
+      const std::string param = cell.required_attribute("parameterName");
+      const std::string val = cell.required_attribute("value");
 
       bool is_factor = factors.count(pred) > 0;
       // Fallback: check DataDictionary optype
@@ -280,10 +283,10 @@ class GeneralRegressionModel : public InternalModel {
     bool has_shared_cells = false;
     std::string first_category;
     for (const auto& cell : node.get_child("ParamMatrix").get_childs("PCell")) {
-      const std::string param = cell.get_attribute("parameterName");
+      const std::string param = cell.required_attribute("parameterName");
       // A PCell without targetCategory is a shared beta: it applies to every
       // target category (ordinal slope terms, common covariates). Key it "".
-      const std::string cat = cell.exists_attribute("targetCategory") ? cell.get_attribute("targetCategory") : "";
+      const std::string cat = cell.get_attribute("targetCategory", "");
       const double beta_val = cell.required_double_attribute("beta");
       param_matrix[param][cat] = beta_val;
 
@@ -305,7 +308,7 @@ class GeneralRegressionModel : public InternalModel {
     if (classes.empty()) classes.push_back(mining_schema.target.name);
 
     // Add reference category at the end (for probability output completeness)
-    if (!reference_category.empty() && reference_category != "null") {
+    if (!reference_category.empty()) {
       if (std::find(classes.begin(), classes.end(), reference_category) == classes.end())
         classes.push_back(reference_category);
       return;
@@ -340,7 +343,7 @@ class GeneralRegressionModel : public InternalModel {
     for (const auto& declared : target->second.valid_values)
       if (std::find(classes.begin(), classes.end(), declared) == classes.end()) {
         classes.push_back(declared);
-        if (reference_category.empty() || reference_category == "null") reference_category = declared;
+        if (reference_category.empty()) reference_category = declared;
       }
   }
 

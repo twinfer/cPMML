@@ -231,8 +231,8 @@ class ClusteringModel : public InternalModel {
     int idx = 1;
     for (const auto& cl : node.get_childs("Cluster")) {
       Cluster c;
-      c.id = cl.exists_attribute("id") ? cl.get_attribute("id") : std::to_string(idx);
-      c.name = cl.exists_attribute("name") ? cl.get_attribute("name") : c.id;
+      c.id = cl.get_attribute("id", std::to_string(idx));
+      c.name = cl.get_attribute("name", c.id);
 
       // Parse Array: space-separated real values
       const XmlNode arr = cl.get_child("Array");
@@ -260,7 +260,7 @@ class ClusteringModel : public InternalModel {
       // the Indexer code of the query's string, so it matched whichever
       // category happened to have that code. An Array of type="string"
       // (refused by JPMML, so there is no oracle) is read token by token.
-      const bool string_array = arr.exists_attribute("type") && arr.get_attribute("type") == "string";
+      const bool string_array = arr.required_attribute("type") == "string";
       c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
       for (size_t i = 0; i < vals.size(); i++) {
         const Eigen::Index at = static_cast<Eigen::Index>(i);

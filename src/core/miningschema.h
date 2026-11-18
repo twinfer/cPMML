@@ -52,7 +52,7 @@ class MiningSchema {
                                                                 const DataDictionary& data_dictionary) {
     std::unordered_set<std::string> result;
     for (const auto& child : node.get_childs("MiningField")) {
-      const std::string name = child.get_attribute("name");
+      const std::string name = child.required_attribute("name");
       if (data_dictionary.datafields.find(name) == data_dictionary.datafields.cend()) result.insert(name);
     }
     return result;

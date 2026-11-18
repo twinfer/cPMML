@@ -192,21 +192,24 @@ static void locale_independent() {
 
 static void typed_getters() {
   pugi::xml_document doc;
-  doc.load_string(R"(<E d=" 2.5 " bad="3abc" l="7" lbad="7.0" b="1" bbad="yes" bcase="TRUE"/>)");
+  doc.load_string(R"(<E d=" 2.5 " bad="3abc" l="7" lbad="7.0" b="1" bbad="yes" bcase="TRUE" s="null" e=""/>)");
   const XmlNode node(doc.child("E"));
 
   CHECK(node.required_double_attribute("d") == 2.5);
   CHECK(node.get_double_attribute("d", 9) == 2.5);
   CHECK(node.get_double_attribute("absent", 9) == 9);
-  CHECK(is_double_min(node.get_double_attribute("absent")));
+  CHECK(node.optional_double_attribute("d") == 2.5);
+  CHECK(!node.optional_double_attribute("absent"));
   CHECK(throws<cpmml::ParsingException>([&] { node.required_double_attribute("absent"); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.required_double_attribute("bad"); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.get_double_attribute("bad", 9); }));
-  CHECK(throws<cpmml::ParsingException>([&] { node.get_double_attribute("bad"); }));
+  CHECK(throws<cpmml::ParsingException>([&] { node.optional_double_attribute("bad"); }));
 
   CHECK(node.required_long_attribute("l") == 7);
   CHECK(node.get_long_attribute("absent", 3) == 3);
-  CHECK(node.get_long_attribute("absent") == std::numeric_limits<long>::max());
+  CHECK(node.optional_long_attribute("l") == 7L);
+  CHECK(!node.optional_long_attribute("absent"));
+  CHECK(throws<cpmml::ParsingException>([&] { node.optional_long_attribute("lbad"); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.required_long_attribute("lbad"); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.get_long_attribute("lbad", 3); }));
 
@@ -216,6 +219,16 @@ static void typed_getters() {
   CHECK(throws<cpmml::ParsingException>([&] { node.get_bool_attribute("bbad", false); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.get_bool_attribute("bcase", false); }));
   CHECK(throws<cpmml::ParsingException>([&] { node.required_bool_attribute("absent"); }));
+
+  // Text attributes (CODE_REVIEW.md R1): the text "null" is a value like any
+  // other, and absence is told apart from it and from the empty text.
+  CHECK(node.required_attribute("s") == "null");
+  CHECK(node.optional_attribute("s") == std::string("null"));
+  CHECK(node.optional_attribute("e") == std::string(""));
+  CHECK(!node.optional_attribute("absent"));
+  CHECK(node.get_attribute("absent", "dflt") == "dflt");
+  CHECK(node.get_attribute("s", "dflt") == "null");
+  CHECK(throws<cpmml::ParsingException>([&] { node.required_attribute("absent"); }));
 }
 
 // ---- 3. documents that must not load ----------------------------------------
@@ -325,6 +338,85 @@ static void malformed_documents() {
   CHECK(!loads(bad_array));
 }
 
+static cpmml::Model load(const std::string& document);
+
+// An absent attribute that a reader needs is a load error, not the text "null"
+// (CODE_REVIEW.md R1). The base build loaded the RegressionTable and
+// DerivedField documents, reading that text; it already refused the
+// SimplePredicate without value.
+static void absent_attributes() {
+  const std::string head = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="categorical" dataType="string"><Value value="a"/><Value value="b"/></DataField>
+  </DataDictionary>)";
+  const std::string schema = R"(<MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>)";
+
+  // Regression.html: for a categorical target "each one must have the
+  // attribute targetCategory defined with a unique value".
+  const auto classification = [&](const std::string& second_table) {
+    return head + R"(<RegressionModel functionName="classification" normalizationMethod="softmax">)" + schema +
+           R"(<RegressionTable intercept="0" targetCategory="a"><NumericPredictor name="x" coefficient="1"/></RegressionTable>)" +
+           second_table + "</RegressionModel></PMML>";
+  };
+  CHECK(loads(classification(R"(<RegressionTable intercept="0" targetCategory="b"/>)")));
+  CHECK(!loads(classification(R"(<RegressionTable intercept="0"/>)")));
+
+  // Predicates.html: value is required by every operator but isMissing and
+  // isNotMissing.
+  const auto tree = [&](const std::string& predicate) {
+    return head + R"(<TreeModel functionName="classification">)" + schema +
+           R"(<Node score="a"><True/><Node score="b">)" + predicate + "</Node></Node></TreeModel></PMML>";
+  };
+  CHECK(loads(tree(R"(<SimplePredicate field="x" operator="lessThan" value="1"/>)")));
+  CHECK(loads(tree(R"(<SimplePredicate field="x" operator="isMissing"/>)")));
+  CHECK(!loads(tree(R"(<SimplePredicate field="x" operator="lessThan"/>)")));
+
+  // A TransformationDictionary DerivedField is referenced by its name.
+  const auto derived = [&](const std::string& name_attr) {
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary><DataField name="x" optype="continuous" dataType="double"/><DataField name="y" optype="continuous" dataType="double"/></DataDictionary>
+  <TransformationDictionary><DerivedField)" +
+           name_attr + R"( optype="continuous" dataType="double"><FieldRef field="x"/></DerivedField></TransformationDictionary>
+  <RegressionModel functionName="regression"><MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <RegressionTable intercept="0"><NumericPredictor name="x" coefficient="1"/></RegressionTable></RegressionModel>
+</PMML>)";
+  };
+  CHECK(loads(derived(R"( name="d")")));
+  CHECK(!loads(derived("")));
+
+  // TimeSeriesModel.html: a known point needs value, and "In addition, time
+  // or index must be used." The history is ordered by index, or by time when
+  // no point has an index: the same series given by time, out of document
+  // order, forecasts the same as by index.
+  const auto arima = [](const std::string& points) {
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary><DataField name="ts" optype="continuous" dataType="double"/></DataDictionary>
+  <TimeSeriesModel functionName="timeSeries" bestFit="ARIMA"><MiningSchema><MiningField name="ts" usageType="target"/></MiningSchema>
+    <TimeSeries usage="original">)" +
+           points + R"(</TimeSeries>
+    <ARIMA constantTerm="0" predictionMethod="conditionalLeastSquares"><NonseasonalComponent p="2" d="0" q="0">
+      <AR><Array n="2" type="real">0.5 0.25</Array></AR></NonseasonalComponent></ARIMA>
+  </TimeSeriesModel></PMML>)";
+  };
+  const auto forecast = [&](const std::string& points) {
+    cpmml::Input args;
+    args["horizon"] = 2;
+    return load(arima(points)).evaluate(args).series();
+  };
+  // y[t+1] = 0.5 y[t] + 0.25 y[t-1], history 4, 8: 0.5*8 + 0.25*4 = 5, then
+  // 0.5*5 + 0.25*8 = 4.5.
+  const std::vector<double> expected{5.0, 4.5};
+  CHECK(forecast(R"(<TimeValue index="1" value="4"/><TimeValue index="2" value="8"/>)") == expected);
+  CHECK(forecast(R"(<TimeValue index="2" value="8"/><TimeValue index="1" value="4"/>)") == expected);
+  CHECK(forecast(R"(<TimeValue time="20.5" value="8"/><TimeValue time="3" value="4"/>)") == expected);
+  CHECK(!loads(arima(R"(<TimeValue index="1" value="4"/><TimeValue value="8"/>)")));
+  CHECK(!loads(arima(R"(<TimeValue index="1" value="4"/><TimeValue time="2" value="8"/>)")));
+}
+
 // ---- 4. invalid input values that end the record ----------------------------
 
 static cpmml::Model load(const std::string& document) {
@@ -405,6 +497,7 @@ int main() {
   locale_independent();
   typed_getters();
   malformed_documents();
+  absent_attributes();
   invalid_inputs();
   writer_round_trip();
 

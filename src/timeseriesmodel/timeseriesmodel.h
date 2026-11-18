@@ -12,6 +12,7 @@
 #include <cmath>
 #include <deque>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unsupported/Eigen/KroneckerProduct>
 #include <utility>
@@ -902,17 +903,50 @@ class TimeSeriesModel {
                                     std::to_string(expected) + " square");
   }
 
-  // Collect all (index, value) pairs from <TimeSeries usage="original">
+  // Collect the (position, value) pairs of <TimeSeries usage="original">; the
+  // callers sort them by position. TimeSeriesModel.html: a known point needs
+  // only value; "In addition, time or index must be used." (index is required
+  // only "In case of a logical TimeSeries"). The position is @index when every
+  // point has one; otherwise every point must have @time (pmml-4-4.xsd: both
+  // optional), and the position is the point's rank in ascending time. A
+  // series that mixes index-only and time-only points has no single order, so
+  // cPMML refuses it rather than guess one.
   static std::vector<std::pair<int, double>> collect_timeseries(const XmlNode& ts_node) {
-    std::vector<std::pair<int, double>> pts;
+    struct Point {
+      std::optional<long> index;
+      std::optional<double> time;
+      double value;
+    };
+    std::vector<Point> points;
+    bool every_index = true, every_time = true;
     for (const auto& ts : ts_node.get_childs("TimeSeries")) {
       if (!is_original_series(ts)) continue;
       for (const auto& tv : ts.get_childs("TimeValue")) {
-        int idx = static_cast<int>(tv.get_long_attribute("index"));
-        double val = tv.get_double_attribute("value");
-        pts.push_back({idx, val});
+        Point p{tv.optional_long_attribute("index"), tv.optional_double_attribute("time"),
+                tv.required_double_attribute("value")};
+        if (!p.index && !p.time)
+          throw cpmml::ParsingException(
+              "TimeSeriesModel: TimeValue has neither index nor time (TimeSeriesModel.html: \"In addition, time or "
+              "index must be used.\")");
+        if (p.time && std::isnan(*p.time))
+          throw cpmml::ParsingException("TimeSeriesModel: TimeValue time is NaN, which has no place in the order");
+        every_index = every_index && p.index.has_value();
+        every_time = every_time && p.time.has_value();
+        points.push_back(p);
       }
     }
+    std::vector<std::pair<int, double>> pts;
+    pts.reserve(points.size());
+    if (every_index) {
+      for (const auto& p : points) pts.push_back({static_cast<int>(*p.index), p.value});
+      return pts;
+    }
+    if (!every_time)
+      throw cpmml::ParsingException(
+          "TimeSeriesModel: the original TimeSeries mixes TimeValues that have only index with TimeValues that "
+          "have only time; cPMML orders the history by one or the other and cannot order this series");
+    std::stable_sort(points.begin(), points.end(), [](const Point& a, const Point& b) { return *a.time < *b.time; });
+    for (size_t i = 0; i < points.size(); ++i) pts.push_back({static_cast<int>(i), points[i].value});
     return pts;
   }
 
@@ -925,12 +959,15 @@ class TimeSeriesModel {
     ets.seasonal = "none";
 
     ets.transform = read_transform(node);
-    if (node.exists_attribute("RMSE")) ets.rmse = node.get_double_attribute("RMSE");
+    if (node.exists_attribute("RMSE")) ets.rmse = node.required_double_attribute("RMSE");
 
     // Level (required by spec)
     XmlNode lv = node.get_child("Level");
     ets.alpha = lv.get_double_attribute("alpha", 0.0);
-    ets.l = lv.get_double_attribute("smoothedValue");
+    // Optional in pmml-4-4.xsd, but the forecast is built on it: "Level
+    // specifies smoothedValue the smoothed value of the time series at the
+    // last known point of the history" (TimeSeriesModel.html).
+    ets.l = lv.required_double_attribute("smoothedValue");
 
     // Trend_ExpoSmooth (optional)
     ets.b = 0.0;
@@ -952,7 +989,9 @@ class TimeSeriesModel {
       ets.trend = read_enum(tr, "trend", TREND_TABLE, "additive");
       ets.gamma = tr.get_double_attribute("gamma", 0.0);
       ets.phi = tr.get_double_attribute("phi", 1.0);
-      ets.b = tr.get_double_attribute("smoothedValue");
+      // "The smoothed coefficients are required if the specified trend is
+      // "polynomial_exponential;" otherwise, the smoothed value is required."
+      ets.b = tr.required_double_attribute("smoothedValue");
     }
 
     // Seasonality_ExpoSmooth (optional)
@@ -965,7 +1004,7 @@ class TimeSeriesModel {
       };
       ets.seasonal = read_enum(se, "type", SEASONALITY_TYPE_TABLE);
       ets.delta = se.get_double_attribute("delta", 0.0);
-      ets.period = static_cast<int>(se.get_long_attribute("period"));
+      ets.period = static_cast<int>(se.required_long_attribute("period"));
       ets.phase = static_cast<int>(se.get_long_attribute("phase", ets.period));
       if (se.exists_child("Array")) {
         ets.s = parse_array(se.get_child("Array"));
@@ -974,8 +1013,8 @@ class TimeSeriesModel {
         if (!tvs.empty()) {
           ets.s.resize(tvs.size(), 0.0);
           for (const auto& tv : tvs) {
-            int idx = static_cast<int>(tv.get_long_attribute("index")) - 1;
-            if (idx >= 0 && idx < static_cast<int>(ets.s.size())) ets.s[idx] = tv.get_double_attribute("value");
+            int idx = static_cast<int>(tv.required_long_attribute("index")) - 1;
+            if (idx >= 0 && idx < static_cast<int>(ets.s.size())) ets.s[idx] = tv.required_double_attribute("value");
           }
         }
       }
@@ -1012,9 +1051,9 @@ class TimeSeriesModel {
     for (const auto& row : rows)
       if (row.size() != cols) throw cpmml::ParsingException(element + ": Matrix rows have differing lengths");
 
-    if (matrix.exists_attribute("nbRows") && static_cast<size_t>(matrix.get_long_attribute("nbRows")) != rows.size())
+    if (matrix.exists_attribute("nbRows") && static_cast<size_t>(matrix.required_long_attribute("nbRows")) != rows.size())
       throw cpmml::ParsingException(element + ": nbRows disagrees with the number of Array rows");
-    if (matrix.exists_attribute("nbCols") && static_cast<size_t>(matrix.get_long_attribute("nbCols")) != cols)
+    if (matrix.exists_attribute("nbCols") && static_cast<size_t>(matrix.required_long_attribute("nbCols")) != cols)
       throw cpmml::ParsingException(element + ": nbCols disagrees with the Array length");
 
     Eigen::MatrixXd mat(static_cast<Eigen::Index>(rows.size()), static_cast<Eigen::Index>(cols));
@@ -1026,15 +1065,15 @@ class TimeSeriesModel {
   }
 
   void parse_ssm(const XmlNode& node) {
-    if (node.exists_attribute("intercept")) ssm.intercept = node.get_double_attribute("intercept");
-    if (node.exists_attribute("variance")) ssm.sigma2 = node.get_double_attribute("variance");
+    if (node.exists_attribute("intercept")) ssm.intercept = node.required_double_attribute("intercept");
+    if (node.exists_attribute("variance")) ssm.sigma2 = node.required_double_attribute("variance");
 
     // PsiVector: MA(∞) weights ψ₀,ψ₁,... for exact h-step variance
     // var(h) = σ² × Σ_{j=0}^{h-1} ψ_j²   (PMML 4.4 spec §TimeSeriesModel)
     if (node.exists_child("PsiVector")) {
       XmlNode pv = node.get_child("PsiVector");
       // @variance on PsiVector overrides RMSE-derived sigma2
-      if (pv.exists_attribute("variance")) ssm.sigma2 = pv.get_double_attribute("variance");
+      if (pv.exists_attribute("variance")) ssm.sigma2 = pv.required_double_attribute("variance");
       if (pv.exists_child("Array")) ssm.psi = parse_array(pv.get_child("Array"));
     }
 
@@ -1116,7 +1155,7 @@ class TimeSeriesModel {
 
     double sigma2_val = 1.0;
     if (node.exists_attribute("RMSE")) {
-      double rmse = node.get_double_attribute("RMSE");
+      double rmse = node.required_double_attribute("RMSE");
       sigma2_val = rmse * rmse;
     }
 
@@ -1525,7 +1564,7 @@ class TimeSeriesModel {
   void parse_dynamic_regressors(const XmlNode& ts_node) {
     for (const auto& dr_node : ts_node.get_childs("DynamicRegressor")) {
       DynamicRegressorState dr;
-      dr.field = dr_node.get_attribute("field");
+      dr.field = dr_node.required_attribute("field");
       dr.delay = static_cast<int>(dr_node.get_long_attribute("delay", 0));
       dr.transform = read_transform(dr_node);
 

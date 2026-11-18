@@ -46,9 +46,9 @@ class Apply : public Expression {
       : Expression(output_index, output_type, indexer),
         function(BuiltInFunction(node)),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()),
+        defaultValue(exist_defaultvalue ? Value(node.required_attribute("defaultValue"), output_type) : Value()),
         invalidValueTreatmentMethod(InvalidValueTreatmentMethod::read(node)) {
     // asValue names MiningField/@invalidValueReplacement; an Apply has no
     // replacement to give, so the token is refused rather than read as asIs.

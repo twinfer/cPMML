@@ -63,7 +63,7 @@ class DataField {
       : n_values(1), name(name), datatype(datatype), index(std::numeric_limits<size_t>::max()) {}
 
   DataField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
-      : name(node.get_attribute("name")),
+      : name(node.required_attribute("name")),
         datatype(DataType::read(node)),
         integer(DataType::is_integer(node)),
         index(indexer->get_or_set(name, datatype).first),
@@ -76,14 +76,14 @@ class DataField {
       auto property = Property(value);
       switch (property.value) {
         case Property::PropertyValue::VALID:
-          allowed_values.emplace(Value(value.get_attribute("value"), datatype));
-          valid_values.push_back(value.get_attribute("value"));
+          allowed_values.emplace(Value(value.required_attribute("value"), datatype));
+          valid_values.push_back(value.required_attribute("value"));
           break;
         case Property::PropertyValue::MISSING:
-          missing_markers.insert(value.get_attribute("value"));
+          missing_markers.insert(value.required_attribute("value"));
           break;
         case Property::PropertyValue::INVALID:
-          forbidden_values.emplace(Value(value.get_attribute("value"), datatype));
+          forbidden_values.emplace(Value(value.required_attribute("value"), datatype));
           break;
       }
     }
@@ -113,7 +113,7 @@ class DataField {
   static std::unordered_map<std::string, DataField> to_datafields(const std::vector<XmlNode>& nodes,
                                                                   const std::shared_ptr<Indexer>& indexer) {
     std::unordered_map<std::string, DataField> result;
-    for (const auto& node : nodes) result[node.get_attribute("name")] = DataField(node, indexer);
+    for (const auto& node : nodes) result[node.required_attribute("name")] = DataField(node, indexer);
 
     return result;
   }

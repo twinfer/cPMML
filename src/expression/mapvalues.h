@@ -42,16 +42,16 @@ class MapValues : public Expression {
       : Expression(output_index, output_type, indexer),
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue ? Value(node.get_attribute("defaultValue"), output_type) : Value()),
-        out(node.get_attribute("outputColumn")) {
+        defaultValue(exist_defaultvalue ? Value(node.required_attribute("defaultValue"), output_type) : Value()),
+        out(node.required_attribute("outputColumn")) {
     std::string tmp_column;
     std::string tmp_input;
     for (const auto& n : node.get_childs("FieldColumnPair")) {
-      tmp_input = n.get_attribute("field");
+      tmp_input = n.required_attribute("field");
       inputs.insert(tmp_input);
-      tmp_column = n.get_attribute("column");
+      tmp_column = n.required_attribute("column");
       columns.push_back(tmp_column);
       fieldcolumn_pairs[tmp_column] = tmp_input;
     }

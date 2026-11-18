@@ -74,7 +74,7 @@ class TextIndex : public Expression {
   TextIndex(const XmlNode& node, const size_t& output_index, const DataType& output_type,
             const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer) {
-    const std::string field_name = node.get_attribute("textField");
+    const std::string field_name = node.required_attribute("textField");
     field_index = indexer->get_or_set(field_name);
     inputs.insert(field_name);
 
@@ -98,10 +98,10 @@ class TextIndex : public Expression {
     if (node.exists_attribute("maxLevenshteinDistance") &&
         node.required_double_attribute("maxLevenshteinDistance") != 0.0)
       throw cpmml::ParsingException("TextIndex: only maxLevenshteinDistance=\"0\" is supported, got " +
-                                    node.get_attribute("maxLevenshteinDistance"));
+                                    node.required_attribute("maxLevenshteinDistance"));
 
     if (node.exists_attribute("wordSeparatorCharacterRE")) {
-      const std::string re = node.get_attribute("wordSeparatorCharacterRE");
+      const std::string re = node.required_attribute("wordSeparatorCharacterRE");
       if (re != "\\s+") {
         custom_separator = true;
         try {

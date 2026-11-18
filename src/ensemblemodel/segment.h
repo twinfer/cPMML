@@ -37,8 +37,12 @@ class Segment {
 
   Segment() = default;
 
-  Segment(const XmlNode& node, const PredicateBuilder& predicate_builder, const std::shared_ptr<InternalModel>& model)
-      : id(node.get_attribute("id")),
+  // MultipleModels.html: "Since the Segment id attribute is optional, if it is
+  // not specified, Segments are identified by an implicit 1-based index,
+  // indicating the position in which each segment appears in the model."
+  Segment(const XmlNode& node, const PredicateBuilder& predicate_builder, const std::shared_ptr<InternalModel>& model,
+          size_t position)
+      : id(node.get_attribute("id", std::to_string(position))),
         weight(node.get_double_attribute("weight", 1)),  // PMML default weight is 1
         predicate(predicate_builder.build_from_parent(node)),
         model(model) {}

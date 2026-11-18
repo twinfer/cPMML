@@ -61,7 +61,7 @@ class BaselineModel : public InternalModel {
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     XmlNode td = node.get_child("TestDistributions");
-    test_field = td.get_attribute("field");
+    test_field = td.required_attribute("field");
     test_field_idx = indexer->get_index(test_field);
 
     parse_test_statistic(td);

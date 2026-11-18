@@ -29,6 +29,7 @@
 class RegressionTable {
  public:
   double intercept = 0;
+  bool has_target_category = false;
   std::string target_category;
   std::vector<NumericPredictor> numeric_predictors;
   std::vector<CategoricalPredictor> categorical_predictors;
@@ -38,7 +39,11 @@ class RegressionTable {
 
   RegressionTable(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : intercept(node.required_double_attribute("intercept")),
-        target_category(node.get_attribute("targetCategory")),
+        // Regression.html: for a numerical target "the attribute targetCategory
+        // may be missing"; for a categorical one each table "must have the
+        // attribute targetCategory" (checked by RegressionModel, which knows).
+        has_target_category(node.exists_attribute("targetCategory")),
+        target_category(node.get_attribute("targetCategory", "")),
         numeric_predictors(NumericPredictor::to_numericpredictors(node.get_childs("NumericPredictor"), indexer)),
         categorical_predictors(CategoricalPredictor::to_categoricalpredictors(node, indexer)),
         predictor_terms(PredictorTerm::to_predictorterms(node.get_childs("PredictorTerm"), indexer)) {}

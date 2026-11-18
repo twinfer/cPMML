@@ -35,13 +35,13 @@ class NormDiscrete : public Expression {
                const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        field_name(node.get_attribute("field")),
+        field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name)),
-        value(Value(node.get_attribute("value"),
+        value(Value(node.required_attribute("value"),
                     DataType::DataTypeValue::STRING)),  // by definition NormDiscrete is
                                                         // to map string values (to be
                                                         // checked)
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()) {
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()) {
     inputs.insert(field_name);
   }
 

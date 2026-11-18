@@ -152,7 +152,7 @@ class NeuralNetworkModel : public InternalModel {
   void parse_neural_inputs(const XmlNode& inputs_node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& ni : inputs_node.get_childs("NeuralInput")) {
       NeuralInput input;
-      input.id = ni.get_attribute("id");
+      input.id = ni.required_attribute("id");
       input.derived_field = DerivedField(ni.get_child("DerivedField"), indexer);
       neural_inputs.push_back(std::move(input));
     }
@@ -188,7 +188,7 @@ class NeuralNetworkModel : public InternalModel {
 
       for (size_t i = 0; i < n; i++) {
         const auto& neuron = neuron_nodes[i];
-        std::string nid = neuron.get_attribute("id");
+        std::string nid = neuron.required_attribute("id");
         output_ids.push_back(nid);
         curr_id_to_idx[nid] = i;
 
@@ -197,7 +197,7 @@ class NeuralNetworkModel : public InternalModel {
         altitudes[i] = neuron.get_double_attribute("altitude", layer_altitude);
 
         for (const auto& con : neuron.get_childs("Con")) {
-          const std::string from = con.get_attribute("from");
+          const std::string from = con.required_attribute("from");
           const auto it = prev_id_to_idx.find(from);
           if (it != prev_id_to_idx.end()) W(i, it->second) = con.required_double_attribute("weight");
           fan_ins[i] += 1.0;
@@ -214,11 +214,11 @@ class NeuralNetworkModel : public InternalModel {
   void parse_neural_outputs(const XmlNode& outputs_node) {
     for (const auto& no : outputs_node.get_childs("NeuralOutput")) {
       NeuralOutput output;
-      output.output_neuron = no.get_attribute("outputNeuron");
+      output.output_neuron = no.required_attribute("outputNeuron");
 
       XmlNode df = no.get_child("DerivedField");
       if (df.exists_child("NormDiscrete")) {
-        output.target_category = df.get_child("NormDiscrete").get_attribute("value");
+        output.target_category = df.get_child("NormDiscrete").required_attribute("value");
       } else {
         output.target_category = mining_schema.target.name;
         if (df.exists_child("NormContinuous"))

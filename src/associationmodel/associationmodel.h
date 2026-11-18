@@ -187,11 +187,11 @@ class AssociationModel : public InternalModel {
   void parse_items(const XmlNode& node) {
     for (const auto& n : node.get_childs("Item")) {
       Item item;
-      item.id           = n.get_attribute("id");
-      item.value        = n.get_attribute("value");
-      item.field        = n.exists_attribute("field")        ? n.get_attribute("field")        : "";
-      item.category     = n.exists_attribute("category")     ? n.get_attribute("category")     : "";
-      item.mapped_value = n.exists_attribute("mappedValue")  ? n.get_attribute("mappedValue")  : "";
+      item.id           = n.required_attribute("id");
+      item.value        = n.required_attribute("value");
+      item.field        = n.get_attribute("field", "");
+      item.category     = n.get_attribute("category", "");
+      item.mapped_value = n.get_attribute("mappedValue", "");
       item.weight       = n.get_double_attribute("weight", 1.0);
       items[item.id]    = std::move(item);
     }
@@ -199,10 +199,10 @@ class AssociationModel : public InternalModel {
 
   void parse_itemsets(const XmlNode& node) {
     for (const auto& n : node.get_childs("Itemset")) {
-      std::string id = n.get_attribute("id");
+      std::string id = n.required_attribute("id");
       std::unordered_set<std::string> refs;
       for (const auto& ref : n.get_childs("ItemRef"))
-        refs.insert(ref.get_attribute("itemRef"));
+        refs.insert(ref.required_attribute("itemRef"));
       itemsets[id] = std::move(refs);
     }
   }
@@ -212,9 +212,9 @@ class AssociationModel : public InternalModel {
     for (const auto& n : node.get_childs("AssociationRule")) {
       ++rule_index;
       AssociationRule rule;
-      rule.id         = n.exists_attribute("id") ? n.get_attribute("id") : std::to_string(rule_index);
-      rule.antecedent = n.get_attribute("antecedent");
-      rule.consequent = n.get_attribute("consequent");
+      rule.id         = n.get_attribute("id", std::to_string(rule_index));
+      rule.antecedent = n.required_attribute("antecedent");
+      rule.consequent = n.required_attribute("consequent");
       rule.support    = n.required_double_attribute("support");
       rule.confidence = n.required_double_attribute("confidence");
       rule.lift       = n.get_double_attribute("lift", 1.0);

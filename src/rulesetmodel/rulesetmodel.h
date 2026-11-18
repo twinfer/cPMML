@@ -58,7 +58,7 @@ class RuleSetModel : public InternalModel {
                const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     XmlNode ruleset_node = node.get_child("RuleSet");
-    default_score = ruleset_node.exists_attribute("defaultScore") ? ruleset_node.get_attribute("defaultScore") : "";
+    default_score = ruleset_node.get_attribute("defaultScore", "");
     default_confidence = ruleset_node.get_double_attribute("defaultConfidence", 0.0);
 
     // Parse selection criterion (take first method if multiple present)
@@ -107,8 +107,8 @@ class RuleSetModel : public InternalModel {
     for (const auto& child : node.get_childs()) {
       if (child.name() == "SimpleRule") {
         SimpleRule rule;
-        rule.id = child.exists_attribute("id") ? child.get_attribute("id") : "";
-        rule.score = child.get_attribute("score");
+        rule.id = child.get_attribute("id", "");
+        rule.score = child.required_attribute("score");
         rule.confidence = child.get_double_attribute("confidence", 1.0);
         rule.weight = child.get_double_attribute("weight", 1.0);
 

@@ -39,10 +39,10 @@ class TransformedValue : public OutputExpression {
       } catch (const cpmml::ParsingException&) {
         // Unsupported function — leave expression null; eval returns empty.
       }
-    } else if (node.exists_attribute("value")) {
+    } else if (const auto value = node.optional_attribute("value")) {
       // Non-standard: value= references another output field by name.
       // Treat as a FieldRef to that field.
-      const std::string ref = node.get_attribute("value");
+      const std::string ref = *value;
       expression = std::make_shared<FieldRef>(ref, indexer, output_index, output_type);
     }
     if (expression) Expression::inputs = expression->inputs;

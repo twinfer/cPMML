@@ -32,7 +32,7 @@ class PredictorTerm {
  public:
   std::string name;
   DataType datatype;
-  double coefficient = double_min();
+  double coefficient = 0.0;
   std::vector<SimpleFieldRef> fields;
   std::function<double(const Value&)> predictor_term;
 
@@ -40,7 +40,7 @@ class PredictorTerm {
 
   PredictorTerm(const XmlNode& node,  // PredictorTerm node
                 const std::shared_ptr<Indexer>& indexer)
-      : name(node.get_attribute("name")),
+      : name(node.get_attribute("name", "")),  // optional in pmml-4-4.xsd, informational
         coefficient(node.required_double_attribute("coefficient")),
         fields(SimpleFieldRef::to_simplefields(node.get_childs("FieldRef"), indexer)) {}
 

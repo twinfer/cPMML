@@ -48,7 +48,12 @@ class RegressionModel : public InternalModel {
             normalization_methodtype, target_field.optype.value == OpType::OpTypeValue::ORDINAL)),
         regression_tables(RegressionTable::to_regressiontables(node.get_childs("RegressionTable"), indexer)) {
     if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION)
-      for (const auto& regression_table : regression_tables) classes.push_back(regression_table.target_category);
+      for (const auto& regression_table : regression_tables) {
+        if (!regression_table.has_target_category)
+          throw cpmml::ParsingException(
+              "RegressionModel: a classification RegressionTable needs targetCategory (Regression.html)");
+        classes.push_back(regression_table.target_category);
+      }
     else
       classes.push_back(mining_schema.target.name);
   }

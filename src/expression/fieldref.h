@@ -42,9 +42,9 @@ class FieldRef : public Expression {
            const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        field_name(node.get_attribute("field")),
+        field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name)),  // datatype is not needed here
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()) {
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()) {
     inputs.insert(field_name);
   }
 
@@ -75,10 +75,10 @@ class SimpleFieldRef {
 
   SimpleFieldRef(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        field_name(node.get_attribute("field")),
+        field_name(node.required_attribute("field")),
         index(indexer->get_index(field_name)),
         mapmissing_to(exist_missingreplacement
-                          ? Value(node.get_attribute("mapMissingTo"), indexer->get_type(field_name))
+                          ? Value(node.required_attribute("mapMissingTo"), indexer->get_type(field_name))
                           : Value()) {}
 
   inline Value value(const Sample& sample) const {

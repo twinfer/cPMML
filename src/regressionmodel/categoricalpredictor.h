@@ -53,7 +53,7 @@ class CategoricalPredictor {
                                                                               const DataType& datatype) {
     std::unordered_map<Value, double, Value::ValueHash> result;
     for (const auto& node : nodes)
-      result[Value(node.get_attribute("value"), datatype)] = node.required_double_attribute("coefficient");
+      result[Value(node.required_attribute("value"), datatype)] = node.required_double_attribute("coefficient");
 
     return result;
   }
@@ -69,7 +69,7 @@ class CategoricalPredictor {
     DataType field_datatype;
     std::unordered_set<std::string> seen;
     for (const auto& node : regressiontable_node.get_childs("CategoricalPredictor")) {
-      field_name = node.get_attribute("name");
+      field_name = node.required_attribute("name");
       if (seen.find(field_name) == seen.cend()) {
         field_index = indexer->get_index(field_name);
         field_datatype = indexer->get_type(field_name);

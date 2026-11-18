@@ -111,15 +111,18 @@ class ScorecardModel : public InternalModel {
 
     for (const auto& ch_node : node.get_child("Characteristics").get_childs("Characteristic")) {
       Characteristic ch;
-      ch.name = ch_node.get_attribute("name");
-      ch.reason_code = ch_node.get_attribute("reasonCode");
+      // pmml-4-4.xsd: Characteristic@name and @reasonCode, and Attribute@reasonCode,
+      // are optional xs:string without a default; absent is the empty text,
+      // i.e. "no reason code" (a reason code may be the text "null").
+      ch.name = ch_node.get_attribute("name", "");
+      ch.reason_code = ch_node.get_attribute("reasonCode", "");
       ch.baseline_score = ch_node.get_double_attribute("baselineScore", model_baseline);
 
       for (const auto& attr_node : ch_node.get_childs("Attribute")) {
         Attribute attr;
         attr.partial_score =
             attr_node.get_double_attribute("partialScore", 0.0);
-        attr.reason_code = attr_node.exists_attribute("reasonCode") ? attr_node.get_attribute("reasonCode") : "";
+        attr.reason_code = attr_node.get_attribute("reasonCode", "");
 
         // ComplexPartialScore: expression-computed partial score
         if (attr_node.exists_child("ComplexPartialScore")) {
@@ -174,7 +177,7 @@ class ScorecardModel : public InternalModel {
 
           if (use_reason_codes) {
             const std::string code = attr.reason_code.empty() ? ch.reason_code : attr.reason_code;
-            if (!code.empty() && code != "null") {
+            if (!code.empty()) {
               const double diff = points_below ? (ch.baseline_score - ps) : (ps - ch.baseline_score);
               auto it = std::find_if(points_missed.begin(), points_missed.end(),
                                      [&code](const auto& entry) { return entry.first == code; });

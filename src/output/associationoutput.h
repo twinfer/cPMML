@@ -96,7 +96,7 @@ class AssociationOutput : public OutputExpression {
         rank(static_cast<int>(node.get_long_attribute("rank", 1))),
         rank_basis(read_enum(node, "rankBasis", RANK_BASIS_TABLE, RankBasis::CONFIDENCE)),
         descending(read_enum(node, "rankOrder", RANK_ORDER_TABLE, true)),
-        multi_valued(node.exists_attribute("isMultiValued") && node.get_attribute("isMultiValued") == "1") {}
+        multi_valued(node.get_attribute("isMultiValued", "0") == "1") {}
 
   inline virtual std::string eval_str(const Sample& /*sample*/, const InternalScore& score) const override {
     auto it = score.matched_rules_by_algorithm.find(algorithm_key);

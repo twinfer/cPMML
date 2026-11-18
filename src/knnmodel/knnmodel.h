@@ -105,7 +105,7 @@ class NearestNeighborModel : public InternalModel {
                                      CategoricalScoring::MAJORITY_VOTE)),
         continuous_method(
             read_enum(node, "continuousScoringMethod", CONTINUOUS_SCORING_TABLE, ContinuousScoring::AVERAGE)),
-        instance_id_variable(node.exists_attribute("instanceIdVariable") ? node.get_attribute("instanceIdVariable") : ""),
+        instance_id_variable(node.get_attribute("instanceIdVariable", "")),
         threshold(node.get_double_attribute("threshold", 0.001)),
         is_clustering(mining_function.value == MiningFunction::MiningFunctionType::CLUSTERING) {
     parse_metric(node);
@@ -245,7 +245,7 @@ class NearestNeighborModel : public InternalModel {
     // Build field → column mapping from InstanceFields
     std::unordered_map<std::string, std::string> field_to_col;
     for (const auto& f : ti.get_child("InstanceFields").get_childs("InstanceField")) {
-      field_to_col[f.get_attribute("field")] = instance_field_column(f);
+      field_to_col[f.required_attribute("field")] = instance_field_column(f);
     }
 
     // Instance ID column (for clustering models with instanceIdVariable)

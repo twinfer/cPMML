@@ -29,9 +29,11 @@ class Header {
   Header() {};
 
   explicit Header(const XmlNode& node)
-      : copyright(node.get_attribute("copyright")),
-        description(node.get_attribute("description")),
-        model_version(node.get_attribute("modelVersion")) {};
+      // pmml-4-4.xsd Header: all three are optional xs:string without a
+      // default; absent reads as the empty text (nothing in cPMML reads them).
+      : copyright(node.get_attribute("copyright", "")),
+        description(node.get_attribute("description", "")),
+        model_version(node.get_attribute("modelVersion", "")) {};
 };
 
 #endif

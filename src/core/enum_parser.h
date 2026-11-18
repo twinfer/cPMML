@@ -100,15 +100,16 @@ inline EnumT read_enum(const XmlNode& node, const char* attribute, const EnumEnt
   if (!node.exists_attribute(attribute))
     throw cpmml::ParsingException("required attribute " + what + " is missing; allowed values are " +
                                   enum_reader::list_tokens(table, false));
-  return enum_value(node.get_attribute(attribute), table, what);
+  return enum_value(node.required_attribute(attribute), table, what);
 }
 
 // Optional attribute: absent takes the spec default, present must be in the table.
 template <class EnumT, size_t N>
 inline EnumT read_enum(const XmlNode& node, const char* attribute, const EnumEntry<EnumT> (&table)[N],
                        EnumT spec_default) {
-  if (!node.exists_attribute(attribute)) return spec_default;
-  return enum_value(node.get_attribute(attribute), table, node.name() + "@" + attribute);
+  const std::optional<std::string> raw = node.optional_attribute(attribute);
+  if (!raw) return spec_default;
+  return enum_value(*raw, table, node.name() + "@" + attribute);
 }
 
 // An xs:choice of elements, read by the element's own name.

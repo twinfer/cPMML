@@ -71,7 +71,7 @@ class DataType {
 
   // dataType="integer" is carried as DOUBLE; this tells the two apart.
   static bool is_integer(const XmlNode& node) {
-    return node.exists_attribute("dataType") && node.get_attribute("dataType") == "integer";
+    return node.optional_attribute("dataType") == "integer";
   }
 
   // INTEGER is unreachable through read() (integer maps to DOUBLE) but is

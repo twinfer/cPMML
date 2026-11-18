@@ -23,7 +23,7 @@
 inline std::string instance_field_column(const XmlNode& instance_field) {
   const std::string column = instance_field.get_attribute("column", "");
 
-  return column.empty() ? instance_field.get_attribute("field") : column;
+  return column.empty() ? instance_field.required_attribute("field") : column;
 }
 
 #endif

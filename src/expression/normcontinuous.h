@@ -38,8 +38,8 @@ class NormContinuous : public Expression {
                  const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.get_attribute("mapMissingTo"), output_type) : Value()),
-        field_name(node.get_attribute("field")),
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
+        field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name)),
         outliertreatment_method(OutlierTreatmentMethod::read(node)),
         orig(get_values("orig", node,
@@ -59,7 +59,7 @@ class NormContinuous : public Expression {
     std::vector<Value> result;
 
     for (const auto& linear_norm : node.get_childs("LinearNorm"))
-      result.push_back(Value(linear_norm.get_attribute(linearnorm_type), dataType));
+      result.push_back(Value(linear_norm.required_attribute(linearnorm_type), dataType));
 
     return result;
   }

@@ -92,7 +92,7 @@ class NaiveBayesModel : public InternalModel {
     double total = 0.0;
     std::vector<std::pair<std::string, double>> counts;
     for (const auto& tvc : bo.get_child("TargetValueCounts").get_childs("TargetValueCount")) {
-      const std::string cls = tvc.get_attribute("value");
+      const std::string cls = tvc.required_attribute("value");
       const double cnt = tvc.required_double_attribute("count");
       classes.push_back(cls);
       counts.emplace_back(cls, cnt);
@@ -104,7 +104,7 @@ class NaiveBayesModel : public InternalModel {
   void parse_inputs(const XmlNode& node, const DataDictionary& data_dictionary,
                     const std::shared_ptr<Indexer>& indexer) {
     for (const auto& bi : node.get_child("BayesInputs").get_childs("BayesInput")) {
-      const std::string field = bi.get_attribute("fieldName");
+      const std::string field = bi.required_attribute("fieldName");
       const size_t idx = indexer->get_index(field);
 
       // Discrete: PairCounts → PairValueCounts → TargetValueCounts
@@ -112,9 +112,9 @@ class NaiveBayesModel : public InternalModel {
         DiscreteInput di;
         di.field_index = idx;
         for (const auto& pvc : bi.get_childs("PairCounts")) {
-          const Value input_val(pvc.get_attribute("value"), data_dictionary.at(field).datatype);
+          const Value input_val(pvc.required_attribute("value"), data_dictionary.at(field).datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
-            di.counts[input_val.value][tvc.get_attribute("value")] = tvc.required_double_attribute("count");
+            di.counts[input_val.value][tvc.required_attribute("value")] = tvc.required_double_attribute("count");
         }
         di.class_totals.assign(classes.size(), 0.0);
         for (const auto& [v, cls_map] : di.counts)
@@ -131,7 +131,7 @@ class NaiveBayesModel : public InternalModel {
         GaussianInput gi;
         gi.field_index = idx;
         for (const auto& tvs : bi.get_child("TargetValueStats").get_childs("TargetValueStat")) {
-          const std::string cls = tvs.get_attribute("value");
+          const std::string cls = tvs.required_attribute("value");
           if (tvs.exists_child("GaussianDistribution")) {
             const XmlNode gd = tvs.get_child("GaussianDistribution");
             gi.params[cls] = {gd.required_double_attribute("mean"), gd.required_double_attribute("variance")};

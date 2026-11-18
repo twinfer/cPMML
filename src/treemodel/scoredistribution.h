@@ -7,6 +7,9 @@
 #ifndef CPMML_SCOREDISTRIBUTION_H
 #define CPMML_SCOREDISTRIBUTION_H
 
+#include <optional>
+#include <string>
+
 #include "core/value.h"
 #include "core/xmlnode.h"
 
@@ -26,40 +29,20 @@ class ScoreDistribution {
  public:
   Value value;
   std::string value_string;
-  double record_count = double_min();
-  bool has_confidence = false;
-  double confidence = double_min();
-  std::string confidence_string;
-  bool has_probability = false;
-  double probability = double_min();
-  std::string probability_string;
+  // pmml-4-4.xsd ScoreDistribution: value and recordCount are use="required";
+  // confidence and probability are optional PROB-NUMBERs without a default.
+  double record_count = 0.0;
+  std::optional<double> confidence;
+  std::optional<double> probability;
 
   ScoreDistribution() = default;
 
   ScoreDistribution(XmlNode node, DataType dataType)
-      : value(Value(node.get_attribute("value"), dataType)),
-        value_string(node.get_attribute("value")),
+      : value(Value(node.required_attribute("value"), dataType)),
+        value_string(node.required_attribute("value")),
         record_count(node.required_double_attribute("recordCount")),
-        has_confidence(node.exists_attribute("confidence")),
-        confidence(node.get_double_attribute("confidence")),
-        confidence_string(node.get_attribute("confidence")),
-        has_probability(node.exists_attribute("probability")),
-        probability(node.get_double_attribute("probability")),
-        probability_string(node.get_attribute("probability")) {}
-
-  ScoreDistribution(XmlNode node, DataType dataType, double total_record_count)
-      : value(Value(node.get_attribute("value"), dataType)),
-        record_count(node.required_double_attribute("recordCount")),
-        has_confidence(node.exists_attribute("confidence")),
-        confidence(total_record_count > 0 ? record_count / total_record_count
-                                          : 1),  // confidence should be computed with laplace correction,
-                                                 // since no coefficient is prenset in PMML
-        // when, as in this case, it is computed from record count, it is equal
-        // to probability
-        confidence_string(::to_string<double>(confidence)),
-        has_probability(node.exists_attribute("probability")),
-        probability(confidence),
-        probability_string(confidence_string) {}
+        confidence(node.optional_double_attribute("confidence")),
+        probability(node.optional_double_attribute("probability")) {}
 
   static std::vector<ScoreDistribution> to_score_distributions(const std::vector<XmlNode>& score_distribution_nodes,
                                                                const DataType& target_type) {

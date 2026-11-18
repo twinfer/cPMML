@@ -89,7 +89,7 @@ class TextEvaluator : public InternalEvaluator {
     // Identify text (first active) and target (predicted) field
     for (const auto& mf : model.get_child("MiningSchema").get_childs("MiningField")) {
       const FieldUsageType usage = FieldUsageType::read(mf);
-      std::string fname = mf.get_attribute("name");
+      std::string fname = mf.required_attribute("name");
       if (usage == FieldUsageType::FieldUsageTypeValue::ACTIVE && text_field.empty())
         text_field = fname;
       else if (usage == FieldUsageType::FieldUsageTypeValue::TARGET)

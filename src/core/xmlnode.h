@@ -7,7 +7,7 @@
 #ifndef CPMML_XMLNODE_H
 #define CPMML_XMLNODE_H
 
-#include <limits>
+#include <optional>
 #include <pugixml.hpp>
 #include <string>
 #include <unordered_set>
@@ -37,10 +37,17 @@ class XmlNode {
     return static_cast<bool>(node.attribute(attribute_name.c_str()));
   }
 
-  std::string get_attribute(const std::string& attribute_name) const {
+  // There is no one-argument get_attribute: it answered the text "null" for an
+  // absent attribute, which a document can also hold (CODE_REVIEW.md R1). A
+  // caller says what absence means: required_attribute (use="required"),
+  // get_attribute(name, default) (the XSD default, or "" where the caller
+  // keeps "absent" apart with exists_attribute), or optional_attribute.
+  std::string required_attribute(const std::string& attribute_name) const { return required(attribute_name).value(); }
+
+  std::optional<std::string> optional_attribute(const std::string& attribute_name) const {
     pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
-    if (!attr) return "null";
-    return attr.value();
+    if (!attr) return std::nullopt;
+    return std::string(attr.value());
   }
 
   std::string get_attribute(const std::string& attribute_name, const std::string& default_value) const {
@@ -58,9 +65,10 @@ class XmlNode {
   // differ only in what an absent attribute means:
   //   required_*            absent is a load error (use="required");
   //   get_*(name, default)  absent takes the PMML default;
-  //   get_*(name)           absent gives the legacy sentinel (DBL_MIN for a
-  //                         double, LONG_MAX for an integer), for the readers
-  //                         that still test for it.
+  //   optional_*            absent is std::nullopt (no default in the XSD and
+  //                         absence means something to the reader).
+  // There is no one-argument get_*: it answered a sentinel (DBL_MIN, LONG_MAX)
+  // that a document can also hold (CODE_REVIEW.md R1).
 
   double required_double_attribute(const std::string& attribute_name) const {
     return parse_double(required(attribute_name), attribute_name);
@@ -71,8 +79,10 @@ class XmlNode {
     return attr ? parse_double(attr, attribute_name) : default_value;
   }
 
-  double get_double_attribute(const std::string& attribute_name) const {
-    return get_double_attribute(attribute_name, std::numeric_limits<double>::min());
+  std::optional<double> optional_double_attribute(const std::string& attribute_name) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr) return std::nullopt;
+    return parse_double(attr, attribute_name);
   }
 
   long required_long_attribute(const std::string& attribute_name) const {
@@ -84,8 +94,10 @@ class XmlNode {
     return attr ? parse_long(attr, attribute_name) : default_value;
   }
 
-  long get_long_attribute(const std::string& attribute_name) const {
-    return get_long_attribute(attribute_name, std::numeric_limits<long>::max());
+  std::optional<long> optional_long_attribute(const std::string& attribute_name) const {
+    pugi::xml_attribute attr = node.attribute(attribute_name.c_str());
+    if (!attr) return std::nullopt;
+    return parse_long(attr, attribute_name);
   }
 
   bool required_bool_attribute(const std::string& attribute_name) const {
@@ -136,7 +148,7 @@ class XmlNode {
     std::vector<XmlNode> result;
     for (auto child : node.children(child_name.c_str())) {
       XmlNode child_node(child);
-      if (child_node.get_attribute(attribute_name) == attribute_value) result.push_back(child_node);
+      if (child_node.optional_attribute(attribute_name) == attribute_value) result.push_back(child_node);
     }
     return result;
   }
