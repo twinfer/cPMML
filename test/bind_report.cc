@@ -373,6 +373,17 @@ void rule_cases() {
          {});
   expect("constant-inherits-malformed", "S2: the inherited type reads the text",
          in_model(derived("v", "boolean", call("not", constant("yes")), "categorical")), {"E-VALUE-MALFORMED"});
+  expect("constant-no-inherit-and",
+         "S2 needs a ParameterField dataType: and \"takes a variable number of fields as parameters\" (no "
+         "ParameterField), so an untyped \"true\" is inferred, a string (\"any non-numeric characters\")",
+         in_model(derived("v", "boolean", call("and", constant("true") + ref("b")), "categorical")),
+         {"E-TYPE-BOOLEAN-MIXED"});
+  expect("constant-missing-untyped",
+         "\"If the missing attribute is true, the constant will be taken as a missing value, regardless of the "
+         "content\": an untyped overflow is not read",
+         in_model(derived("u", "double",
+                          call("+", "<Constant missing=\"true\">99999999999999999999</Constant>" + ref("x")))),
+         {});
 
   // ---- functions (§4.2)
   expect("arity", "BuiltinFunctions.html: + \"have two parameters\"",

@@ -1183,10 +1183,11 @@ class Binder {
       typed = true;
     }
     // "If the missing attribute is true, the constant will be taken as a
-    // missing value, regardless of the content."
-    if (missing && *missing) {
-      if (typed) return {type};
-    }
+    // missing value, regardless of the content": its text is not read, so
+    // it is not checked, typed or not (an untyped one keeps the type its
+    // text infers, as the engine's Constant does not read it either).
+    const bool missing_value = missing && *missing;
+    if (missing_value && typed) return {type};
     if (typed) {
       // "If the content is empty ... unless dataType is something besides
       // "string", in which case, it will be taken as a missing value of the
@@ -1199,18 +1200,7 @@ class Binder {
       // only through the string rule (typing.h infer_constant).
       if (text.empty() && *type != TypeId::String) return {type};
       if (attr(node, "dataType") && parse_datatype(*attr(node, "dataType"))->temporal) return {type};
-      types::Value v;
-      switch (*type) {
-        case TypeId::Float:
-          v = types::parse_constant_as<types::Float>(text, parse_ctx_);
-          break;
-        case TypeId::Double:
-          v = types::parse_constant_as<types::Double>(text, parse_ctx_);
-          break;
-        default:
-          v = types::cold::parse_as(ColdPathIssuer::make(), *type, text, parse_ctx_);
-          break;
-      }
+      const types::Value v = parse_constant(*type, text, parse_ctx_);  // typing.h, shared with the engine
       if (types::is_invalid(v))
         error(code::kValueMalformed, ctx, node,
               "text " + detail::quoted(text) + " is not a value of type " + std::string(type_name(*type)) +
@@ -1222,8 +1212,9 @@ class Binder {
         return {TypeId::Integer};
       case ConstantKind::IntegerOverflow:
         // §3.4: "integer beyond int64 -> load error" (D4).
-        error(code::kValueMalformed, ctx, node,
-              "untyped integer " + detail::quoted(text) + " is beyond the 64-bit range (§3.4, D4)");
+        if (!missing_value)
+          error(code::kValueMalformed, ctx, node,
+                "untyped integer " + detail::quoted(text) + " is beyond the 64-bit range (§3.4, D4)");
         return {TypeId::Integer};
       case ConstantKind::Double:
         return {TypeId::Double};
@@ -1470,21 +1461,6 @@ class Binder {
   }
 
   // ---------------------------------------------------------------- Apply (§4)
-  static std::optional<TypeId> param_declared_type(fn::Param p) {
-    switch (p) {
-      case fn::Param::Integer:
-        return TypeId::Integer;
-      case fn::Param::Double:
-        return TypeId::Double;
-      case fn::Param::String:
-        return TypeId::String;
-      case fn::Param::Boolean:
-        return TypeId::Boolean;
-      default:
-        return std::nullopt;
-    }
-  }
-
   // Q6: ordering over an operand whose field defines no order.
   void check_order_operand(Ctx& ctx, pugi::xml_node node, const Binding* field, const std::string& what) {
     if (!field || !field->type.optype) return;
@@ -1585,7 +1561,7 @@ class Binder {
     bool temporal = false;
     for (std::size_t i = 0; i < n; i++) {
       const fn::Param p = sig->param(i);
-      types[i] = bind_expression(ctx, args[i], param_declared_type(p));
+      types[i] = bind_expression(ctx, args[i], parameter_type(*sig, i));  // S2
       check_param(ctx, node, *sig, i, p, args[i], types[i], temporal);
     }
     if (temporal)

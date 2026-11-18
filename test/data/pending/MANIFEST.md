@@ -84,7 +84,7 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_mapmissing_string_slot_equal | P4.7 | no (note 8) | FAIL `output 'o': predicted: false  expected: true` (row 2) | both rows agree |
 | fix_mapmissing_string_slot_numeric | P4.7, else P6.8 (note 9) | no (note 9) | FAIL `predicted: 200.0  expected: 255.0` (row 1) | both rows agree |
 | fix_builtin_text_if | P4.3 | no | FAIL `output 'if_full': predicted: E  expected: no value` | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
-| fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': model declares it but produced no value  expected: 2-2000` | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
+| fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23) | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `output 'f_pct': model declares it but produced no value  expected: rate 0.5%` | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
 
 ### Notes

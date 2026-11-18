@@ -1,0 +1,4 @@
+s,m,y,d,t,dinf,dninf,dnan,finf,empty_typed,missing_attr,empty_mm,typed_sp,str_sp
+INF,07,2000,1.5,1.5,Infinity,-Infinity,NaN,-Infinity,true,true,9.0,2.5,a b
+abc,12,1999,-2,-2.0,Infinity,-Infinity,NaN,-Infinity,true,true,9.0,-1.0,a b
+,03,2001,0,0.0,Infinity,-Infinity,NaN,-Infinity,true,true,9.0,1.0,a b

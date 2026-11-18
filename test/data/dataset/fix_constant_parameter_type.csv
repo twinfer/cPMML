@@ -1,0 +1,4 @@
+s,m,y,d,t,if_true,if_false,if_one,not_false,not_true,sub,sl,up_num,sl_inf,cos
+INF,07,2000,1.5,1.5,1,2,1.5,true,false,bcd,4,1.50,3,1.0
+abc,12,1999,-2,-2.0,1,2,-2.0,true,false,bcd,4,1.50,3,1.0
+,03,2001,0,0.0,1,2,0.0,true,false,bcd,4,1.50,3,1.0

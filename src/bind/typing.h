@@ -63,6 +63,7 @@
 #include <string_view>
 #include <vector>
 
+#include "bind/function_table.h"
 #include "core/types/parse.h"
 #include "core/types/value.h"
 #include "utils/lexical.h"
@@ -243,6 +244,72 @@ inline ConstantKind infer_constant(std::string_view text) {
   double d = 0;
   if (lexical::parse_double(text, d)) return ConstantKind::Double;
   return ConstantKind::String;
+}
+
+// The dataType an untyped Constant argument inherits from the built-in
+// parameter it is passed to (§3.4, review S2). Transformations.html: "If the
+// ParameterField definition includes a dataType, the Constant will inherit
+// the dataType specified in the ParameterField". Only the parameters whose
+// pseudo-declaration in BuiltinFunctions.html carries a dataType are
+// inherited from: not (`<ParameterField name="x" dataType="boolean"/>`), the
+// condition of if (`<ParameterField name="x" dataType="boolean"/>`),
+// uppercase, lowercase, stringLength, trimBlanks, replace, matches (every
+// `dataType="string"`), substring (input string, startPos and length
+// `dataType="integer"`), the pattern of formatNumber and formatDatetime
+// (`dataType="string"`), and the distribution, expm1, hypot, ln1p, rint and
+// trigonometric functions (`dataType="double"`; normalPDF, normalIDF,
+// stdNormalPDF, stdNormalIDF and erf "have similar to above
+// pseudo-declarations"). The function table (function_table.h) gives some
+// parameters a type the spec's declarations do not: and and or ("The
+// function takes a variable number of fields as parameters", no
+// ParameterField) and the referenceYear of dateDaysSinceYear and
+// dateSecondsSinceYear (`<ParameterField name="referenceYear"
+// optype="continuous"/>`, no dataType). Those types still check the
+// arguments (E-TYPE-PARAM) but give an untyped Constant nothing to inherit,
+// so it is inferred. The arithmetic, comparison and aggregate parameters and
+// the values of concat and if declare none either (Param::Numeric,
+// Comparable, Any).
+constexpr StaticType parameter_type(const fn::Signature& sig, std::size_t position) {
+  if (sig.name == "and" || sig.name == "or" || sig.name == "dateDaysSinceYear" || sig.name == "dateSecondsSinceYear")
+    return std::nullopt;
+  switch (sig.param(position)) {
+    case fn::Param::Integer:
+      return TypeId::Integer;
+    case fn::Param::Double:
+      return TypeId::Double;
+    case fn::Param::String:
+      return TypeId::String;
+    case fn::Param::Boolean:
+      return TypeId::Boolean;
+    default:
+      return std::nullopt;
+  }
+}
+
+// The type a Constant at `position` (0-based, after the Extensions) of an
+// Apply of `function` inherits, or nullopt (no built-in of that name, or a
+// parameter with no declared dataType).
+constexpr StaticType inherited_constant_type(std::string_view function, std::size_t position) {
+  const fn::Signature* sig = fn::find(function);
+  return sig ? parameter_type(*sig, position) : std::nullopt;
+}
+
+// Constant text read as `type` (a declared or inherited dataType): the
+// type's lexical space (XML Schema Part 2; numbers and booleans collapse
+// blanks, string keeps them), plus, for float and double, INF, -INF and NaN
+// in any case (Transformations.html: "These three constants are case
+// insensitive and only meaningful as floating point values (datatype equal to
+// "float" or "double")", §2.6, review S3). Invalid when the text is not in
+// the space; empty content is the caller's (a missing value, or "").
+inline types::Value parse_constant(TypeId type, std::string_view text, types::ParseContext& ctx) {
+  switch (type) {
+    case TypeId::Float:
+      return types::parse_constant_as<types::Float>(text, ctx);
+    case TypeId::Double:
+      return types::parse_constant_as<types::Double>(text, ctx);
+    default:
+      return types::cold::parse_as(ColdPathIssuer::make(), type, text, ctx);
+  }
 }
 
 // ---------------------------------------------------------------- Array content

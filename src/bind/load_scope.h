@@ -32,8 +32,9 @@
  * cpmml::ParsingException listing the first 20 errors whose code is a rule of
  * names and scopes, the rules P2.1 makes authoritative: E-SCOPE-UNRESOLVED,
  * E-SCOPE-TOP-LEVEL, E-NAME-DUPLICATE, E-CYCLE. Every other binder error
- * stays report-only until the design commit that owns it (P2.3 Constants,
- * P2.7 ordering, ...). P2.2's document-text errors (E-VALUE-MALFORMED,
+ * stays report-only until the design commit that owns it (P2.7 ordering,
+ * ...); P2.3's Constant errors are raised by the Constant constructor
+ * (expression/constant.h). P2.2's document-text errors (E-VALUE-MALFORMED,
  * E-ATTRIBUTE-MALFORMED, E-KEY-NAN, E-KEY-DUPLICATE) are raised by the
  * engine's constructors as they read the text, through the helpers at the
  * end of this file: Load mode does not bind expression or model bodies, and
@@ -45,8 +46,12 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "bind/binder.h"
 #include "cPMML.h"
@@ -59,12 +64,52 @@ namespace cpmml::bind {
 
 class LoadScope {
  public:
-  LoadScope(pugi::xml_node pmml, std::string_view text) : binder_(pmml, text, Binder::Mode::Load) {}
+  LoadScope(pugi::xml_node pmml, std::string_view text) : text_(text), binder_(pmml, text, Binder::Mode::Load) {}
 
   LoadScope(const LoadScope&) = delete;
   LoadScope& operator=(const LoadScope&) = delete;
 
   const Binder& binder() const { return binder_; }
+
+  // The text content of `element`, an element of the engine's document with
+  // no child node there, as the binder's reader sees it (P2.3,
+  // expression/constant.h): pugixml's default flags, the engine's, drop a
+  // text child that is only blanks, so <Constant> </Constant> and
+  // <Constant/> look alike. The document text is parsed again, once per
+  // load and only when an element asks, with parse_ws_pcdata_single (the
+  // binder's flags, Binder(std::string_view)), so its encoding is converted
+  // and its line ends normalised exactly as the engine's were (XML 1.0
+  // §2.11: "translating both the two-character sequence #xD #xA and any #xD
+  // that is not followed by #xA to a single #xA"), and `element` is found in
+  // it by its position among the element children of each ancestor (the two
+  // parses differ only in text nodes). Returns "" for an element with no
+  // content, the blanks otherwise. Only while the model is built (Active).
+  std::string lone_blanks(pugi::xml_node element) const {
+    if (!blanks_doc_) {
+      auto doc = std::make_unique<pugi::xml_document>();
+      if (!doc->load_buffer(text_.data(), text_.size(), pugi::parse_default | pugi::parse_ws_pcdata_single))
+        throw std::logic_error("LoadScope: the document the engine parsed does not parse again");
+      blanks_doc_ = std::move(doc);
+    }
+    std::vector<std::size_t> path;  // element index under each ancestor, innermost first
+    for (pugi::xml_node n = element; n.parent(); n = n.parent()) {
+      std::size_t i = 0;
+      for (pugi::xml_node s = n.previous_sibling(); s; s = s.previous_sibling())
+        if (s.type() == pugi::node_element) i++;
+      path.push_back(i);
+    }
+    pugi::xml_node m = *blanks_doc_;
+    for (auto it = path.rbegin(); it != path.rend() && m; ++it) {
+      std::size_t k = *it;
+      pugi::xml_node c = m.first_child();
+      for (; c; c = c.next_sibling())
+        if (c.type() == pugi::node_element && k-- == 0) break;
+      m = c;
+    }
+    if (!m || std::strcmp(m.name(), element.name()) != 0)
+      throw std::logic_error(std::string("LoadScope: element ") + element.name() + " not found in the second parse");
+    return m.child_value();
+  }
 
   static bool is_load_error(const Diagnostic& d) {
     return d.severity == Severity::Error && (d.code == code::kScopeUnresolved || d.code == code::kScopeTopLevel ||
@@ -96,17 +141,23 @@ class LoadScope {
   // Makes `scope` current for the lifetime of the guard (model construction).
   class Active {
    public:
-    explicit Active(const LoadScope& scope) : previous_(current()) { current() = &scope; }
-    ~Active() { current() = previous_; }
+    explicit Active(const LoadScope& scope) : scope_(scope), previous_(current()) { current() = &scope; }
+    ~Active() {
+      scope_.blanks_doc_.reset();  // the text it was parsed from is the loader's, gone after the build
+      current() = previous_;
+    }
     Active(const Active&) = delete;
     Active& operator=(const Active&) = delete;
 
    private:
+    const LoadScope& scope_;
     const LoadScope* previous_;
   };
 
  private:
+  std::string_view text_;  // the engine's document text, valid while the model is built
   Binder binder_;
+  mutable std::unique_ptr<pugi::xml_document> blanks_doc_;  // lone_blanks, parsed on demand
 };
 
 // The engine's DataType of a static type (core/datatype.h: integer and the

@@ -19,6 +19,8 @@
  *      bind/load_scope.h): FieldScope.html's errors fail the load and name
  *      the field; the clashes real documents contain still load; an invalid
  *      input names its field (B45).
+ *   6. Constant typing (typed-core P2.3): typed text read strictly, untyped
+ *      text inferred or inherited from the built-in's parameter (S2).
  *
  * Exit status is the number of failed checks.
  *******************************************************************************/
@@ -911,6 +913,128 @@ static void document_text() {
   // integer field loads and gives 0) and the norm_discrete checks above.
 }
 
+// Constant typing (typed-core P2.3, §3.4; expression/constant.h): the load
+// errors a fixture cannot hold. Each document is one TransformationDictionary
+// DerivedField over the Constant (an OutputField would catch the error until
+// P2.5, B13). JPMML 1.7.7 was probed on each and is noted where it departs.
+static std::string constant_field(const std::string& type, const std::string& expression) {
+  return typed_doc(R"(<DerivedField name="x" optype="continuous" dataType=")" + type + R"(">)" + expression +
+                   "</DerivedField>");
+}
+
+static void constants() {
+  const auto error = [](const std::string& type, const std::string& expression) {
+    return load_error(constant_field(type, expression));
+  };
+  const auto malformed = [&](const std::string& type, const std::string& expression) {
+    return contains(error(type, expression), "E-VALUE-MALFORMED");
+  };
+  // dataType given ("The dataType of Constant can be optionally specified"):
+  // the text is read in that type, XSD-strict. The
+  // base build read integer text as a double (1.5 loaded). JPMML 1.7.7
+  // refuses the first four too (NumberFormatException) but scores
+  // dataType="boolean" TRUE as true (Java's parseBoolean) and
+  // dataType="integer" 1e3 as 1000: departures, the spec deciding (XML Schema
+  // Part 2 §3.2.2.1, boolean: "{true, false, 1, 0}"; §3.3.13.1, integer: "a
+  // finite-length sequence of decimal digits (#x30-#x39) with an optional
+  // leading sign").
+  CHECK(malformed("double", R"(<Constant dataType="integer">1.5</Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="integer">INF</Constant>)"));  // only float, double (S3)
+  CHECK(malformed("double", R"(<Constant dataType="double">Infinity</Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="double">1d</Constant>)"));
+  CHECK(malformed("boolean", R"(<Constant dataType="boolean">TRUE</Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="integer">1e3</Constant>)"));
+  CHECK(contains(error("double", R"(<Constant dataType="real">1</Constant>)"), "E-ENUM"));
+  // S3: NaN, INF, -INF "are case insensitive and only meaningful as floating
+  // point values"; the base build refused inf.
+  CHECK(error("double", R"(<Constant dataType="double">inF</Constant>)").empty());
+  CHECK(error("double", R"(<Constant dataType="float">-iNf</Constant>)").empty());
+  CHECK(error("double", R"(<Constant dataType="double">nan</Constant>)").empty());
+  // Empty content of a typed number is a missing value, blanks-only content
+  // is not empty (xs:string, whiteSpace preserve) and collapses to "", which
+  // no number reads (P1.2; JPMML: "empty String"). The engine's pugixml flags
+  // drop a blanks-only text, so this is read from the document text.
+  CHECK(error("double", R"(<Constant dataType="double"></Constant>)").empty());
+  CHECK(error("double", R"(<Constant dataType="double"/>)").empty());
+  CHECK(error("double", R"(<Constant dataType="double"><!-- none --></Constant>)").empty());
+  CHECK(malformed("double", R"(<Constant dataType="double"> </Constant>)"));
+  CHECK(malformed("double", "<Constant dataType=\"double\">\n\t</Constant>"));
+  CHECK(malformed("double", R"(<Constant dataType="double"> <!-- none --> </Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="double" note="a>b"> </Constant>)"));  // '>' in an attribute
+  CHECK(error("double", R"(<Constant dataType="double"> 1 </Constant>)").empty());
+  // "If the missing attribute is true, the constant will be taken as a
+  // missing value, regardless of the content."
+  CHECK(error("double", R"(<Constant dataType="integer" missing="true">abc</Constant>)").empty());
+  CHECK(error("double", R"(<Constant missing="true">99999999999999999999</Constant>)").empty());
+  CHECK(contains(error("double", R"(<Constant dataType="double" missing="yes">1</Constant>)"), "missing"));
+  // No dataType: an integer beyond int64 is a load error (§3.4, D4; JPMML
+  // reads it as a string and refuses "+": "No PMML data type for the
+  // intersection of PMML data types double and string").
+  CHECK(malformed("double",
+                  R"(<Apply function="+"><FieldRef field="d"/><Constant>99999999999999999999</Constant></Apply>)"));
+  CHECK(error("double", R"(<Apply function="+"><FieldRef field="d"/><Constant>9223372036854775807</Constant></Apply>)")
+            .empty());
+  // S2: an untyped Constant argument inherits the parameter's dataType, so it
+  // must be a value of it. substring's startPos is declared integer
+  // (JPMML 1.7.7 loads 1.0 and scores it as 1: a departure, the spec's
+  // "inherit the dataType" decides); the condition of if and the argument of
+  // not are boolean (JPMML: IllegalArgumentException "yes" at the first
+  // record).
+  CHECK(malformed(
+      "string",
+      R"(<Apply function="substring"><FieldRef field="s"/><Constant>1.0</Constant><Constant>2</Constant></Apply>)"));
+  CHECK(
+      error("string",
+            R"(<Apply function="substring"><FieldRef field="s"/><Constant>1</Constant><Constant>2</Constant></Apply>)")
+          .empty());
+  CHECK(malformed(
+      "integer",
+      R"(<Apply function="if"><Constant>yes</Constant><Constant>1</Constant><Constant>2</Constant></Apply>)"));
+  CHECK(malformed("boolean", R"(<Apply function="not"><Constant>2</Constant></Apply>)"));
+  // The blanks of a Constant are its text as XML hands it on, whatever the
+  // document's encoding: XML 1.0 §2.11, "translating both the two-character
+  // sequence #xD #xA and any #xD that is not followed by #xA to a single
+  // #xA", so stringLength of CR LF is 1 (JPMML 1.7.7 agrees); a document
+  // pugixml converts from ISO-8859-1 reads them as a UTF-8 one does (the
+  // first P2.3 draft failed to load it once a non-ASCII byte preceded the
+  // Constant).
+  const auto length_of = [](const std::string& document) {
+    const std::string path = write_document(document);
+    double length = -1;
+    try {
+      cpmml::Model model(path, false);
+      length = model.evaluate(row("1")).as_double();
+    } catch (const std::exception&) {
+    }
+    std::remove(path.c_str());
+    return length;
+  };
+  const auto blanks_doc = [](const std::string& blanks) {
+    return typed_doc(R"(<DerivedField name="x" optype="continuous" dataType="integer">)"
+                     R"(<Apply function="stringLength"><Constant>)" +
+                         blanks + "</Constant></Apply></DerivedField>",
+                     R"(<NumericPredictor name="x" coefficient="1"/>)");
+  };
+  const auto latin1 = [](std::string document) {
+    document.replace(document.find("UTF-8"), 5, "ISO-8859-1");
+    document.replace(document.find("<Header/>"), 9, "<Header description=\"caf\xE9\"/>");
+    return document;
+  };
+  CHECK(length_of(blanks_doc("\r\n")) == 1);
+  CHECK(length_of(blanks_doc("\r")) == 1);
+  CHECK(length_of(blanks_doc(" \r\n ")) == 3);
+  CHECK(length_of(latin1(blanks_doc("  "))) == 2);
+  CHECK(length_of(latin1(blanks_doc(""))) == 0);
+  CHECK(contains(load_error(latin1(constant_field("double", R"(<Constant dataType="double"> </Constant>)"))),
+                 "E-VALUE-MALFORMED"));
+  CHECK(load_error(latin1(constant_field("double", R"(<Constant dataType="double"/>)"))).empty());
+  // Parameters with no declared dataType inherit nothing: if's values and
+  // concat's arguments are inferred, so "yes" is a string there.
+  CHECK(error("string", R"(<Apply function="if"><Constant>true</Constant><Constant>yes</Constant></Apply>)").empty());
+  CHECK(
+      error("string", R"(<Apply function="concat"><Constant>yes</Constant><Constant>1.0</Constant></Apply>)").empty());
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -941,6 +1065,7 @@ int main() {
   invalid_inputs();
   names_and_scopes();
   document_text();
+  constants();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

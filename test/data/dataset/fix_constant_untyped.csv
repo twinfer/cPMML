@@ -1,0 +1,4 @@
+s,m,y,d,t,cc_abc,cc_my,cc_inf,cc_nan,eq_inf,big,big2,cc_sp,cc_empty,cc_blank
+INF,07,2000,1.5,1.5,abcde,07-2000,INFx,nanx,true,1.00000000015E10,3.0000000015E9,x 1,ab,a  b
+abc,12,1999,-2,-2.0,abcde,12-1999,INFx,nanx,false,9.999999998E9,2.999999998E9,x 1,ab,a  b
+,03,2001,0,0.0,abcde,03-2001,INFx,nanx,N/A,1.0E10,3.0E9,x 1,ab,a  b
