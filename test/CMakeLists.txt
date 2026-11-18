@@ -84,6 +84,17 @@ foreach(_case_expect
             -P ${CMAKE_CURRENT_SOURCE_DIR}/types_negative/check_negative.cmake)
 endforeach()
 
+# The binder in report mode (src/bind/, docs/design/typed-core.md §3.7, P1.2):
+# its rule cases, then every fixture, benchmark model and staged fixture bound
+# and compared with test/data/bind_baseline.txt (--update rewrites it).
+# Header-only and not used by the engine, so the test links only pugixml and
+# miniz.
+add_executable(bind_report.exe bind_report.cc)
+target_include_directories(bind_report.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bind_report.exe pugixml::pugixml miniz)
+add_dependencies(unit_tests bind_report.exe)
+add_test(NAME bind_report COMMAND bind_report.exe ${PROJECT_SOURCE_DIR})
+
 # Concurrent scoring: a data race does not fail a single-threaded fixture, so
 # nothing else in the suite would notice if R3 regressed. Two models, one with
 # categorical string inputs (the string-interning path) and one ensemble (the

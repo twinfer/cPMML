@@ -1,0 +1,213 @@
+# Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
+# Regenerate with: bind_report.exe <source-dir> --update
+# documents: 377
+# E-KEY-NAN: 1
+# E-NAME-DUPLICATE: 9
+# E-REQUIRED: 1
+# E-SCOPE-UNRESOLVED: 2
+# E-TYPE-BOOLEAN-MIXED: 3
+# U-ELEMENT: 25
+# W-CAST-LOSSY: 113
+# W-CAST-NARROWING: 15
+# W-OUTPUT-NO-DATATYPE: 4
+# W-SCOPE-IMPLICIT: 8
+# W-TEXT-WIDENED: 26
+benchmark/data/model/AuditTree.xml:88	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+benchmark/data/model/HousingGBTRegressor.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingGBTRegressor.xml:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:175	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:178	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:181	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:184	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:187	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:190	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor.xml:193	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor_PCA.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingGBTRegressor_PCA.xml:662	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor_PCA.xml:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor_PCA.xml:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor_PCA.xml:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTRegressor_PCA.xml:674	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:58	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingGBTlassifier.xml:207	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:210	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:213	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:216	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:219	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:222	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:225	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier.xml:228	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier_PCA.xml:58	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingGBTlassifier_PCA.xml:697	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier_PCA.xml:700	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier_PCA.xml:703	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier_PCA.xml:706	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingGBTlassifier_PCA.xml:709	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingLRClassifier.xml:62	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingLRClassifier_PCA.xml:62	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingLinearRegressor.xml:55	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingLinearRegressor_PCA.xml:55	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingRFClassifier.xml:62	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingRFClassifier.xml:176	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:179	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:182	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:185	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:188	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:191	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:194	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier.xml:197	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier_PCA.xml:62	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingRFClassifier_PCA.xml:666	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier_PCA.xml:669	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier_PCA.xml:672	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier_PCA.xml:675	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFClassifier_PCA.xml:678	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingRFRegressor.xml:169	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:175	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:178	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:181	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:184	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:187	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor.xml:190	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor_PCA.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+benchmark/data/model/HousingRFRegressor_PCA.xml:659	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor_PCA.xml:662	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor_PCA.xml:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor_PCA.xml:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/HousingRFRegressor_PCA.xml:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+benchmark/data/model/IrisMultinomReg.xml:28	E-NAME-DUPLICATE	1	RegressionModel "Multinom_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+benchmark/data/model/IrisTree.xml:36	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+benchmark/data/model/ensemble_audit_dectree.xml:704	W-TEXT-WIDENED	2	MiningModel > Segment #8 > TreeModel "DecisionTree"	SimplePredicate "Age": value="35.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+benchmark/data/model/ensemble_audit_dectree.xml:828	W-TEXT-WIDENED	2	MiningModel > Segment #10 > TreeModel "DecisionTree"	SimplePredicate "Age": value="27.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+benchmark/data/model/single_audit_dectree.xml:147	W-TEXT-WIDENED	2	TreeModel "DecisionTree"	SimplePredicate "Age": value="33.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/ARIMA_DynReg.zip:17	E-SCOPE-UNRESOLVED	1	TimeSeriesModel "ARIMA_DynReg"	DynamicRegressor: field "x" is not in scope
+test/data/model/AuditTree.zip:88	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/HousingGBTClassifier.zip:58	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingGBTClassifier.zip:207	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:210	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:213	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:216	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:219	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:222	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:225	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier.zip:228	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier_PCA.zip:58	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingGBTClassifier_PCA.zip:697	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier_PCA.zip:700	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier_PCA.zip:703	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier_PCA.zip:706	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTClassifier_PCA.zip:709	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingGBTRegressor.zip:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:175	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:178	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:181	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:184	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:187	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:190	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor.zip:193	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor_PCA.zip:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingGBTRegressor_PCA.zip:662	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor_PCA.zip:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor_PCA.zip:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor_PCA.zip:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingGBTRegressor_PCA.zip:674	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingLRClassifier.zip:62	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingLRClassifier_PCA.zip:62	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingLinearRegressor.zip:55	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingLinearRegressor_PCA.zip:55	U-ELEMENT	1	RegressionModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingRFClassifier.zip:62	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingRFClassifier.zip:176	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:179	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:182	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:185	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:188	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:191	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:194	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier.zip:197	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier_PCA.zip:62	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingRFClassifier_PCA.zip:666	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier_PCA.zip:669	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier_PCA.zip:672	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier_PCA.zip:675	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFClassifier_PCA.zip:678	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingRFRegressor.zip:169	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:175	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(housing_median_age))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:178	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_rooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:181	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(total_bedrooms))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:184	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(population))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:187	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(households))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor.zip:190	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(median_income))": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor_PCA.zip:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
+test/data/model/HousingRFRegressor_PCA.zip:659	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[0])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor_PCA.zip:662	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[1])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor_PCA.zip:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor_PCA.zip:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/HousingRFRegressor_PCA.zip:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/IrisMultinomReg.zip:28	E-NAME-DUPLICATE	1	RegressionModel "Multinom_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/IrisNaiveBayes.zip:51	E-REQUIRED	1	NaiveBayesModel	BayesOutput: attribute fieldName is required (pmml-4-4.xsd)
+test/data/model/IrisText.zip:34	U-ELEMENT	1	TextModel	ClassLabels: not typed by the binder (no binder rule for it yet); 1 occurrence
+test/data/model/IrisTree.zip:36	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/ensemble_audit_dectree.zip:704	W-TEXT-WIDENED	2	MiningModel > Segment #8 > TreeModel "DecisionTree"	SimplePredicate "Age": value="35.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/ensemble_audit_dectree.zip:828	W-TEXT-WIDENED	2	MiningModel > Segment #10 > TreeModel "DecisionTree"	SimplePredicate "Age": value="27.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_anomaly_clustermeandist.zip:35	W-SCOPE-IMPLICIT	1	AnomalyDetectionModel "AnomalyOnKmeans"	MiningField "anomalyScore": field "anomalyScore" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_derivedfield_shadow.zip:26	E-NAME-DUPLICATE	1	RegressionModel "Shadow"	DerivedField "d": name "d" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope")
+test/data/model/fix_derivedfield_shadow.zip:31	W-SCOPE-IMPLICIT	1	RegressionModel "Shadow"	NumericPredictor "d": TransformationDictionary DerivedField "d" reads DataField "z", which is not a MiningField of this model (FieldScope.html: an instantiated TD field "can only reference: MiningFields from the MiningSchema of that model element"; accepted, Q3)
+test/data/model/fix_ensemble_chain_display_last.zip:31	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_ensemble_chain_display_mid.zip:29	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_ensemble_chain_display_nested.zip:37	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_ensemble_chain_display_top.zip:37	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_ensemble_localtrans_scope.zip:4	E-SCOPE-UNRESOLVED	1	MiningModel	MiningField "d": field "d" is not in scope
+test/data/model/fix_ensemble_localtrans_shadow.zip:4	E-NAME-DUPLICATE	2	MiningModel > Segment "0" > RegressionModel (+1 more)	DerivedField "g": name "g" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope")
+test/data/model/fix_ensemble_outputs_selectall_values.zip:44	W-CAST-LOSSY	2	MiningModel > Segment "1" > RegressionModel (+1 more)	OutputField "f": declares float over its expression of type double: the value is rounded to float (§2.6)
+test/data/model/fix_ensemble_segtarget_chaindisplay.zip:28	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_ensemble_segtarget_chainprior.zip:26	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_format_classification_double.zip:20	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
+test/data/model/fix_format_classification_double.zip:24	W-CAST-LOSSY	1	RegressionModel	OutputField "p1_f": declares float over a probability of type double: the value is rounded to float (§2.6)
+test/data/model/fix_format_regression_float.zip:23	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
+test/data/model/fix_format_regression_integer.zip:23	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
+test/data/model/fix_mapvalues_nan_key.zip:2	E-KEY-NAN	1		row in DerivedField "x": a NaN key matches no input (§2.7, D26: a NaN key is a load error)
+test/data/model/fix_output_boolean_class_text.zip:17	W-CAST-NARROWING	1	TreeModel	OutputField "pv": declares boolean over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_boolean_class_text.zip:18	W-CAST-NARROWING	1	TreeModel	OutputField "pvi": declares integer over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_boolean_class_text.zip:19	W-CAST-NARROWING	1	TreeModel	OutputField "pvd": declares double over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_predicted_rescale.zip:16	W-CAST-LOSSY	1	RegressionModel	OutputField "pvf": declares float over the predicted value of type double: the value is rounded to float (§2.6)
+test/data/model/fix_output_predicted_rescale.zip:18	W-CAST-NARROWING	1	RegressionModel	OutputField "pdvd": declares double over a display value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_probability_regression_integer.zip:21	W-TEXT-WIDENED	1	RegressionModel	OutputField "p1_0": value="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_regression_integer.zip:23	W-TEXT-WIDENED	1	RegressionModel	OutputField "p4_0": value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:9	W-TEXT-WIDENED	1		Value in DataField "y": Value@value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:21	W-TEXT-WIDENED	1	TreeModel	OutputField "p4_0": value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:22	W-TEXT-WIDENED	1	TreeModel	OutputField "p1_0": value="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:30	W-TEXT-WIDENED	1	TreeModel	TargetValue in Target "y": TargetValue@value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:40	W-TEXT-WIDENED	1	TreeModel	Node: score="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:42	W-TEXT-WIDENED	1	TreeModel	ScoreDistribution: value="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_tree_integer.zip:43	W-TEXT-WIDENED	1	TreeModel	ScoreDistribution: value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_vote_integer.zip:8	W-TEXT-WIDENED	1		Value in DataField "y": Value@value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_vote_integer.zip:21	W-TEXT-WIDENED	1	MiningModel	OutputField "p1_0": value="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_vote_integer.zip:23	W-TEXT-WIDENED	1	MiningModel	OutputField "p4_0": value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_vote_integer.zip:42	W-TEXT-WIDENED	1	MiningModel > Segment "s2" > TreeModel	Node: score="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_probability_vote_integer.zip:51	W-TEXT-WIDENED	1	MiningModel > Segment "s3" > TreeModel	Node: score="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/single_audit_dectree.zip:147	W-TEXT-WIDENED	2	TreeModel "DecisionTree"	SimplePredicate "Age": value="33.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/pending/model/fix_derived_cast_novalue.zip:12	W-CAST-NARROWING	1		DerivedField "ti": declares integer over an expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:13	W-CAST-NARROWING	1		DerivedField "tb": declares boolean over an expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:14	W-CAST-NARROWING	1		DerivedField "tsd": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:15	W-CAST-NARROWING	1		DerivedField "tsi": declares integer over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:16	W-CAST-NARROWING	1		DerivedField "tsb": declares boolean over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:17	W-CAST-NARROWING	1		DerivedField "tnb": declares boolean over an expression of type integer: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_derived_cast_novalue.zip:18	W-CAST-NARROWING	1		DerivedField "tgi": declares integer over an expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_float_set_narrow.zip:10	W-CAST-LOSSY	1		DerivedField "ff": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/pending/model/fix_output_double_float_target.zip:11	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
+test/data/pending/model/fix_output_double_float_target.zip:16	W-CAST-LOSSY	1	RegressionModel	OutputField "tv_f": declares float over its expression of type double: the value is rounded to float (§2.6)
+test/data/pending/model/fix_output_integer_nonintegral.zip:12	W-CAST-NARROWING	1	RegressionModel	OutputField "yi": declares integer over the predicted value of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_output_integer_nonintegral.zip:13	W-CAST-NARROWING	1	RegressionModel	OutputField "ti": declares integer over its expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_string_derived_set.zip:18	W-CAST-NARROWING	1		DerivedField "td": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_string_sum_avg.zip:10	W-CAST-LOSSY	1		DerivedField "ff": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/pending/model/fix_typed_derived_conversions.zip:18	W-CAST-NARROWING	1		DerivedField "td": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/pending/model/fix_typed_derived_conversions.zip:19	W-CAST-LOSSY	1		DerivedField "tf": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/pending/model/fix_typed_derived_conversions.zip:23	W-CAST-LOSSY	1		DerivedField "ncf": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/pending/model/fix_typed_equal_mixed.zip:22	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_b_ct": Apply "equal" compares boolean with string (Functions.html: boolean "can not be mixed with other types", Q7)
+test/data/pending/model/fix_typed_equal_mixed.zip:23	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_b_c1": Apply "equal" compares boolean with integer (Functions.html: boolean "can not be mixed with other types", Q7)
+test/data/pending/model/fix_typed_equal_mixed.zip:24	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_s_b": Apply "equal" compares string with boolean (Functions.html: boolean "can not be mixed with other types", Q7)
