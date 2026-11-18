@@ -33,6 +33,9 @@
 #include <locale>
 #include <pugixml.hpp>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include "cPMML.h"
 #include "core/xmlnode.h"
@@ -690,6 +693,224 @@ static void names_and_scopes() {
   CHECK(contains(message, "Invalid value for field: z") && contains(message, "\"b\""));
 }
 
+// Document text (design commit P2.2, typed-core.md §3.4): every attribute is
+// read with its XSD type, a value of a field by the K1 rule in the field's
+// type, and a MapValues table's keys must be unique and not NaN.
+static std::string typed_doc(const std::string& td, const std::string& table = "") {
+  return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="i" optype="continuous" dataType="integer"/>
+    <DataField name="f" optype="continuous" dataType="float"/>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="b" optype="categorical" dataType="boolean"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <TransformationDictionary>)" +
+         td + R"(</TransformationDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="s"/><MiningField name="i"/><MiningField name="f"/><MiningField name="d"/>
+      <MiningField name="b"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <RegressionTable intercept="0">)" +
+         table + R"(</RegressionTable>
+  </RegressionModel>
+</PMML>)";
+}
+
+// A DerivedField x of `type` over a MapValues keyed by `field` with `rows`
+// (key, output) and the MapValues attributes `attrs`.
+static std::string map_values(const std::string& type, const std::string& field,
+                              const std::vector<std::pair<std::string, std::string>>& rows,
+                              const std::string& attrs = "") {
+  std::string table;
+  for (const auto& [k, v] : rows) table += "<row><k>" + k + "</k><v>" + v + "</v></row>";
+  return R"(<DerivedField name="x" optype="continuous" dataType=")" + type + R"("><MapValues outputColumn="v")" +
+         attrs + R"(><FieldColumnPair field=")" + field + R"(" column="k"/><InlineTable>)" + table +
+         "</InlineTable></MapValues></DerivedField>";
+}
+
+static std::string set_tree(const std::string& field, const std::string& members) {
+  return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="categorical" dataType="string"/>
+  </DataDictionary>
+  <TreeModel functionName="classification">
+    <MiningSchema><MiningField name="s"/><MiningField name="d"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Node score="a"><True/><Node score="b"><SimpleSetPredicate field=")" +
+         field + R"(" booleanOperator="isIn"><Array type="string">)" + members +
+         R"(</Array></SimpleSetPredicate></Node></Node>
+  </TreeModel>
+</PMML>)";
+}
+
+static std::string grm_covariate(const std::string& value) {
+  return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML version="4.4" xmlns="http://www.dmg.org/PMML-4_4"><Header/>
+  <DataDictionary><DataField name="x1" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/></DataDictionary>
+  <GeneralRegressionModel modelType="regression" functionName="regression" targetVariableName="y">
+    <MiningSchema><MiningField name="x1"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <ParameterList><Parameter name="p0"/><Parameter name="p1"/></ParameterList>
+    <CovariateList><Predictor name="x1"/></CovariateList>
+    <PPMatrix><PPCell value=")" +
+         value + R"(" predictorName="x1" parameterName="p1"/></PPMatrix>
+    <ParamMatrix><PCell parameterName="p0" beta="0.2"/><PCell parameterName="p1" beta="-0.5"/></ParamMatrix>
+  </GeneralRegressionModel>
+</PMML>)";
+}
+
+static void document_text() {
+  // §2.7 / D26: "A NaN key is a load error (it can match nothing)". The
+  // fuzzer case behind fix_mapvalues_nan_key (B35), as it was registered:
+  // JPMML 1.7.7 loads it and the row never matches.
+  const std::string nan_key = R"PMML(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/><DataDictionary><DataField name="s" optype="categorical" dataType="string"></DataField><DataField name="i" optype="continuous" dataType="integer"></DataField><DataField name="f" optype="continuous" dataType="float"></DataField><DataField name="d" optype="continuous" dataType="double"></DataField><DataField name="b" optype="categorical" dataType="boolean"></DataField><DataField name="y" optype="continuous" dataType="double"/></DataDictionary><TransformationDictionary><DerivedField name="x" optype="continuous" dataType="integer"><MapValues outputColumn="v"><FieldColumnPair field="d" column="k"/><InlineTable><row><k>NaN</k><v>3</v></row><row><k>-1.25</k><v>007</v></row><row><k>0.1</k><v>1</v></row></InlineTable></MapValues></DerivedField></TransformationDictionary><RegressionModel functionName="regression"><MiningSchema><MiningField name="s"/><MiningField name="i"/><MiningField name="f"/><MiningField name="d"/><MiningField name="b"/><MiningField name="y" usageType="target"/></MiningSchema><Output><OutputField name="o_s" optype="categorical" dataType="string" feature="transformedValue"><FieldRef field="x"/></OutputField><OutputField name="o_t" optype="continuous" dataType="integer" feature="transformedValue"><FieldRef field="x"/></OutputField></Output><RegressionTable intercept="0"><NumericPredictor name="x" coefficient="1"/></RegressionTable></RegressionModel></PMML>)PMML";
+  CHECK(contains(load_error(nan_key), "E-KEY-NAN"));
+  // A NaN key over an integer field is the xs:double NaN (§3.4 rule 2).
+  CHECK(contains(load_error(typed_doc(map_values("double", "i", {{"NaN", "1"}, {"3", "2"}}))), "E-KEY-NAN"));
+  CHECK(load_error(typed_doc(map_values("double", "s", {{"NaN", "1"}, {"3", "2"}}))).empty());  // a string
+  // A SimpleSetPredicate member too, whatever the number of members (the
+  // linear path must give the hashed path's answers, P1.2).
+  CHECK(contains(load_error(set_tree("d", "1 NaN 3")), "E-KEY-NAN"));
+  CHECK(load_error(set_tree("d", "1 2 3")).empty());
+  CHECK(load_error(set_tree("s", "1 NaN 3")).empty());
+
+  // B42, Transformations.html (MapValues): "it is an error if the table
+  // entries used for matching are not unique". Keys are equal once typed:
+  // an integer 3 and 3.0, a double 3.5 and 3.50, a float 0.1 and its double
+  // spelling, 0 and -0 (§2.7 KeyEqual), boolean true and 1, the same
+  // string. The base build loaded each, one row silently winning; JPMML
+  // refuses each ("Element InlineTable is not valid").
+  for (const auto& [field, a, b] : std::vector<std::tuple<std::string, std::string, std::string>>{
+           {"i", "3", "3.0"},
+           {"d", "3.5", "3.50"},
+           {"f", "0.1", "0.10000000149011612"},
+           {"d", "0", "-0"},
+           {"b", "true", "1"},
+           {"s", "a", "a"}}) {
+    const std::string error = load_error(typed_doc(map_values("double", field, {{a, "1"}, {b, "2"}})));
+    CHECK(contains(error, "E-KEY-DUPLICATE"));
+  }
+  CHECK(load_error(typed_doc(map_values("double", "s", {{"1", "1"}, {"1.0", "2"}}))).empty());  // two strings
+  CHECK(load_error(typed_doc(map_values("double", "d", {{"0.1", "1"}, {"0.10000000149011612", "2"}}))).empty());
+
+  // MapValues and Discretize values are of their own dataType, else of the
+  // nearest enclosing declared type (§3.4, D21), parsed strictly as it: an
+  // integer's "1.5" is malformed (the base build read it in the engine's
+  // double).
+  CHECK(contains(load_error(typed_doc(map_values("double", "s", {{"a", "1.5"}}, R"( dataType="integer")"))),
+                 "E-VALUE-MALFORMED"));
+  CHECK(contains(load_error(typed_doc(map_values("integer", "s", {{"a", "1.5"}}))), "E-VALUE-MALFORMED"));
+  CHECK(load_error(typed_doc(map_values("integer", "s", {{"a", "007"}}))).empty());
+  CHECK(contains(load_error(typed_doc(map_values("double", "s", {{"a", "1"}}, R"( dataType="double" defaultValue="x")"))),
+                 "E-VALUE-MALFORMED"));
+  const std::string discretize =
+      R"(<DerivedField name="x" optype="continuous" dataType="integer"><Discretize field="d"><DiscretizeBin binValue=")";
+  const std::string bin = R"("><Interval closure="closedOpen" leftMargin="0" rightMargin="3"/></DiscretizeBin></Discretize></DerivedField>)";
+  CHECK(contains(load_error(typed_doc(discretize + "1.50" + bin)), "E-VALUE-MALFORMED"));
+  CHECK(load_error(typed_doc(discretize + "2" + bin)).empty());
+  // A string MapValues in a double DerivedField is cast at load (§2.6); text
+  // with no double value has no value to give.
+  CHECK(load_error(typed_doc(map_values("double", "s", {{"a", "1.50"}}, R"( dataType="string")"))).empty());
+  CHECK(contains(load_error(typed_doc(map_values("double", "s", {{"a", "abc"}}, R"( dataType="string")"))),
+                 "E-VALUE-MALFORMED"));
+
+  // Apply mapMissingTo/defaultValue are of the Apply's result type (§3.4):
+  // "true" for equal in a double DerivedField (the base build refused it:
+  // "true" is not a valid double), not "abc" for +. They are then cast to the
+  // enclosing DerivedField's type at load (§2.6): concat's "5" is the double
+  // 5, its "abc" has no double value.
+  const auto apply = [](const std::string& type, const std::string& function, const std::string& attrs) {
+    return R"(<DerivedField name="x" optype="continuous" dataType=")" + type + R"("><Apply function=")" + function +
+           R"(" )" + attrs + R"(><FieldRef field="i"/><Constant>3</Constant></Apply></DerivedField>)";
+  };
+  CHECK(load_error(typed_doc(apply("double", "equal", R"(mapMissingTo="true")"))).empty());
+  CHECK(load_error(typed_doc(apply("double", "concat", R"(mapMissingTo="5")"))).empty());
+  CHECK(contains(load_error(typed_doc(apply("double", "concat", R"(mapMissingTo="abc")"))), "E-VALUE-MALFORMED"));
+  CHECK(load_error(typed_doc(apply("string", "concat", R"(mapMissingTo="abc")"))).empty());
+  // FieldRef@mapMissingTo is "parsed as T(field) by the rule above" (§3.4,
+  // K1), then cast to the enclosing DerivedField's type: an integer field's
+  // "2.5" is a double (rule 2); a double field's "abc" is malformed; a string
+  // field's "5" is the double 5 in a double DerivedField, its "abc" has no
+  // double value.
+  const auto fieldref = [](const std::string& type, const std::string& field, const std::string& text) {
+    return R"(<DerivedField name="x" optype="continuous" dataType=")" + type + R"("><FieldRef field=")" + field +
+           R"(" mapMissingTo=")" + text + R"("/></DerivedField>)";
+  };
+  CHECK(load_error(typed_doc(fieldref("double", "i", "2.5"))).empty());
+  CHECK(contains(load_error(typed_doc(fieldref("string", "d", "abc"))), "E-VALUE-MALFORMED"));
+  CHECK(load_error(typed_doc(fieldref("double", "s", "5"))).empty());
+  CHECK(contains(load_error(typed_doc(fieldref("double", "s", "abc"))), "E-VALUE-MALFORMED"));
+  CHECK(contains(load_error(typed_doc(apply("string", "+", R"(mapMissingTo="abc")"))), "E-VALUE-MALFORMED"));
+  CHECK(contains(load_error(typed_doc(apply("string", "+", R"(defaultValue="abc")"))), "E-VALUE-MALFORMED"));
+  // NormContinuous and NormDiscrete mapMissingTo and LinearNorm orig/norm are
+  // NUMBER (xs:double) in a string DerivedField too (B11): the base build read
+  // them as strings, so these loaded and interpolated string codes.
+  const std::string nc = R"(<DerivedField name="x" optype="categorical" dataType="string"><NormContinuous field="d")";
+  CHECK(load_error(typed_doc(nc + R"(><LinearNorm orig="0" norm="0"/><LinearNorm orig="1" norm="1"/></NormContinuous></DerivedField>)"))
+            .empty());
+  CHECK(!load_error(typed_doc(nc + R"(><LinearNorm orig="a" norm="0"/><LinearNorm orig="b" norm="1"/></NormContinuous></DerivedField>)"))
+             .empty());
+  CHECK(!load_error(typed_doc(nc + R"( mapMissingTo="m"><LinearNorm orig="0" norm="0"/><LinearNorm orig="1" norm="1"/></NormContinuous></DerivedField>)"))
+             .empty());
+  CHECK(!load_error(typed_doc(R"(<DerivedField name="x" optype="categorical" dataType="string"><NormDiscrete field="s" value="a" mapMissingTo="m"/></DerivedField>)"))
+             .empty());
+
+  // B7, pmml-4-4.xsd: <xs:attribute name="exponent" type="INT-NUMBER"
+  // default="1"/>; INT-NUMBER is xs:integer. The base build read "2.5" as a
+  // double (4^2.5 = 32); JPMML 1.7.7 loads it and scores x^1.
+  const auto exponent = [](const std::string& e) {
+    return typed_doc("", R"(<NumericPredictor name="i" coefficient="1" exponent=")" + e + R"("/>)");
+  };
+  // D28 (decided 2026-11-18): "2.0", "2e0", "2.5" are not in the xs:integer
+  // lexical space ("a finite-length sequence of decimal digits (#x30-#x39)
+  // with an optional leading sign", XML Schema Part 2 §3.3.13.1) and are load
+  // errors; "+2", "02" and " 2 " (whiteSpace collapse) are the integer 2
+  // (fixture fix_numericpredictor_exponent_text scores them).
+  CHECK(!load_error(exponent("2.5")).empty());
+  CHECK(!load_error(exponent("2.0")).empty());
+  CHECK(!load_error(exponent("2e0")).empty());
+  CHECK(load_error(exponent("2")).empty());
+  CHECK(load_error(exponent("-1")).empty());
+  CHECK(load_error(exponent("+2")).empty());
+  CHECK(load_error(exponent("02")).empty());
+  CHECK(load_error(exponent(" 2 ")).empty());
+  // D29 (decided 2026-11-18): NormDiscrete@value is read in its field's type
+  // by K1 (§3.4): on an integer field "3.5" is the double 3.5 (rule 2) and
+  // loads (JPMML 1.7.7 refuses it, NumberFormatException; fixture
+  // fix_normdiscrete_integer_decimal scores it 0); non-numeric text on a
+  // numeric field is rule 3, a load error.
+  const auto norm_discrete = [](const std::string& field, const std::string& value) {
+    return typed_doc(R"(<DerivedField name="x" optype="continuous" dataType="double"><NormDiscrete field=")" + field +
+                     R"(" value=")" + value + R"("/></DerivedField>)");
+  };
+  CHECK(load_error(norm_discrete("i", "3.5")).empty());
+  CHECK(load_error(norm_discrete("i", "3.0")).empty());
+  CHECK(!load_error(norm_discrete("i", "abc")).empty());
+  CHECK(!load_error(norm_discrete("d", "abc")).empty());
+  CHECK(!load_error(norm_discrete("b", "yes")).empty());
+  CHECK(load_error(norm_discrete("s", "abc")).empty());
+  // A GeneralRegression covariate's PPCell@value is its exponent
+  // (GeneralRegression.html: "the cell value is set to the exponent"), and
+  // D28 (§8.5) reads it as INT-NUMBER, xs:integer, as NumericPredictor's:
+  // malformed or non-integer text is a load error (the base build failed
+  // every record for "two" and scored x^2.5 for "2.5").
+  CHECK(load_error(grm_covariate("2")).empty());
+  CHECK(load_error(grm_covariate("+2")).empty());
+  CHECK(load_error(grm_covariate("02")).empty());
+  CHECK(load_error(grm_covariate(" 2 ")).empty());
+  CHECK(contains(load_error(grm_covariate("two")), "E-ATTRIBUTE-MALFORMED"));
+  CHECK(contains(load_error(grm_covariate("2.5")), "E-ATTRIBUTE-MALFORMED"));
+  CHECK(contains(load_error(grm_covariate("2.0")), "E-ATTRIBUTE-MALFORMED"));
+  CHECK(contains(load_error(grm_covariate("2e0")), "E-ATTRIBUTE-MALFORMED"));
+  // D29 is fixture fix_normdiscrete_integer_decimal (value="3.5" on an
+  // integer field loads and gives 0) and the norm_discrete checks above.
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -719,6 +940,7 @@ int main() {
   absent_attributes();
   invalid_inputs();
   names_and_scopes();
+  document_text();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

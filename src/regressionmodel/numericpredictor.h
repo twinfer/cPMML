@@ -48,7 +48,11 @@ class NumericPredictor {
         index(field.index),
         datatype(field.datatype),
         coefficient(node.required_double_attribute("coefficient")),
-        exponent(node.get_double_attribute("exponent", 1)) {}
+        // pmml-4-4.xsd: <xs:attribute name="exponent" type="INT-NUMBER"
+        // default="1"/>, and INT-NUMBER is xs:integer: "2.5" is a load error
+        // (B7: it was read as a double, so 4^2.5 gave 32). JPMML 1.7.7 loads
+        // it and scores x^1.
+        exponent(static_cast<double>(node.get_long_attribute("exponent", 1))) {}
 
   inline double get_term(const Sample& sample) const {
     const Value& value = sample[index].value;

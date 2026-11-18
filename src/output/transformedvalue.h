@@ -72,7 +72,10 @@ class TransformedValue : public OutputExpression {
   inline double eval_double(const Sample& sample, const InternalScore& /*score*/) const override {
     if (!expression) return double_min();
     const Value v = expression->eval(sample);
-    return v.missing ? double_min() : v.value;
+    if (v.missing) return double_min();
+    // A number or boolean constant held as a string slot's text (Value::
+    // numeric_text): a numeric OutputField reads its number.
+    return v.numeric_text ? v.text_number() : v.value;
   };
 };
 

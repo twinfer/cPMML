@@ -80,6 +80,14 @@ class PredicateBuilder {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
         std::vector<std::string> values = parse_array(node.get_child("Array").value());
         const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
+        // §2.7 / D26: a NaN member "can match nothing", so it is a load error,
+        // for any number of members (the linear path must give the hashed
+        // path's answers). JPMML 1.7.7 loads it.
+        for (const auto& v : values)
+          if (cpmml::bind::is_nan_key(v, datatype))
+            throw cpmml::ParsingException(std::string(cpmml::bind::code::kKeyNaN) + ": SimpleSetPredicate field=\"" +
+                                          node.required_attribute("field") +
+                                          "\": a NaN member matches no input (§2.7, D26: a NaN key is a load error)");
         if (values.size() > SET_THRESHOLD) return Predicate(index, op, Value::createUnorderedValues(values, datatype));
         return Predicate(index, op, Value::createValues(values, datatype));
       }

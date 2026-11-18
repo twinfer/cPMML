@@ -44,9 +44,25 @@ class FieldRef : public Expression {
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.required_attribute("field")),
-        index(indexer->get_or_set(field_name)),  // datatype is not needed here
-        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()) {
+        index(indexer->get_or_set(field_name)),
+        // §3.4: "mapMissingTo (xs:string) parsed as T(field) by the rule
+        // above" (K1): a value of the referenced field, not of the enclosing
+        // DerivedField's type (B11). Stored as cpmml::bind::slot_constant
+        // says: a string field's "5" is the double 5 in a double DerivedField,
+        // a double field's "5" is the string "5" that keeps its number 5 in a
+        // string one (decided 2026-11-18, §9), and a nested FieldRef's is 5
+        // with its text (JPMML 1.7.7 and the base build agree on each).
+        mapmissing_to(exist_missingreplacement ? map_missing_constant(node, field_name, *indexer, output_type)
+                                               : Value()) {
     inputs.insert(field_name);
+  }
+
+  static Value map_missing_constant(const XmlNode& node, const std::string& field, Indexer& indexer,
+                                    const DataType& slot) {
+    const std::string text = node.required_attribute("mapMissingTo");
+    const auto type = cpmml::bind::k1_type(
+        text, cpmml::bind::type_id(cpmml::bind::scope_resolve(indexer, node, field).datatype));
+    return cpmml::bind::slot_constant(node, "mapMissingTo", text, type, slot);
   }
 
   inline Value eval(const Sample& sample) const override {

@@ -1,12 +1,16 @@
 # Staged fixtures (typed-core P0.5)
 
-These 20 fixtures come from three attempts that were not merged:
+Twenty of these fixtures come from three attempts that were not merged:
 `type_value_tag`, `typed_values` and `concat_formatnumber`. Each one encodes a
 bug that the typed-core design (`docs/design/typed-core.md`, §7
 "P-fixtures") fixes in a later commit. They are kept here so that work is
 not lost. They are **not registered in ctest**. `test/CMakeLists.txt` globs
 only `test/data/model/*.zip`, and nothing in the build or the tools searches
 subdirectories, so `pending/` is never picked up.
+
+Two more, `fix_mapmissing_string_slot_equal` and
+`fix_mapmissing_string_slot_numeric`, are known gaps that design commit
+P2.2 left for P4.7 (notes 8 and 9).
 
 Layout: `model/<name>.zip` (one `<name>.pmml` inside) and
 `dataset/<name>.csv`, the same layout as `test/data/`, with LF line endings.
@@ -77,6 +81,8 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_derived_cast_novalue | P6.7 (after P4.7) | **yes: rows 3-6** (note 6) | FAIL `output 'o_tsd': predicted: 1  expected: 1.0` | rows 1-2 agree; rows 3-6 refused (TypeCheckException) |
 | fix_output_integer_nonintegral | P6.7 (after P4.7) | **yes: rows 4-6, 8** (note 6) | FAIL `output 'ti': predicted: 3.5  expected: no value` | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
 | fix_output_integer_chain | P7b.4 | **yes: rows 2, 5** (note 6) | FAIL `predicted: 103.5  expected: no prediction` | rows 1, 3, 4 agree; rows 2, 5 refused (TypeCheckException) |
+| fix_mapmissing_string_slot_equal | P4.7 | no (note 8) | FAIL `output 'o': predicted: false  expected: true` (row 2) | both rows agree |
+| fix_mapmissing_string_slot_numeric | P4.7, else P6.8 (note 9) | no (note 9) | FAIL `predicted: 200.0  expected: 255.0` (row 1) | both rows agree |
 | fix_builtin_text_if | P4.3 | no | FAIL `output 'if_full': predicted: E  expected: no value` | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
 | fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': model declares it but produced no value  expected: 2-2000` | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `output 'f_pct': model declares it but produced no value  expected: rate 0.5%` | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
@@ -176,3 +182,39 @@ JPMML gives up on the whole file at the first row it refuses.
    the predictedValue OutputField `pv`, which has no value, and JPMML
    throws MissingFieldException (`Field "pv" is not defined`). Only row 6
    is spec-derived.
+8. **fix_mapmissing_string_slot_equal** (added by design commit P2.2, not
+   from the three attempts; its base is P2.2's parent, 529130a). A string
+   DerivedField `x` holds `FieldRef b` with `mapMissingTo="true"`, and an
+   OutputField asks `equal(x, "true")` (§2.7: string x string equality is
+   text; §3.4 `DerivedField dataType=X -> Cast<X>(expression)`), which
+   JPMML 1.7.7 gives `true` on both rows. Row 1 (b missing) holds the
+   constant, which P2.2 stores as the string `true` keeping its number
+   (decided 2026-11-18, design §9), so it is `true` on P2.2 and on the base
+   build (and in the registered fixture
+   `fix_mapmissing_string_slot_compare`). Row 2 (b = true, not missing)
+   holds the boolean input, which no cast turns into the string `true`
+   before P4.7, so `equal` compares the number 1 with the string's code and
+   gives `false` on both builds. P4.7's Cast node makes `x` a string.
+9. **fix_mapmissing_string_slot_numeric** (added by design commit P2.2,
+   base 529130a; bug B38, "a numeric field computed over a string input
+   uses the string's internal code", the string-code class of B1). String
+   DerivedFields `s`..`s5` hold a FieldRef with a number or boolean
+   `mapMissingTo` (`5`, `1e1`, `2.5` of an integer field, `07`, `0` of a
+   boolean field); double DerivedFields `t` and `t3` copy `s` and `s3`
+   (§3.4 `DerivedField dataType=X -> Cast<X>(expression)`) and are read by
+   the RegressionTable's NumericPredictors (coefficients 1 and 100) and by
+   the double OutputFields `ot` and `ot3`. Row 1 (every input missing):
+   JPMML 1.7.7 gives `t` = 5 and `t3` = 2.5, so the prediction is
+   5 + 100 * 2.5 = 255. P2.2 keeps the constant's number for OutputFields
+   only (decided 2026-11-18, design §9): `ot` 5.0, `ot3` 2.5, `os2n` 10.0
+   and `os4n` 7 are right on P2.2 and string codes on the base build (the
+   4 cells of the P2.2 dump diff), but `t` and `t3` themselves still hold
+   the codes, so the NumericPredictors read 0 and 2 and the prediction is
+   200 on both builds. Row 2 (d = 3, i = 4, b = true) puts numbers and a
+   boolean into the string slots, which no cast turns into text before
+   P4.7, so the string OutputFields `os`..`os5` have no value on both
+   builds (JPMML: `3.0`, `3.0`, `4`, `4`, `true`, Java number text, D17).
+   P4.7's Cast nodes make `t` = Cast<double>(`s`) and `s` =
+   Cast<string>(`d`); if P4.7's Cast<double> over the old storage still
+   reads a string's code, the fixture moves with B38 to P6.8 ("a string
+   never reaches a numeric slot as a code").

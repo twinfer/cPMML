@@ -14,6 +14,7 @@
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -38,6 +39,16 @@ class Value {
  public:
   double value = double_min();
   bool missing = true;
+  // A number or boolean document constant that is the value of a string slot
+  // (design typed-core.md §9, decided 2026-11-18 after P2.1: it "keeps its
+  // text as well as its number: string readers get the text (§3.4
+  // Cast<string>) ..., numeric readers the number"). The slot is a string, so
+  // `value` is svalue's string code, as every string's is, and the equality
+  // readers (predicates, MapValues keys, NormDiscrete, equal, isIn) compare
+  // the text as the base build did; a numeric reader that knows it reads a
+  // number takes text_number(). Set only at load (cpmml::bind::slot_constant,
+  // document_constant); the in-place string edits below clear it.
+  bool numeric_text = false;
   std::string svalue;
 
   // Thread-local pointer to the active model's Indexer for per-model string mapping.
@@ -96,10 +107,33 @@ class Value {
     return other.find(*this) == other.end();
   }
 
-  inline void lowercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::tolower); }
-  inline void uppercase() { std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::toupper); }
-  inline void substr(const size_t& start, const size_t& size) { svalue = svalue.substr(start, size); }
-  inline void trim_blanks() { svalue = ::trim(svalue); }
+  // The number of a numeric_text value: its text, validated at load as a
+  // number literal (an XSD double, or Java text: "Infinity") or a boolean
+  // literal (1 or 0).
+  inline double text_number() const {
+    double number = 0;
+    if (java::parse(svalue, number)) return number;
+    bool flag = false;
+    if (lexical::parse_boolean(svalue, flag)) return flag ? 1 : 0;
+    throw std::logic_error("Value::text_number: \"" + svalue + "\" is not a number or boolean literal");
+  }
+
+  inline void lowercase() {
+    numeric_text = false;
+    std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::tolower);
+  }
+  inline void uppercase() {
+    numeric_text = false;
+    std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::toupper);
+  }
+  inline void substr(const size_t& start, const size_t& size) {
+    numeric_text = false;
+    svalue = svalue.substr(start, size);
+  }
+  inline void trim_blanks() {
+    numeric_text = false;
+    svalue = ::trim(svalue);
+  }
   // std::regex's constructor parses and compiles the pattern. Both of these
   // rebuilt it per record, though the pattern comes from a Constant the
   // document fixes at parse time. The cache is thread_local: building a regex

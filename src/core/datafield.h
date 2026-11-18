@@ -72,6 +72,12 @@ class DataField {
     std::vector<Predicate> tmp_contraints;
     std::set<Value> allowed_values;
     std::set<Value> forbidden_values;
+    // Document text (§3.4, design commit P2.2): a valid or invalid
+    // Value@value is a value of the field, read by the K1 rule, which
+    // Value(text, datatype) is in the engine's storage (bind/load_scope.h:
+    // an integer field's "4.0" is the double 4, rule 2); a missing marker is
+    // matched as raw text first (§2.8), so it may be anything. Interval
+    // margins are NUMBER (xs:double), whatever the field's type.
     for (const auto& value : values) {
       auto property = Property(value);
       switch (property.value) {
@@ -92,7 +98,8 @@ class DataField {
     if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_NOT_IN, forbidden_values));
 
     auto intervals = node.get_childs("Interval");
-    for (const auto& interval : intervals) tmp_contraints.push_back(IntervalBuilder::build(interval, index, datatype));
+    for (const auto& interval : intervals)
+      tmp_contraints.push_back(IntervalBuilder::build(interval, index, DataType::DataTypeValue::DOUBLE));
 
     if (tmp_contraints.size() > 0) constraints = Predicate(tmp_contraints, Op::AND);
 

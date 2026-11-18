@@ -63,10 +63,19 @@ class MiningField : public DataField {
         field_usage_type(FieldUsageType::read(node)),
         hasOutlierTreatment(node.exists_attribute("outliers")),
         outliertreatmentmethod(OutlierTreatmentMethod::read(node)),
+        // pmml-4-4.xsd: lowValue and highValue are NUMBER (xs:double), not
+        // values of the field (§3.4, L2): on an integer field a bound 2.5 is
+        // the double 2.5, which the clamped value takes (D22, the slot
+        // widened).
         hasLowValue(node.exists_attribute("lowValue")),
-        low_value(hasOutlierTreatment && hasLowValue ? Value(node.required_attribute("lowValue"), datatype) : Value()),
+        low_value(hasOutlierTreatment && hasLowValue ? Value(node.required_double_attribute("lowValue")) : Value()),
         hasHighValue(node.exists_attribute("highValue")),
-        high_value(hasOutlierTreatment && hasHighValue ? Value(node.required_attribute("highValue"), datatype) : Value()),
+        high_value(hasOutlierTreatment && hasHighValue ? Value(node.required_double_attribute("highValue")) : Value()),
+        // missingValueReplacement and invalidValueReplacement are xs:string
+        // values of the field, read by the K1 rule (§3.4): Value(text,
+        // datatype) is that rule in the engine's storage (bind/load_scope.h),
+        // so an integer field's "2.5" is the double 2.5 (rule 2; the design
+        // widens the slot, W-SLOT-WIDENED, which a double slot already is).
         hasMissingReplacement(node.exists_attribute("missingValueReplacement")),
         missingvalue_replacement(hasMissingReplacement ? Value(node.required_attribute("missingValueReplacement"), datatype)
                                                        : Value()),  //, data_dictionary.datafields[name].datatype)),

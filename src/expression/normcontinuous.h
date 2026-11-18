@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <utility>
 
+#include "bind/load_scope.h"
 #include "expression.h"
 
 /**
@@ -38,28 +39,26 @@ class NormContinuous : public Expression {
                  const std::shared_ptr<Indexer>& indexer)
       : Expression(output_index, output_type, indexer),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
+        // pmml-4-4.xsd: NormContinuous@mapMissingTo and LinearNorm@orig/@norm
+        // are NUMBER (xs:double), whatever the enclosing DerivedField's
+        // dataType (§3.4, B11: in a string DerivedField they were read as
+        // string codes and interpolated).
+        mapmissing_to(exist_missingreplacement ? cpmml::bind::number_constant(node, "mapMissingTo", output_type) : Value()),
         field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name)),
         outliertreatment_method(OutlierTreatmentMethod::read(node)),
-        orig(get_values("orig", node,
-                        output_type)),  // TYPE IMPLICIT: DOUBLE, we know input type must be
-                                        // equal to output type in this case
-        norm(get_values("norm", node,
-                        output_type))  // TYPE IMPLICIT: DOUBLE, we know input type must be
-                                       // equal to output type in this case
-  {
+        orig(get_values("orig", node)),
+        norm(get_values("norm", node)) {
     if (orig.size() < 2 || orig.size() != norm.size())
       throw cpmml::ParsingException("NormContinuous requires at least two LinearNorm elements");
     inputs.insert(field_name);
   }
 
-  static std::vector<Value> get_values(const std::string& linearnorm_type, const XmlNode& node,
-                                       const DataType& dataType) {
+  static std::vector<Value> get_values(const std::string& linearnorm_type, const XmlNode& node) {
     std::vector<Value> result;
 
     for (const auto& linear_norm : node.get_childs("LinearNorm"))
-      result.push_back(Value(linear_norm.required_attribute(linearnorm_type), dataType));
+      result.push_back(cpmml::bind::number_attribute(linear_norm, linearnorm_type));
 
     return result;
   }

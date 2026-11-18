@@ -49,6 +49,7 @@ class GeneralRegressionModel : public InternalModel {
     std::string value;  // exponent (continuous) or category level (factor)
     bool is_factor;     // false → continuous covariate
     Value level;        // a factor's level, read once at load with the predictor's dataType
+    double exponent = 1;  // a covariate's exponent, read once at load (D28: xs:integer)
   };
 
   // One β coefficient from ParamMatrix
@@ -277,7 +278,27 @@ class GeneralRegressionModel : public InternalModel {
       pc.is_factor = is_factor;
       // Read at load, while the model's Indexer still interns: a string level
       // gets its own code, which no string the model never names can share.
-      if (is_factor) pc.level = Value(val, field.datatype);
+      // A factor's PPCell@value (xs:string) is a level of the factor, read by
+      // the K1 rule (§3.4) in its declared type, which Value(text, datatype)
+      // is in the engine's storage (bind/load_scope.h): an integer factor's
+      // "1.0" is the double 1 (rule 2, D22) and matches the input 1, and
+      // "1.5" matches no integer. A covariate's is its exponent
+      // (GeneralRegression.html: "the cell value is set to the exponent"),
+      // which D28 (§8.5, decided 2026-11-18) reads as INT-NUMBER, xs:integer,
+      // as NumericPredictor@exponent: "2.0", "2e0", "2.5" are load errors,
+      // "+2", "02", " 2 " are 2. It is read here once; it used to be parsed
+      // as a double on every record that reached the cell, and malformed
+      // text failed each of them.
+      if (is_factor) {
+        pc.level = Value(val, field.datatype);
+      } else {
+        long exponent = 0;
+        if (!lexical::parse_long(val, exponent))
+          throw cpmml::ParsingException(std::string(cpmml::bind::code::kAttributeMalformed) + ": PPCell@value=\"" +
+                                        val + "\" of covariate " + pred +
+                                        " is not an integer (its exponent; D28: INT-NUMBER, xs:integer)");
+        pc.exponent = static_cast<double>(exponent);
+      }
 
       pp_matrix[param].push_back(std::move(pc));
     }
@@ -373,8 +394,7 @@ class GeneralRegressionModel : public InternalModel {
         if (xv != cell.level) return 0.0;  // short-circuit
       } else {
         // Continuous covariate: x^exponent
-        const double exp_val = to_double(cell.value);
-        result *= std::pow(x, exp_val);
+        result *= std::pow(x, cell.exponent);
       }
     }
     return result;

@@ -46,9 +46,9 @@ class Apply : public Expression {
       : Expression(output_index, output_type, indexer),
         function(BuiltInFunction(node)),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
-        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), output_type) : Value()),
+        mapmissing_to(exist_missingreplacement ? result_constant(node, "mapMissingTo", output_type) : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue ? Value(node.required_attribute("defaultValue"), output_type) : Value()),
+        defaultValue(exist_defaultvalue ? result_constant(node, "defaultValue", output_type) : Value()),
         invalidValueTreatmentMethod(InvalidValueTreatmentMethod::read(node)) {
     // asValue names MiningField/@invalidValueReplacement; an Apply has no
     // replacement to give, so the token is refused rather than read as asIs.
@@ -90,6 +90,38 @@ class Apply : public Expression {
 
       expressions.push_back(expression);
     }
+  }
+
+  // §3.4: Apply "mapMissingTo, defaultValue (xs:string) parsed as the
+  // **Apply's** result type", not the enclosing DerivedField's (B11): they
+  // stand for the function's result, so they are kept in its representation,
+  // as the values the function returns are. The result type is the one the
+  // engine gives the Apply today (BuiltInFunction::expression_kind; P2.4 puts
+  // the binder's in its place); a string result has no java::Kind. Stored as
+  // cpmml::bind::slot_constant says: `concat` with mapMissingTo="5" in a
+  // double DerivedField gives the double 5, as does `if` with
+  // defaultValue="5" over an untyped MapValues, which expression_kind types as
+  // a string; `+` with mapMissingTo="5" in a string DerivedField gives the
+  // string "5" that keeps its number 5 (decided 2026-11-18, §9; JPMML 1.7.7
+  // and the base build agree).
+  static Value result_constant(const XmlNode& node, const std::string& attribute, const DataType& slot) {
+    using cpmml::bind::TypeId;
+    TypeId type = TypeId::String;
+    if (const auto kind = BuiltInFunction::expression_kind(node.xml())) switch (*kind) {
+        case java::Kind::INTEGER:
+          type = TypeId::Integer;
+          break;
+        case java::Kind::FLOAT:
+          type = TypeId::Float;
+          break;
+        case java::Kind::DOUBLE:
+          type = TypeId::Double;
+          break;
+        case java::Kind::BOOLEAN:
+          type = TypeId::Boolean;
+          break;
+      }
+    return cpmml::bind::slot_constant(node, attribute, node.required_attribute(attribute), type, slot);
   }
 
   inline Value eval(const Sample& sample) const override {
