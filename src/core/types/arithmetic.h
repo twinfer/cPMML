@@ -44,8 +44,13 @@
  *    another of the opposite sign is infinite with the same sign as the
  *    numerator."
  * Every other case the summary lists is IEEE's answer. These rules are not in
- * the design's §2 or §4.2 (IEEE gives NaN for all four, and INF/-INF's
- * "infinite" is not IEEE's NaN): proposed as D27.
+ * the design's §2 or §4.2: IEEE gives NaN for all four (and INF/-INF's
+ * "infinite" is not IEEE's NaN); JPMML 1.7.7 gives an invalid value for them
+ * ("Function "/" returned invalid value", N/A under asMissing). Proposed as
+ * D27.
+ *
+ * A zero divisor is one zero whatever its sign: x/-0.0 is INF for x > 0 and
+ * -INF for x < 0, as the division sentence says (JPMML agrees; IEEE does not).
  *
  * floor, ceil. BuiltinFunctions.html: "Since INF and -INF can only be floating
  * point numbers, they will cause floor, ceil, round, and modulo to return an
@@ -127,6 +132,12 @@ struct Divide {
       return a;  // "infinite with the same sign as the numerator"
     }
     if (a.v == 0 && b.v == 0) return Missing{};
+    // The sign of the result comes from the numerator alone: the spec's "a
+    // positive number ... INF", "a negative number ... -INF", over XSD's value
+    // space with "only one zero" (§3.2.4). IEEE would flip it for a -0.0
+    // divisor, which D18 (an input -0) and -1*0 both produce.
+    if (b.v == 0) return T{a.v > 0 ? std::numeric_limits<decltype(a.v)>::infinity()
+                                   : -std::numeric_limits<decltype(a.v)>::infinity()};
     return T{a.v / b.v};
   }
 };
@@ -160,22 +171,25 @@ struct Ceil {
 
 // ---------------------------------------------------------------- the visitors
 // A missing operand gives missing (BuiltinFunctions.html "any missing inputs
-// to a built-in function will result in a missing value being returned"); an
-// invalid one stays invalid ("An invalid value is not missing"), and wins
-// over a missing one. Non-numeric operands never reach a kernel: the binder
-// refuses them at load (§2.5: no arithmetic accepts string; boolean "can not
-// be mixed"), so meeting one is a binder bug and throws.
+// to a built-in function will result in a missing value being returned"),
+// whatever the other operand holds: the order of the §4.3 Apply wrapper,
+// which returns missing before the kernel runs. Otherwise an invalid operand
+// stays invalid ("An invalid value is not missing"). (An Apply argument never
+// holds Invalid today, §2.1, so the order cannot show in scoring.)
+// Non-numeric operands never reach a kernel: the binder refuses them at load
+// (§2.5: no arithmetic accepts string; boolean "can not be mixed"), so meeting
+// one is a binder bug and throws.
 template <class Op>
 struct Arithmetic {
   template <Alternative A, Alternative B>
     requires(Sentinel<A> || Sentinel<B>)
   Value operator()(const A& a, const B& b) const {
-    if constexpr (std::is_same_v<A, Invalid>)
-      return a;
-    else if constexpr (std::is_same_v<B, Invalid>)
-      return b;
-    else
+    if constexpr (std::is_same_v<A, Missing> || std::is_same_v<B, Missing>)
       return Missing{};
+    else if constexpr (std::is_same_v<A, Invalid>)
+      return a;
+    else
+      return b;
   }
   template <PmmlNumeric A, PmmlNumeric B>
   Value operator()(const A& a, const B& b) const {

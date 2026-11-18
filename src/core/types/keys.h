@@ -18,10 +18,14 @@
  * purposes NaN = NaN"), so KeyEqual is an equivalence relation, as an
  * unordered container requires.
  *
- * Keys are of one type (the binder casts them at load); a NaN key is a load
- * error (D26). A probe that the comparison would call unordered with some key
- * is decided before the lookup (decide_nonfinite), so the hashed path gives
- * the answer the comparison would give member by member:
+ * Keys are of one type (the binder casts them at load), and the binder casts
+ * the probe to that type before the lookup; a NaN key is a load error (D26).
+ * The cast matters: against String keys an uncast numeric NaN or INF probe
+ * would compare by Java text (D2, 'NaN' == NaN is true), which is not what
+ * the table below gives. A probe that the comparison would call unordered
+ * with some key of its own type is decided before the lookup
+ * (decide_nonfinite), so the hashed path gives the answer the comparison
+ * would give member by member:
  *
  *   ±INF probe  Indeterminate if the keys hold the same infinity (equal is
  *               missing for it, false for every other key), else NotFound

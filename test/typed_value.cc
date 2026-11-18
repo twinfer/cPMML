@@ -440,6 +440,15 @@ static void test_arithmetic() {
   CHECK(invalid_because(divide(Integer{kMin}, Integer{-1}), InvalidReason::Overflow), "§4.2: INT64_MIN / -1");
   CHECK(is_integer(divide(Integer{-7}, Integer{2}), -3), "§4.2 note: integer division truncates toward zero (Java)");
   CHECK(is_double(divide(Integer{7}, Double{2}), 3.5), "§2.5: integer / double in double");
+  CHECK(is_double(divide(Double{1}, Double{-0.0}), kInf) && is_float(divide(Float{1}, Float{-0.0f}), kInfF),
+        "\"If a positive number is divided by zero, INF will be returned\"; XSD §3.2.4: \"only one zero\" (not "
+        "IEEE's -INF)");
+  CHECK(is_double(divide(Double{-1}, Double{-0.0}), -kInf),
+        "\"If a negative number is divided by zero, -INF will be returned\", for a -0.0 divisor too");
+  CHECK(is_double(divide(Double{kInf}, Double{-0.0}), kInf) && is_double(divide(Double{-kInf}, Double{-0.0}), -kInf),
+        "\"An infinite number divided by a finite number is infinite\", signed by the numerator over one zero");
+  CHECK(holds<Missing>(divide(Double{-0.0}, Double{0})) && holds<Missing>(divide(Double{0}, Double{-0.0})),
+        "\"If zero is divided by zero ... a missing value will be returned\", either sign");
   // NaN
   CHECK(is_double(plus(Double{kNaN}, Double{1}), kNaN),
         "D23: Transformations.html \"All arithmetic expressions involving NaN will evaluate to NaN\"");
@@ -470,9 +479,12 @@ static void test_arithmetic() {
   // sentinels
   CHECK(holds<Missing>(plus(Missing{}, Integer{1})) && holds<Missing>(plus(Integer{1}, Missing{})),
         "BuiltinFunctions.html: \"any missing inputs ... will result in a missing value\" (D24)");
-  CHECK(invalid_because(plus(Invalid{InvalidReason::Domain}, Missing{}), InvalidReason::Domain) &&
-            invalid_because(plus(Missing{}, Invalid{InvalidReason::Domain}), InvalidReason::Domain),
+  CHECK(invalid_because(plus(Invalid{InvalidReason::Domain}, Integer{1}), InvalidReason::Domain) &&
+            invalid_because(plus(Double{1}, Invalid{InvalidReason::Domain}), InvalidReason::Domain),
         "BuiltinFunctions.html: \"An invalid value is not missing\"");
+  CHECK(holds<Missing>(plus(Invalid{InvalidReason::Domain}, Missing{})) &&
+            holds<Missing>(plus(Missing{}, Invalid{InvalidReason::Domain})),
+        "\"any missing inputs ... will result in a missing value\": missing first, the §4.3 Apply wrapper's order");
   bool threw = false;
   try {
     plus(Boolean{true}, Integer{1});
