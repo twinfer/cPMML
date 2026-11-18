@@ -27,14 +27,8 @@
  * It is a node of the decision tree, containing a Predicate and a TreeScore.
  * The score represents the prediction associated to a sample matching the
  * predicate.
- *
- * Scoring walks the children vectors per record, so each Node starts on a
- * cache line (alignas(64)): its size then stays a whole number of lines
- * when a member is added or removed (the base layout was 512 bytes by
- * accident; 504 without recordCount measured 4-6% slower on the small
- * benchmark trees, docs/design/typed-core.md P2.0).
  */
-class alignas(64) Node {
+class Node {
  public:
   std::string id;
   std::string simple_score;
