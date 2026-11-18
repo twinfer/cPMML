@@ -1035,6 +1035,109 @@ static void constants() {
       error("string", R"(<Apply function="concat"><Constant>yes</Constant><Constant>1.0</Constant></Apply>)").empty());
 }
 
+// A RegressionModel over typed_doc's fields whose Output holds the predicted
+// value and `fields`.
+static std::string output_doc(const std::string& fields, const std::string& td = "") {
+  return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="i" optype="continuous" dataType="integer"/>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <TransformationDictionary>)" +
+         td + R"(</TransformationDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="s"/><MiningField name="i"/><MiningField name="d"/>
+      <MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="p" optype="continuous" dataType="double" feature="predictedValue"/>
+      )" + fields +
+         R"(
+    </Output>
+    <RegressionTable intercept="0"><NumericPredictor name="d" coefficient="1"/></RegressionTable>
+  </RegressionModel>
+</PMML>)";
+}
+
+// An OutputField o of `type` with feature transformedValue over `expression`.
+static std::string transformed(const std::string& type, const std::string& expression,
+                               const std::string& attrs = "") {
+  return R"(<OutputField name="o" optype="continuous" dataType=")" + type + R"(" feature="transformedValue")" +
+         attrs + ">" + expression + "</OutputField>";
+}
+
+// Design commit P2.5 (no silent fallbacks; §3.6: "Nothing is caught and
+// turned into a silent default"). B13: an OutputField whose expression fails
+// to load fails the load, as the same expression does in a DerivedField; the
+// base build caught the ParsingException and left the field empty on every
+// record. B25: an Apply's Extension children are not arguments (pmml-4-4.xsd
+// Apply: Extension*, then EXPRESSION*); the base build refused them.
+static void no_silent_fallbacks() {
+  const auto output_error = [](const std::string& type, const std::string& expression) {
+    return load_error(output_doc(transformed(type, expression)));
+  };
+  // Control: a valid transformedValue loads.
+  CHECK(output_error("double", R"(<Apply function="+"><FieldRef field="d"/><Constant>1</Constant></Apply>)").empty());
+  // B13. Each loads on the base build, the field empty. JPMML 1.7.7 refuses
+  // each at its first evaluation (lazy): 'Function "noSuchFunction" is not
+  // defined', NumberFormatException 'For input string: "abc"',
+  // NumberFormatException, TypeCheckException (Aggregate).
+  CHECK(contains(output_error("double", R"(<Apply function="noSuchFunction"><FieldRef field="d"/></Apply>)"),
+                 "noSuchFunction"));
+  // §3.4 NormDiscrete: "non-numeric text on a numeric field -> load error"
+  // (P2.2's error, which the catch hid inside an OutputField).
+  CHECK(contains(output_error("double", R"(<NormDiscrete field="d" value="abc"/>)"), "abc"));
+  CHECK(contains(output_error("double", R"(<Constant dataType="integer">1.5</Constant>)"), "E-VALUE-MALFORMED"));
+  CHECK(contains(output_error("double", R"(<Aggregate field="d" function="sum"/>)"), "Aggregate"));
+  CHECK(contains(output_error("integer", R"(<MapValues outputColumn="o" dataType="integer">
+        <FieldColumnPair field="i" column="k"/>
+        <InlineTable><row><k>3</k><o>1</o></row><row><k>3.0</k><o>2</o></row></InlineTable></MapValues>)"),
+                 "E-KEY-DUPLICATE"));
+  // An inner expression of the OutputField's Apply fails the same way.
+  CHECK(!output_error("double", R"(<Apply function="+"><FieldRef field="d"/>
+        <Apply function="noSuchFunction"><FieldRef field="d"/></Apply></Apply>)")
+             .empty());
+  // Output.html: "For this result feature, OutputField must contain an
+  // EXPRESSION, unless it is used to refer to a transformed value of a
+  // segment model through the segmentID attribute." The base build loaded
+  // both, the first empty on every record and the second a copy of the field
+  // its `value` names (not defined by the spec: "The attribute value is used
+  // in conjunction with result features referring to specific values").
+  // JPMML 1.7.7: "Required element OutputField/<Expression> is not defined".
+  CHECK(contains(load_error(output_doc(transformed("double", ""))), "must contain an EXPRESSION"));
+  CHECK(contains(load_error(output_doc(transformed("double", "", R"( value="d")"))), "must contain an EXPRESSION"));
+  CHECK(contains(load_error(output_doc(transformed("double", R"(<Extension name="e"/>)"))),
+                 "must contain an EXPRESSION"));
+  // segmentId is not supported (B34, P8.15).
+  CHECK(contains(load_error(output_doc(transformed("double", "", R"( segmentId="1")"))), "segmentId"));
+
+  // B25. JPMML 1.7.7 loads and scores each (fixture fix_apply_extension).
+  const std::string ext = R"(<Extension extender="X" name="n" value="v"><X-Thing a="1"/></Extension>)";
+  CHECK(load_error(output_doc("", R"(<DerivedField name="x" optype="continuous" dataType="double"><Apply function="+">)" +
+                                      ext + R"(<FieldRef field="d"/><Constant>1</Constant></Apply></DerivedField>)"))
+            .empty());
+  CHECK(output_error("double", R"(<Apply function="+">)" + ext + ext +
+                                   R"(<FieldRef field="d"/><Constant>1</Constant></Apply>)")
+            .empty());
+  // The Extension is not counted: an untyped Constant after it is at position
+  // 0, if's boolean condition (S2), so TRUE there is not a boolean and true
+  // is.
+  CHECK(contains(output_error("double", R"(<Apply function="if">)" + ext +
+                                            R"(<Constant>TRUE</Constant><Constant>1</Constant></Apply>)"),
+                 "E-VALUE-MALFORMED"));
+  CHECK(output_error("double", R"(<Apply function="if">)" + ext +
+                                   R"(<Constant>true</Constant><Constant>1</Constant></Apply>)")
+            .empty());
+  // Out of the XSD's order (an Extension between arguments) it is skipped as
+  // well, as the argument count and the S2 positions already skip it; JPMML
+  // 1.7.7 scores it so.
+  CHECK(output_error("double", R"(<Apply function="+"><FieldRef field="d"/>)" + ext +
+                                   R"(<Constant>1</Constant></Apply>)")
+            .empty());
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -1066,6 +1169,7 @@ int main() {
   names_and_scopes();
   document_text();
   constants();
+  no_silent_fallbacks();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

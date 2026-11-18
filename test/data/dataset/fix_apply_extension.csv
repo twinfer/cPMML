@@ -1,0 +1,5 @@
+x,s,y,o_mul,o_if,o_ift,o_sub,o_cat
+1,abcdef,2.0,2.0,1.0,1.0,bcd,abcdef-bcd
+-2.5,xy,-1.5,-5.0,2.0,-2.5,y,xy-y
+0,hello,1.0,0.0,2.0,0.0,ell,hello-ell
+3.25,pq r st,4.25,6.5,1.0,3.25,q r,pq r st-q r

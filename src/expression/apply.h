@@ -56,6 +56,15 @@ class Apply : public Expression {
       throw cpmml::ParsingException("Apply: invalidValueTreatment=\"asValue\" is only defined for a MiningField");
     std::shared_ptr<Expression> expression;
     for (const auto& n : node.get_childs()) {
+      // B25 (design commit P2.5): pmml-4-4.xsd Apply is "Extension* then
+      // EXPRESSION*" (<xs:element ref="Extension" minOccurs="0"
+      // maxOccurs="unbounded"/> <xs:group ref="EXPRESSION" minOccurs="0"
+      // maxOccurs="unbounded"/>): an Extension is producer content, not an
+      // argument. It was read as an expression element and refused. Skipped
+      // wherever it stands, as BuiltInFunction counts the arguments and
+      // Constant finds its parameter position (§3.4 "children after
+      // Extension*").
+      if (n.name() == "Extension") continue;
       ExpressionType expression_type(n);
       switch (expression_type.value) {
         case ExpressionType::ExpressionTypeValue::CONSTANT:
