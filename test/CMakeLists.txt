@@ -50,6 +50,40 @@ target_link_libraries(java_format.exe ${PROJECT_NAME} pugixml::pugixml miniz Eig
 add_dependencies(unit_tests java_format.exe)
 add_test(java_format java_format.exe)
 
+# The type library of the typed core (src/core/types/, docs/design/typed-core.md
+# §2, P1.1): one check per rule. Header-only and not used by the engine yet, so
+# the test links nothing.
+add_executable(typed_value.exe typed_value.cc)
+target_include_directories(typed_value.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+add_dependencies(unit_tests typed_value.exe)
+add_test(typed_value typed_value.exe)
+
+# Must-not-compile cases of the type library (§2.2, §6.4): each is compiled
+# at test time with this build's compiler, once with its control (must
+# compile) and once as written (must fail with the intended diagnostic, the
+# regex below covering clang's and GCC's wording); see
+# types_negative/check_negative.cmake. A case that compiles fails its test.
+set(_types_negative_flags ${CMAKE_CXX20_STANDARD_COMPILE_OPTION} -Wall -I${PROJECT_SOURCE_DIR}/src)
+if(CMAKE_OSX_SYSROOT)
+    list(APPEND _types_negative_flags -isysroot ${CMAKE_OSX_SYSROOT})
+endif()
+foreach(_case_expect
+        "missing_alternative|Incomplete, const cpmml::types::String"
+        "uncategorised|every Value alternative is in exactly one category"
+        "cold_path|private constructor of class 'cpmml::types::cold::ColdPath'|ColdPath::ColdPath\\(\\)' is private")
+    string(FIND "${_case_expect}" "|" _bar)
+    string(SUBSTRING "${_case_expect}" 0 ${_bar} _case)
+    math(EXPR _bar "${_bar} + 1")
+    string(SUBSTRING "${_case_expect}" ${_bar} -1 _expect)
+    add_test(NAME types_negative_${_case}
+        COMMAND ${CMAKE_COMMAND}
+            -DCXX=${CMAKE_CXX_COMPILER}
+            "-DFLAGS=${_types_negative_flags}"
+            -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/types_negative/${_case}.cc
+            "-DEXPECT=${_expect}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/types_negative/check_negative.cmake)
+endforeach()
+
 # Concurrent scoring: a data race does not fail a single-threaded fixture, so
 # nothing else in the suite would notice if R3 regressed. Two models, one with
 # categorical string inputs (the string-interning path) and one ensemble (the
