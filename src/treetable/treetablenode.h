@@ -35,8 +35,13 @@ class TreeTableNode {
       this->value = value;
       return;
     }
-    if (children.find(keys[level]) == children.cend()) children[keys[level]] = std::make_shared<TreeTableNode>();
-    children[keys[level]]->add(keys, value, level + 1);
+    // One lookup, then use the node it found or made. A NaN key never equals
+    // itself, so a second lookup (operator[] after find) inserts a fresh,
+    // empty slot and the old code dereferenced its null pointer. A NaN row is
+    // stored but unreachable, as a lookup with NaN finds nothing either.
+    auto& child = children[keys[level]];
+    if (!child) child = std::make_shared<TreeTableNode>();
+    child->add(keys, value, level + 1);
   }
 
   inline V get(const std::vector<K>& keys, const size_t level = 0) const {

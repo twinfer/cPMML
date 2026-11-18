@@ -1,0 +1,9 @@
+s,i,f,d,b,y,o_s,o_t
+A,-2,0.1,7,true,N/A,N/A,N/A
+abc,3,3,2.0,false,N/A,N/A,N/A
+A,7,3,0.1,true,1.0,1,1
+abc,7,-1.25,-1.25,true,7.0,7,7
+A,3,2.5,-0,true,N/A,N/A,N/A
+,-2,,0.1,true,1.0,1,1
+B,-2,0.1,,true,N/A,N/A,N/A
+,2147483648,3.4e39,,true,N/A,N/A,N/A
