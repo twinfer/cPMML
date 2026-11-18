@@ -1694,6 +1694,8 @@ Departures from JPMML that follow the spec, and departures from the spec
 | D25 | an invalid value in any MiningField with returnInvalid makes the record invalid, read or not | checks only fields the model reads | MiningSchema.html returnInvalid: "when an invalid input is encountered, the model should return a value indicating an invalid result" (P0-unread-invalid-input) |
 | D26 | a `NaN` key in a hashed table (MapValues InlineTable, large SimpleSetPredicate) is a load error (§2.7) | loads; the row never matches | spec silent; a NaN key can match nothing, so the row is dead text and most likely an export error. Until P2.2 cPMML loads it like JPMML (B35) |
 | D27 | `+`, `-`, `*`, `/` over infinities follow Transformations.html's "Brief Summary of Operations Involving Infinite Numbers": `INF + -INF`, `INF - INF`, `INF * 0` and `INF / INF` of one sign give missing; `INF / -INF` gives the numerator | fails the record (`Function "+" returned invalid value`; measured in P1.1) | the spec's table; IEEE would give NaN (decided 2026-11-18) |
+| D28 | **spec**: NumericPredictor/GRM `exponent` is `INT-NUMBER` (xs:integer): `2.0`, `2e0`, `2.5` are load errors; `+2`, `02`, ` 2 ` read as 2 | loads non-integer text and scores x^1 | pmml-4-4.xsd `exponent` type="INT-NUMBER" (decided 2026-11-18) |
+| D29 | **spec**: NormDiscrete `value` is read in its field's type by K1/D22; `3.5` on an integer field loads, the comparison widens, and the unit is 0 for every integer input | refuses the document (NumberFormatException) | Transformations.html NormDiscrete "has value 1.0 if the value of input field f is v, otherwise it is 0"; xsd `value` is xs:string (decided 2026-11-18) |
 
 ---
 
@@ -1822,6 +1824,19 @@ it and JPMML scores those documents. The P1 agents' doc notes (the
 Unsupported severity and codes, the ColdPath friends, the comparison
 Purpose, NaN probes, the §3.4 table rows) are accepted as written in the P1
 section.
+
+**Decided 2026-11-18 after P2.1.** `InternalEvaluator::load_scope` (the
+load binder kept with each model, 30-320 KiB, pointing into the freed
+document, to avoid a per-record slowdown from allocator reuse) is accepted
+until P7a.2, which must remove it or make its scopes the engine's. P2.2's
+departures from JPMML follow the spec: D28 (`exponent` is xs:integer) and
+D29 (NormDiscrete `value` in its field's type). A Constant of number or
+boolean type that lands in a string slot (a FieldRef or Apply
+`mapMissingTo`/`defaultValue` in a string DerivedField) keeps its text as
+well as its number: string readers get the text (§3.4 `Cast<string>`, what
+base and JPMML give: `"5"`, `"true"`, `"1"`), numeric readers the number.
+The first P2.2 commit, which stored only the number, was dropped from
+local history and P2.2 is rebuilt.
 
 ---
 
