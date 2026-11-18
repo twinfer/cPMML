@@ -172,6 +172,15 @@ struct Scope {
   NameMap local;
   NameMap chain_outputs;
   NameMap outputs;
+  // The LocalTransformations DerivedFields and OutputFields that are not
+  // declared because their name is already a MiningField or a
+  // TransformationDictionary DerivedField (Binder::shadow_warning), with the
+  // type their dataType names. The engine still computes them, into the
+  // name's one slot (flat until P7), so a read in this model after them sees
+  // their value: Binder::value_type gives it their type, as the engine's
+  // re-walk did before P2.4. Rare: searched linearly.
+  std::vector<std::pair<std::string, StaticType>> local_shadows;
+  std::vector<std::pair<std::string, StaticType>> output_shadows;
   std::unordered_set<const Binding*> td_instances;  // TD definitions instantiated here
   std::unordered_set<std::string> target_names;     // the fields its Targets describe
 

@@ -29,10 +29,9 @@ class OutputField {
   //  supported by choice
   OutputExpressionType expression_type;
   bool derived;
+  // Its dataType; INTEGER for dataType="integer" (P2.4), which a selectAll
+  // collection writes as an integer (MultipleModelMethod::collection_entry).
   DataType datatype;
-  // dataType="integer", which DataType carries as a double: a selectAll
-  // collection writes such a value as an integer (see MultipleModelMethod).
-  bool integer = false;
   size_t index;
   std::shared_ptr<OutputExpression> expression;
 
@@ -63,13 +62,19 @@ class OutputField {
                  feat == OutputExpressionType::OutputExpressionTypeValue::REASON_CODE) {
         datatype = DataType::DataTypeValue::STRING;
       } else if (indexer->contains(model_target)) {
+        // The target's type, as the engine carried it before P2.4: an
+        // integer target was a double then, and stays one here, so that a
+        // selectAll collection writes such a field as a double (7.0), as
+        // before. (An untyped Discretize or MapValues in it finds no enclosing
+        // dataType, D21, and bind::expression_type leaves it unknown: its
+        // values are computed as doubles, as before.)
         datatype = indexer->get_type(model_target);
+        if (datatype == DataType::DataTypeValue::INTEGER) datatype = DataType::DataTypeValue::DOUBLE;
       } else {
         throw cpmml::ParsingException("Impossible to determine datatype for output: " + name);
       }
     } else {
       datatype = DataType::read(node);
-      integer = DataType::is_integer(node);
     }
 
     index = indexer->get_or_set(name, datatype).first;

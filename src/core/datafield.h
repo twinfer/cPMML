@@ -33,13 +33,10 @@ class DataField {
  public:
   size_t n_values = 1;
   std::string name;
+  // INTEGER for dataType="integer" (P2.4), whose lexical space is the XSD
+  // integer's: an input "3.5" or "3.0" is not an integer
+  // (MiningField::parse_input).
   DataType datatype;
-  // dataType="integer" is carried as DOUBLE, but its lexical space is the XSD
-  // integer's: an input "3.5" or "3.0" is not an integer. Only the input
-  // reader (MiningField::parse_input) consults this. It lives here and not in
-  // DataType, which is embedded in every predicate and tree node: widening it
-  // from 4 to 8 bytes cost AuditRandomForest ~9%.
-  bool integer = false;
   size_t index = std::numeric_limits<size_t>::max();
   OpType optype;
   // <Value property="missing"> declares which raw input tokens *stand for* a
@@ -65,7 +62,6 @@ class DataField {
   DataField(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
       : name(node.required_attribute("name")),
         datatype(DataType::read(node)),
-        integer(DataType::is_integer(node)),
         index(indexer->get_or_set(name, datatype).first),
         optype(OpType::read(node)) {
     auto values = node.get_childs("Value");

@@ -1,6 +1,6 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 404
+# documents: 408
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
 # E-TYPE-BOOLEAN-MIXED: 3
@@ -8,13 +8,13 @@
 # W-CAST-LOSSY: 113
 # W-CAST-NARROWING: 40
 # W-FORWARD-REF: 10
-# W-NAME-SHADOWS-MININGFIELD: 6
-# W-NAME-SHADOWS-TD: 3
+# W-NAME-SHADOWS-MININGFIELD: 7
+# W-NAME-SHADOWS-TD: 4
 # W-OUTPUT-NO-DATATYPE: 4
 # W-SCOPE-FLAT: 1
 # W-SCOPE-IMPLICIT: 8
 # W-SLOT-WIDENED: 2
-# W-TEXT-WIDENED: 33
+# W-TEXT-WIDENED: 35
 benchmark/data/model/AuditTree.xml:88	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": OutputField name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 benchmark/data/model/HousingGBTRegressor.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
 benchmark/data/model/HousingGBTRegressor.xml:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
@@ -177,6 +177,10 @@ test/data/model/fix_ensemble_localtrans_shadow.zip:4	W-NAME-SHADOWS-TD	2	MiningM
 test/data/model/fix_ensemble_outputs_selectall_values.zip:44	W-CAST-LOSSY	2	MiningModel > Segment "1" > RegressionModel (+1 more)	OutputField "f": declares float over its expression of type double: the value is rounded to float (§2.6)
 test/data/model/fix_ensemble_segtarget_chaindisplay.zip:28	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
 test/data/model/fix_ensemble_segtarget_chainprior.zip:26	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
+test/data/model/fix_fieldref_mapmissingto_widened.zip:12	W-TEXT-WIDENED	1		FieldRef "i" in DerivedField "q": mapMissingTo="2.5" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_fieldref_mapmissingto_widened.zip:15	W-TEXT-WIDENED	1		FieldRef "i" in DerivedField "r": mapMissingTo="3.0" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_fieldref_shadow_type.zip:22	W-NAME-SHADOWS-MININGFIELD	1	RegressionModel	OutputField "x": OutputField name "x" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
+test/data/model/fix_fieldref_shadow_type.zip:26	W-NAME-SHADOWS-TD	1	RegressionModel	DerivedField "t": LocalTransformations DerivedField name "t" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope"; accepted, P2.1)
 test/data/model/fix_format_classification_double.zip:20	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
 test/data/model/fix_format_classification_double.zip:24	W-CAST-LOSSY	1	RegressionModel	OutputField "p1_f": declares float over a probability of type double: the value is rounded to float (§2.6)
 test/data/model/fix_format_regression_float.zip:23	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature

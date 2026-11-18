@@ -436,7 +436,7 @@ class MultipleModelMethod {
   // carried as doubles (see DataType) and are written as such; so is the value
   // of an OutputField without a dataType attribute, whatever its target's type.
   static std::string collection_entry(const double value, const OutputField& field) {
-    return java::text({value, java_kind(field.datatype, field.integer)});
+    return java::text({value, java_kind(field.datatype)});
   }
 
   // The fields a segment model's result returns: its own OutputFields, then

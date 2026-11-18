@@ -46,15 +46,36 @@ class TransformedValue : public OutputExpression {
       expression = std::make_shared<FieldRef>(ref, indexer, output_index, output_type);
     }
     if (expression) Expression::inputs = expression->inputs;
-    value_kind = child.is_empty() ? std::nullopt : kind_of(child.xml());
+    value_kind = child.is_empty() ? std::nullopt : kind_of(child);
   }
 
-  // The type of the value an expression gives, read from the document at
-  // load: nullopt for a string, else the type its number is written as when a
-  // string OutputField holds it. Value carries no type of its own; the rules,
-  // shared with Apply, are BuiltInFunction::expression_kind's.
-  static std::optional<java::Kind> kind_of(const pugi::xml_node& expression) {
-    return BuiltInFunction::expression_kind(expression);
+  // The Java type a string OutputField writes the expression's number as
+  // (OutputField::add_output), from the expression's static type (design
+  // commit P2.4, bind::expression_type): nullopt for a string, whose text is
+  // written as it is. Where the binder does not know the type (arithmetic
+  // over a boolean or string operand, Q7, reported in report mode and not
+  // yet a load error; a FieldRef to an OutputField whose dataType neither
+  // the document nor its feature gives) the value is the double the engine
+  // computed, and is written as one, as before P2.4.
+  static std::optional<java::Kind> kind_of(const XmlNode& expression) {
+    const cpmml::bind::StaticType type = cpmml::bind::expression_type(expression);
+    if (!type) return java::Kind::DOUBLE;
+    switch (*type) {
+      case cpmml::bind::TypeId::String:
+        return std::nullopt;
+      case cpmml::bind::TypeId::Integer:
+        return java::Kind::INTEGER;
+      case cpmml::bind::TypeId::Float:
+        return java::Kind::FLOAT;
+      case cpmml::bind::TypeId::Boolean:
+        return java::Kind::BOOLEAN;
+      case cpmml::bind::TypeId::Double:
+        return java::Kind::DOUBLE;
+      case cpmml::bind::TypeId::Missing:
+      case cpmml::bind::TypeId::Invalid:
+        break;
+    }
+    throw std::logic_error("TransformedValue: a sentinel is not a static type");
   }
 
   inline Value eval(const Sample& sample) const override {

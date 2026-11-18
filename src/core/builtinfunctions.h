@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "cPMML.h"
 #include "enum_parser.h"
 #include "value.h"
@@ -107,22 +108,23 @@ class BuiltInFunction {  // inputs are mapped by position
   int min_nargs = 0;
   std::function<Value(const std::vector<Value>&)> function;
 
-  // The dataType of a value, as worked out from the document: nullopt for a
-  // string, else the type its number has (and is written as, java_format.h).
-  using Kind = std::optional<java::Kind>;
-
-  // Typing of this application, set by the Apply constructor; all false for a
-  // function built from its name alone.
+  // Typing of this application, set by the Apply constructor from the
+  // binder's static types (design commit P2.4: bind::expression_type, the
+  // §3.4 rows and the function table's result rules, typing.h
+  // engine_apply_type); all false for a function built from its name alone.
   //   narrow_arguments  a float argument of a numeric function or a
   //                     comparison is a 32-bit float (XSD float), so it is
-  //                     narrowed before use: the
-  //                     inputs are carried as doubles and are not narrowed
-  //                     when read;
+  //                     narrowed before use: the inputs are carried as
+  //                     doubles and are not narrowed when read;
   //   float_result      the result is a float, so it is narrowed after;
   //   integer_division  "/" of two integers is an integer: truncated;
   //   integer_power     pow of two integers is an integer, which a negative
   //                     exponent does not give.
-  std::vector<Kind> argument_kinds;
+  // An argument or result whose type the binder does not know (a boolean or
+  // string operand of arithmetic, Q7, reported in report mode and not yet a
+  // load error) is neither a float nor an integer, so it sets none of them:
+  // the function computes in doubles, as it did before P2.4.
+  std::vector<cpmml::bind::StaticType> argument_types;
   bool narrow_arguments = false;
   bool float_result = false;
   bool integer_division = false;
@@ -138,21 +140,28 @@ class BuiltInFunction {  // inputs are mapped by position
         min_nargs(get_min_nargs(function_type)),
         function(get_function(function_type)) {}
 
-  // The function an Apply element names, typed by its arguments.
+  // The function an Apply element names, typed by its arguments' static types.
   explicit BuiltInFunction(const XmlNode& apply) : BuiltInFunction(apply.required_attribute("function")) {
+    using cpmml::bind::TypeId;
     const bool comparison = compares_numbers(function_type);
     if (!is_numeric(function_type) && !comparison) return;
-    for (const auto& argument : arguments_of(apply.xml())) argument_kinds.push_back(expression_kind(argument));
-    for (const auto& kind : argument_kinds)
-      if (kind == java::Kind::FLOAT) narrow_arguments = true;
+    for (pugi::xml_node argument : apply.xml().children())
+      if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0)
+        argument_types.push_back(cpmml::bind::expression_type(argument));
+    for (const auto& type : argument_types)
+      if (type == TypeId::Float) narrow_arguments = true;
     if (comparison) {
       typed_call = narrow_arguments;
       return;
     }
-    const Kind result = result_kind(function_string, argument_kinds);
-    float_result = result == java::Kind::FLOAT;
-    integer_division = function_type == BuiltInFunctionType::DIV && result == java::Kind::INTEGER;
-    integer_power = function_type == BuiltInFunctionType::POW && result == java::Kind::INTEGER;
+    // A supported function (from_string refused the others) is a row of the
+    // binder's table.
+    const cpmml::fn::Signature* sig = cpmml::fn::find(function_string);
+    if (!sig) throw std::logic_error("BuiltInFunction: \"" + function_string + "\" is not in the function table");
+    const cpmml::bind::StaticType result = cpmml::bind::engine_apply_type(*sig, argument_types);
+    float_result = result == TypeId::Float;
+    integer_division = function_type == BuiltInFunctionType::DIV && result == TypeId::Integer;
+    integer_power = function_type == BuiltInFunctionType::POW && result == TypeId::Integer;
     typed_call = narrow_arguments || float_result || integer_division || integer_power;
   }
 
@@ -474,8 +483,8 @@ class BuiltInFunction {  // inputs are mapped by position
     std::vector<Value> narrowed;
     if (narrow_arguments) {
       narrowed = input;
-      for (size_t i = 0; i < narrowed.size() && i < argument_kinds.size(); ++i)
-        if (argument_kinds[i] == java::Kind::FLOAT && !narrowed[i].missing)
+      for (size_t i = 0; i < narrowed.size() && i < argument_types.size(); ++i)
+        if (argument_types[i] == cpmml::bind::TypeId::Float && !narrowed[i].missing)
           narrowed[i].value = static_cast<double>(static_cast<float>(narrowed[i].value));
     }
     const std::vector<Value>& arguments = narrow_arguments ? narrowed : input;
@@ -756,36 +765,12 @@ class BuiltInFunction {  // inputs are mapped by position
     return Value(std::exp(-0.5 * z * z) / (sigma * std::sqrt(2.0 * M_PI)), DataType::DataTypeValue::DOUBLE);
   }
 
-  // --- Result types ---
+  // --- Typing ---
   //
-  // Functions.html: "functions are assumed to inherit the dataType of the
-  // current input parameters unless otherwise specified ... When the input
-  // parameters have multiple dataTypes, the least restrictive dataType will be
-  // inherited by default ... string, double, float, integer". So
-  //   + - * / min max sum product abs pow threshold modulo
-  //                  the least restrictive of the arguments (integer < float <
-  //                  double): "/" is "defined in the same way" as "+", so 3/2
-  //                  of integers is the integer 1; modulo(7,2) is 1, not 1.0;
-  //   avg, median    the same, except that integers give a double: the mean of
-  //                  integers is not one, and the specification does not
-  //                  truncate it (JPMML gives 2.5 for avg(2,3));
-  //   round floor ceil stringLength
-  //                  integer, which the specification declares;
-  //   exp ln log10 sqrt
-  //                  double: their results include NaN and INF, which "can only
-  //                  be floating point numbers";
-  //   expm1 ln1p hypot rint, trigonometric and distribution functions
-  //                  double, which the specification declares (JPMML gives an
-  //                  integer for rint of an integer; the declaration wins);
-  //   predicates     boolean; string functions: string;
-  //   if             the type of its then-argument (the specification does not
-  //                  say).
-  // A boolean or string argument to an arithmetic function gives double, as it
-  // did before. The type comes from the document, not from the values: a
-  // missing double argument that an aggregate skips still makes it a double.
-  // A Value carries no type of its own, which is why this is worked out here,
-  // at load, for the Apply (operator()) and for a string OutputField writing
-  // the number (TransformedValue).
+  // The functions whose arguments or result the Apply constructor types (the
+  // static types themselves are the binder's, P2.4: bind::expression_type
+  // and typing.h engine_apply_type, §3.4 and §4.1): every numeric function,
+  // for a float argument, a float result, an integer "/" or pow.
   static bool is_numeric(const BuiltInFunctionType& type) {
     switch (type) {
       case BuiltInFunctionType::IF:
@@ -833,170 +818,6 @@ class BuiltInFunction {  // inputs are mapped by position
       default:
         return false;
     }
-  }
-
-  // The least restrictive numeric type of `arguments`.
-  static java::Kind common_kind(const std::vector<Kind>& arguments) {
-    java::Kind result = java::Kind::INTEGER;
-    for (const auto& kind : arguments) {
-      if (!kind || *kind == java::Kind::DOUBLE || *kind == java::Kind::BOOLEAN) return java::Kind::DOUBLE;
-      if (*kind == java::Kind::FLOAT) result = java::Kind::FLOAT;
-    }
-    return result;
-  }
-
-  // The type of `function` applied to arguments of `arguments`' types. Takes
-  // the name, not the type, because a string OutputField types an Apply of a
-  // built-in cPMML does not implement (and fails to load) as well.
-  static Kind result_kind(const std::string& function, const std::vector<Kind>& arguments) {
-    const auto* entry = enum_find(function, TABLE);
-    if (!entry || entry->support != EnumSupport::SUPPORTED) {
-      if (function == "and" || function == "or" || function == "isValid" || function == "isNotValid")
-        return java::Kind::BOOLEAN;
-      if (function == "formatNumber" || function == "formatDatetime") return std::nullopt;
-      return java::Kind::DOUBLE;
-    }
-    switch (entry->value) {
-      case BuiltInFunctionType::EQUAL:
-      case BuiltInFunctionType::NOT_EQUAL:
-      case BuiltInFunctionType::LESS_THAN:
-      case BuiltInFunctionType::LESS_THAN_EQUAL:
-      case BuiltInFunctionType::GREATER_THAN:
-      case BuiltInFunctionType::GREATER_THAN_EQUAL:
-      case BuiltInFunctionType::IS_IN:
-      case BuiltInFunctionType::IS_NOT_IN:
-      case BuiltInFunctionType::IS_MISSING:
-      case BuiltInFunctionType::IS_NOT_MISSING:
-      case BuiltInFunctionType::MATCHES:
-      case BuiltInFunctionType::NOT:
-        return java::Kind::BOOLEAN;
-      case BuiltInFunctionType::ROUND:
-      case BuiltInFunctionType::FLOOR:
-      case BuiltInFunctionType::CEIL:
-      case BuiltInFunctionType::STRING_LENGTH:
-        return java::Kind::INTEGER;
-      case BuiltInFunctionType::CONCAT:
-      case BuiltInFunctionType::SUBSTRING:
-      case BuiltInFunctionType::UPPERCASE:
-      case BuiltInFunctionType::LOWERCASE:
-      case BuiltInFunctionType::TRIM_BLANKS:
-      case BuiltInFunctionType::REPLACE:
-        return std::nullopt;
-      case BuiltInFunctionType::IF:
-        return arguments.size() > 1 ? arguments[1] : std::nullopt;
-      case BuiltInFunctionType::PLUS:
-      case BuiltInFunctionType::MINUS:
-      case BuiltInFunctionType::MUL:
-      case BuiltInFunctionType::DIV:
-      case BuiltInFunctionType::MIN:
-      case BuiltInFunctionType::MAX:
-      case BuiltInFunctionType::SUM:
-      case BuiltInFunctionType::PRODUCT:
-      case BuiltInFunctionType::ABS:
-      case BuiltInFunctionType::POW:
-      case BuiltInFunctionType::THRESHOLD:
-      case BuiltInFunctionType::MODULO:
-        return common_kind(arguments);
-      case BuiltInFunctionType::AVG:
-      case BuiltInFunctionType::MEDIAN: {
-        const java::Kind kind = common_kind(arguments);
-        return kind == java::Kind::INTEGER ? java::Kind::DOUBLE : kind;
-      }
-      default:
-        return java::Kind::DOUBLE;
-    }
-  }
-
-  // An Apply's arguments: its element children after the Extensions (XSD:
-  // Extension*, then EXPRESSION*).
-  static std::vector<pugi::xml_node> arguments_of(const pugi::xml_node& apply) {
-    std::vector<pugi::xml_node> arguments;
-    for (const auto& child : apply.children())
-      if (child.type() == pugi::node_element && std::string(child.name()) != "Extension") arguments.push_back(child);
-    return arguments;
-  }
-
-  // The type of the value an expression gives, read from the document:
-  //   FieldRef        the dataType of the DataField, DerivedField or
-  //                   OutputField it names;
-  //   Constant        its dataType; without one, integer if the text is an
-  //                   XSD integer, double if a double, else string ("7" is
-  //                   written "7", "7.50" is "7.5");
-  //   NormContinuous, NormDiscrete  double;
-  //   Discretize, MapValues  their dataType, string by default;
-  //   Apply           result_kind.
-  static Kind expression_kind(const pugi::xml_node& expression) {
-    const std::string element = expression.name();
-    if (element == "FieldRef") return field_kind(expression, expression.attribute("field").value());
-    if (element == "Constant") {
-      if (expression.attribute("dataType")) return declared_kind(expression.attribute("dataType").value());
-      const std::string text = expression.child_value();
-      long whole = 0;
-      double number = 0;
-      if (lexical::parse_long(text, whole)) return java::Kind::INTEGER;
-      if (lexical::parse_double(text, number)) return java::Kind::DOUBLE;
-      return std::nullopt;
-    }
-    if (element == "NormContinuous" || element == "NormDiscrete") return java::Kind::DOUBLE;
-    if (element == "Discretize" || element == "MapValues")
-      return declared_kind(expression.attribute("dataType") ? expression.attribute("dataType").value() : "string");
-    if (element != "Apply") return java::Kind::DOUBLE;
-
-    std::vector<Kind> arguments;
-    for (const auto& argument : arguments_of(expression)) arguments.push_back(expression_kind(argument));
-    return result_kind(expression.attribute("function").value(), arguments);
-  }
-
-  static Kind declared_kind(const std::string& datatype) {
-    if (datatype == "string") return std::nullopt;
-    if (datatype == "integer") return java::Kind::INTEGER;
-    if (datatype == "float") return java::Kind::FLOAT;
-    if (datatype == "boolean") return java::Kind::BOOLEAN;
-    return java::Kind::DOUBLE;
-  }
-
-  // The dataType of the field `name` that the FieldRef `from` refers to,
-  // resolved in the FieldRef's own scope (FieldScope.html), nearest first:
-  // "a model can also define its 'own' derived fields in the element
-  // LocalTransformations", a sub-model's MiningSchema "can refer to any fields
-  // defined within the parent model's scope", and "In a model chain, all
-  // Outputs from the segment models become part of the enclosing mining model
-  // scope ... the Outputs of one segment model may be used as an input to any
-  // of the subsequent segment models"; the DataDictionary and
-  // TransformationDictionary "are visible to all model elements". So, walking
-  // up from the FieldRef: in a model the DerivedFields of its
-  // LocalTransformations and the OutputFields of its Output; in a modelChain
-  // Segment the Outputs of the Segments before it, nearest first; at the top
-  // the TransformationDictionary and the DataDictionary. A name found nowhere,
-  // or declared without a dataType, is a double, the type arithmetic was done
-  // in before. (A DefineFunction body is not reached: user-defined functions
-  // fail to load.)
-  static Kind field_kind(const pugi::xml_node& from, const std::string& name) {
-    for (pugi::xml_node scope = from.parent(); scope; scope = scope.parent()) {
-      if (const pugi::xml_node found = declared_in(scope, name)) return declared_kind(found.attribute("dataType").value());
-      if (std::strcmp(scope.name(), "Segment") == 0 &&
-          std::strcmp(scope.parent().attribute("multipleModelMethod").value(), "modelChain") == 0)
-        for (pugi::xml_node segment = scope.previous_sibling("Segment"); segment;
-             segment = segment.previous_sibling("Segment"))
-          for (const auto& model : segment.children())
-            if (const pugi::xml_node found = model.child("Output").find_child_by_attribute("OutputField", "name", name.c_str()))
-              return declared_kind(found.attribute("dataType").value());
-    }
-    return java::Kind::DOUBLE;
-  }
-
-  // The field `name` that `scope` (a model element, or PMML itself) declares
-  // in its LocalTransformations, Output, TransformationDictionary or
-  // DataDictionary.
-  static pugi::xml_node declared_in(const pugi::xml_node& scope, const std::string& name) {
-    static constexpr std::pair<const char*, const char*> containers[] = {{"LocalTransformations", "DerivedField"},
-                                                                         {"Output", "OutputField"},
-                                                                         {"TransformationDictionary", "DerivedField"},
-                                                                         {"DataDictionary", "DataField"}};
-    for (const auto& [container, element] : containers)
-      if (const pugi::xml_node found = scope.child(container).find_child_by_attribute(element, "name", name.c_str()))
-        return found;
-    return pugi::xml_node();
   }
 
   /**

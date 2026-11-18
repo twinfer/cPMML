@@ -99,7 +99,7 @@ class InternalModel {
   }
 
   void set_shown() {
-    shown_kind = java_kind(target_field.datatype, target_field.integer);
+    shown_kind = java_kind(target_field.datatype);
     const bool text = target_field.datatype.value == DataType::DataTypeValue::STRING;
     // A double target is rewritten too: most models already compute a double
     // and write it with Double.toString, but a TreeModel's prediction is the

@@ -195,12 +195,16 @@ class MiningField : public DataField {
         set_number(parsed, b ? 1.0 : 0.0);
         return InputStatus::VALID;
       }
-      case DataType::DataTypeValue::INTEGER:
+      case DataType::DataTypeValue::INTEGER: {
+        double d = 0.0;
+        if (!lexical::parse_integer_as_double(raw, d)) return InputStatus::MALFORMED;
+        set_number(parsed, d);
+        return InputStatus::VALID;
+      }
       case DataType::DataTypeValue::FLOAT:
       case DataType::DataTypeValue::DOUBLE: {
         double d = 0.0;
-        const bool ok = integer ? lexical::parse_integer_as_double(raw, d) : lexical::parse_double(raw, d);
-        if (!ok) return InputStatus::MALFORMED;
+        if (!lexical::parse_double(raw, d)) return InputStatus::MALFORMED;
         set_number(parsed, d);
         return std::isnan(d) ? InputStatus::INVALID : InputStatus::VALID;
       }
@@ -212,10 +216,10 @@ class MiningField : public DataField {
     switch (invalidvalue_treatmentmethod.value) {
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:
         throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + raw + "\" is not a valid " +
-                                           to_lower(integer ? "integer" : datatype.to_string()));
+                                           to_lower(datatype.to_string()));
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_IS:
         throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + raw + "\" is not a valid " +
-                                           to_lower(integer ? "integer" : datatype.to_string()) +
+                                           to_lower(datatype.to_string()) +
                                            " and cannot be used asIs");
       default:
         return handle_invalid(Value());

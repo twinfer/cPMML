@@ -260,7 +260,30 @@ class Binder {
   // are those of the segments before the one the reference is in, as
   // resolve() sees them while it binds the segments in order (FieldScope.html:
   // "All other fields in PMML must be defined before they are referenced").
-  const Binding* lookup(pugi::xml_node from, std::string_view name) const {
+  const Binding* lookup(pugi::xml_node from, std::string_view name) const { return lookup(from, name, nullptr); }
+
+  // The static type of the value the engine reads for `name` from `from`
+  // (load_scope.h expression_type): the type of lookup()'s binding, except
+  // where, before it in lookup()'s order, the model has a LocalTransformations
+  // DerivedField (or, from inside its Output, an OutputField) of that name
+  // that the binder did not declare because the name is already a MiningField
+  // or a TransformationDictionary DerivedField (shadow_warning). The engine
+  // computes that field into the name's slot all the same, so its value is
+  // what is read, and its dataType is its type, as the re-walk before P2.4
+  // gave it (LocalTransformations, then Output, then the
+  // TransformationDictionary, at the nearest enclosing model). nullopt: no
+  // binding, or one of unknown type.
+  StaticType value_type(pugi::xml_node from, std::string_view name) const {
+    std::optional<StaticType> shadow;
+    const Binding* b = lookup(from, name, &shadow);
+    if (shadow) return *shadow;
+    return b ? b->type.type : StaticType{};
+  }
+
+ private:
+  // lookup(); with `shadow`, an undeclared shadowing field found on the way
+  // (value_type) is put there and the result is nullptr.
+  const Binding* lookup(pugi::xml_node from, std::string_view name, std::optional<StaticType>* shadow) const {
     if (!document_) return nullptr;
     // The context of every element walked is remembered (a direct-mapped
     // cache), so a predicate deep in a tree stops at its parent Node, whose
@@ -315,11 +338,23 @@ class Binder {
       if (const Binding* b = find(document_->td_fields)) return b;
       return find(document_->data_fields);
     }
+    const auto find_shadow = [name, shadow](const std::vector<std::pair<std::string, StaticType>>& shadows) {
+      if (!shadow) return false;
+      for (const auto& [n, t] : shadows)
+        if (n == name) {
+          *shadow = t;
+          return true;
+        }
+      return false;
+    };
     // 1. M's OutputFields (only from inside M's Output)
-    if (in_output)
+    if (in_output) {
       if (const Binding* b = find(model->outputs)) return b;
+      if (find_shadow(model->output_shadows)) return nullptr;
+    }
     // 2. M's LocalTransformations
     if (const Binding* b = find(model->local)) return b;
+    if (find_shadow(model->local_shadows)) return nullptr;
     // 3. TransformationDictionary DerivedFields, unless M has a MiningField
     // of that name; 4. M's MiningFields
     const Binding* mining = find(model->mining);
@@ -334,12 +369,15 @@ class Binder {
         if (const Binding* b = find(s->data_fields)) return b;
         continue;
       }
-      for (const auto* map : {&s->local, &s->mining})
-        if (const Binding* b = find(*map)) return b;
+      if (const Binding* b = find(s->local)) return b;
+      if (find_shadow(s->local_shadows)) return nullptr;
+      if (const Binding* b = find(s->mining)) return b;
       if (const Binding* b = chain_output(*s, name, inner->chain_position)) return b;
     }
     return nullptr;
   }
+
+ public:
 
   // The label of the model scope `from` is in ("" outside any model), for
   // messages.
@@ -1574,46 +1612,15 @@ class Binder {
       const bool ordering = detail::one_of(name, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"});
       for (std::size_t i = 1; i < n; i++) check_comparable(ctx, node, ordering, types[0], types[i], what);
     }
-    // Result (§4.1).
-    StaticType result;
-    switch (sig->result) {
-      case fn::Result::Fixed:
-        result = sig->fixed;
-        break;
-      case fn::Result::LeastRestrictive:
-      case fn::Result::AtLeastDouble: {
-        bool known = n > 0;
-        TypeId t = TypeId::Integer;
-        for (const Typed& a : types) {
-          if (!a.type || !is_numeric(*a.type)) {
-            known = false;
-            break;
-          }
-          t = promote(t, *a.type);
-        }
-        if (known) {
-          if (sig->result == fn::Result::AtLeastDouble && t == TypeId::Integer) t = TypeId::Double;
-          result = t;
-        }
-        break;
-      }
-      case fn::Result::IfBranches: {
-        // D7: the common type of THEN and ELSE.
-        if (n >= 2) {
-          if (n == 2) {
-            result = types[1].type;
-          } else {
-            const CommonType c = least_restrictive(types[1].type, types[2].type);
-            if (c.status == Common::BooleanMixed)
-              error(code::kTypeBooleanMixed, ctx, node,
-                    "THEN is " + type_name(types[1].type) + " and ELSE is " + type_name(types[2].type) +
-                        ": no common type (Functions.html: boolean \"can not be mixed with other types\", Q7; D7)");
-            result = c.type;
-          }
-        }
-        break;
-      }
-    }
+    // Result (§4.1, typing.h apply_result_type, shared with the engine's load).
+    std::vector<StaticType> arg_types(n);
+    for (std::size_t i = 0; i < n; i++) arg_types[i] = types[i].type;
+    const ApplyType applied = apply_result_type(*sig, arg_types);
+    if (applied.boolean_mixed)
+      error(code::kTypeBooleanMixed, ctx, node,
+            "THEN is " + type_name(types[1].type) + " and ELSE is " + type_name(types[2].type) +
+                ": no common type (Functions.html: boolean \"can not be mixed with other types\", Q7; D7)");
+    const StaticType result = applied.type;
     // §3.4: "mapMissingTo, defaultValue (xs:string) parsed as the Apply's
     // result type".
     if (const auto mm = attr(node, "mapMissingTo")) strict_value(ctx, node, result, *mm, "mapMissingTo");
@@ -2113,7 +2120,10 @@ class Binder {
       // LocalTransformations must be unique from any other names in their
       // scope."
       if (const std::string clash = name_clash(m, key, /*outputs=*/false); !clash.empty()) {
-        if (shadow_warning(fctx, df, m, key, "LocalTransformations DerivedField", /*td_too=*/true)) continue;
+        if (shadow_warning(fctx, df, m, key, "LocalTransformations DerivedField", /*td_too=*/true)) {
+          m.local_shadows.emplace_back(key, type.type);
+          continue;
+        }
         error(code::kNameDuplicate, fctx, df,
               "name " + detail::quoted(*name) + " is already " + clash +
                   " (FieldScope.html: LocalTransformations names \"must be unique from any other names in their "
@@ -2245,7 +2255,14 @@ class Binder {
       // other names in their scope, i.e. within a model or model segment and
       // across all model segments in a model chain."
       if (const std::string clash = name_clash(m, key, /*outputs=*/true); !clash.empty()) {
-        if (shadow_warning(fctx, of, m, key, "OutputField", /*td_too=*/false)) continue;
+        if (shadow_warning(fctx, of, m, key, "OutputField", /*td_too=*/false)) {
+          // Its dataType without diagnostics: the field is not declared, and
+          // report mode never reported its attributes.
+          const auto dt = attr(of, "dataType");
+          const auto info = dt ? parse_datatype(*dt) : std::nullopt;
+          m.output_shadows.emplace_back(key, info ? StaticType(info->type) : StaticType{});
+          continue;
+        }
         error(code::kNameDuplicate, fctx, of,
               "name " + detail::quoted(*name) + " is already " + clash +
                   " (FieldScope.html: OutputField names \"must be unique from any other names in their scope\")");

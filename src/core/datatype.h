@@ -28,12 +28,20 @@ class DataType {
     BOOLEAN,
   };
 
-  // Every numeric type is carried as a double, except float, which keeps its
-  // float32 quantization. The PMML 4.4 date/time types are epoch-based
-  // numerics, so they are doubles too.
+  // Each of the five non-temporal dataTypes is its own value (design commit
+  // P2.4): DataDictionary.html, "The dataType reuses names and semantics of
+  // atomic types in XML Schema", and pmml-4-4.xsd's DATATYPE enumerates
+  // "integer" apart from "double", so an integer field is INTEGER, not a
+  // double with a side flag. Values are still the old Value, in which every
+  // number is a double (float keeps its float32 quantization only where a
+  // reader narrows it); INTEGER changes how a value is read (an input "3.5"
+  // is not an integer, MiningField::parse_input) and written (java_kind),
+  // not how it is stored. The PMML 4.4 date/time types are epoch-based
+  // numerics, carried as doubles until P10 (bind/typing.h parse_datatype
+  // maps them to Double too).
   static constexpr EnumEntry<DataTypeValue> TABLE[] = {
       {"string", DataTypeValue::STRING, "STRING"},
-      {"integer", DataTypeValue::DOUBLE, "DOUBLE"},
+      {"integer", DataTypeValue::INTEGER, "INTEGER"},
       {"float", DataTypeValue::FLOAT, "FLOAT"},
       {"double", DataTypeValue::DOUBLE, "DOUBLE"},
       {"boolean", DataTypeValue::BOOLEAN, "BOOLEAN"},
@@ -69,27 +77,15 @@ class DataType {
     return read_enum(node, "dataType", TABLE, when_absent);
   }
 
-  // dataType="integer" is carried as DOUBLE; this tells the two apart.
-  static bool is_integer(const XmlNode& node) {
-    return node.optional_attribute("dataType") == "integer";
-  }
-
-  // INTEGER is unreachable through read() (integer maps to DOUBLE) but is
-  // still a constructible enumerator, so it keeps its own spelling.
-  std::string to_string() const {
-    if (value == DataTypeValue::INTEGER) return "INTEGER";
-
-    return enum_display(value, TABLE, "MISSING");
-  }
+  std::string to_string() const { return enum_display(value, TABLE, "MISSING"); }
 };
 
 // The Java type a number of this dataType is written as (java_format.h):
-// integer (`integer`, which DataType carries as DOUBLE) as a long, float as a
-// float, boolean as true/false, every other numeric type -- the date and time
-// types included, which cPMML carries as doubles -- as a double. A string has
-// no number form; it is DOUBLE here and the caller writes its text instead.
-inline java::Kind java_kind(const DataType& datatype, const bool integer) {
-  if (integer) return java::Kind::INTEGER;
+// integer as a long, float as a float, boolean as true/false, every other
+// numeric type -- the date and time types included, which cPMML carries as
+// doubles -- as a double. A string has no number form; it is DOUBLE here and
+// the caller writes its text instead.
+inline java::Kind java_kind(const DataType& datatype) {
   switch (datatype.value) {
     case DataType::DataTypeValue::INTEGER:
       return java::Kind::INTEGER;

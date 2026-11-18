@@ -224,7 +224,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
     if (field.datatype.value == DataType::DataTypeValue::STRING) return value.svalue;
     // A float is carried as a double (MiningField::parse_input), so it is
     // written as one: Float.toString would round it.
-    const java::Kind kind = java_kind(field.datatype, field.integer);
+    const java::Kind kind = java_kind(field.datatype);
     return java::text({value.value, kind == java::Kind::FLOAT ? java::Kind::DOUBLE : kind});
   }
 

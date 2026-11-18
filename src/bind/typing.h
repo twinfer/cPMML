@@ -312,6 +312,77 @@ inline types::Value parse_constant(TypeId type, std::string_view text, types::Pa
   }
 }
 
+// ---------------------------------------------------------------- Apply result (§4.1)
+// The static type of an Apply of the built-in `sig` over arguments of static
+// types `args` (its EXPRESSION children after Extension*), by the table's
+// result rule. Functions.html: "functions are assumed to inherit the
+// dataType of the current input parameters unless otherwise specified ...
+// When the input parameters have multiple dataTypes, the least restrictive
+// dataType will be inherited by default ... The inheritance precedence for
+// mixed type input parameters is as follows: string double float integer";
+// "boolean dataTypes can not be mixed with other types in a defined function
+// without explicitly defining the expected output dataType". So:
+//   Fixed             the declared type of the pseudo-declaration
+//                     (BuiltinFunctions.html: round, floor, ceil and
+//                     stringLength return dataType="integer", the
+//                     predicates boolean, the string functions string,
+//                     exp/ln/log10/sqrt and the further mathematical and
+//                     distribution functions double);
+//   LeastRestrictive  §2.5 over the arguments, unknown when one is not a
+//                     number (a boolean or string operand, Q7, which the
+//                     binder reports);
+//   AtLeastDouble     the same, integer giving double (avg and median of
+//                     integers are not integers);
+//   IfBranches        D7: the common type of THEN and ELSE (THEN alone with
+//                     no ELSE); `boolean_mixed` when one is boolean and the
+//                     other is not (no common type, Q7).
+// Shared by the binder (Binder::bind_apply, which reports what it finds) and
+// the engine's load (engine_apply_type, below, and load_scope.h expression_type).
+struct ApplyType {
+  StaticType type;
+  bool boolean_mixed = false;  // IfBranches only: THEN and ELSE have no common type
+};
+
+inline ApplyType apply_result_type(const fn::Signature& sig, const std::vector<StaticType>& args) {
+  const std::size_t n = args.size();
+  switch (sig.result) {
+    case fn::Result::Fixed:
+      return {sig.fixed};
+    case fn::Result::LeastRestrictive:
+    case fn::Result::AtLeastDouble: {
+      if (n == 0) return {};
+      TypeId t = TypeId::Integer;
+      for (const StaticType& a : args) {
+        if (!is_numeric(a)) return {};
+        t = promote(t, *a);
+      }
+      if (sig.result == fn::Result::AtLeastDouble && t == TypeId::Integer) t = TypeId::Double;
+      return {t};
+    }
+    case fn::Result::IfBranches: {
+      if (n < 2) return {};
+      if (n == 2) return {args[1]};
+      const CommonType c = least_restrictive(args[1], args[2]);
+      return {c.type, c.status == Common::BooleanMixed};
+    }
+  }
+  return {};
+}
+
+// The result type the engine gives an Apply until design commit P2.6: the
+// table's rule (apply_result_type) for every function except `if`, which
+// keeps the engine's pre-P2.4 typing, the type of its THEN argument, unknown
+// with no THEN (BuiltinFunctions.html declares no result dataType for `if`:
+// `<DefineFunction name="if">` with `<ParameterField name="A"/>` and
+// `<ParameterField name="B"/>` untyped). D7 (the common type of THEN and
+// ELSE, which the binder reports) is B19, which the commit table closes in
+// P2.6 (`bind/typing.h`, `core/builtinfunctions.h`); P2.4, a refactoring
+// commit, does not change it. P2.6 deletes this function.
+inline StaticType engine_apply_type(const fn::Signature& sig, const std::vector<StaticType>& args) {
+  if (sig.result == fn::Result::IfBranches) return args.size() > 1 ? args[1] : StaticType{};
+  return apply_result_type(sig, args).type;
+}
+
 // ---------------------------------------------------------------- Array content
 // Array (pmml-4-4.xsd, "ArrayType"): values separated by blanks; a value with
 // blanks is in double quotes, and a backslash escapes the next character.

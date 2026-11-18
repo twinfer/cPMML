@@ -164,7 +164,7 @@ class XmlNode {
   bool is_empty() const { return node.empty(); }
 
   // The underlying pugixml node, for load-time lookups across the document
-  // (BuiltInFunction::field_kind finds the dataType a FieldRef names).
+  // (bind::expression_type types an Apply's arguments from the binder).
   pugi::xml_node xml() const { return node; }
 
  private:

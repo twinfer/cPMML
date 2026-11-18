@@ -95,32 +95,20 @@ class Apply : public Expression {
   // §3.4: Apply "mapMissingTo, defaultValue (xs:string) parsed as the
   // **Apply's** result type", not the enclosing DerivedField's (B11): they
   // stand for the function's result, so they are kept in its representation,
-  // as the values the function returns are. The result type is the one the
-  // engine gives the Apply today (BuiltInFunction::expression_kind; P2.4 puts
-  // the binder's in its place); a string result has no java::Kind. Stored as
-  // cpmml::bind::slot_constant says: `concat` with mapMissingTo="5" in a
-  // double DerivedField gives the double 5, as does `if` with
-  // defaultValue="5" over an untyped MapValues, which expression_kind types as
-  // a string; `+` with mapMissingTo="5" in a string DerivedField gives the
-  // string "5" that keeps its number 5 (decided 2026-11-18, §9; JPMML 1.7.7
-  // and the base build agree).
+  // as the values the function returns are. The result type is the binder's
+  // (design commit P2.4, bind::expression_type: the function table's result
+  // rule over the arguments' static types). Where the binder does not know
+  // it (arithmetic over a boolean or string operand, Q7, reported in report
+  // mode and not yet a load error) the text is read as a double, the type the
+  // function computes in. Stored as cpmml::bind::slot_constant says: `concat`
+  // with mapMissingTo="5" in a double DerivedField gives the double 5, as
+  // does `if` with defaultValue="5" over an untyped MapValues; `+` with
+  // mapMissingTo="5" in a string DerivedField gives the string "5" that keeps
+  // its number 5 (decided 2026-11-18, §9; JPMML 1.7.7 and the base build
+  // agree).
   static Value result_constant(const XmlNode& node, const std::string& attribute, const DataType& slot) {
     using cpmml::bind::TypeId;
-    TypeId type = TypeId::String;
-    if (const auto kind = BuiltInFunction::expression_kind(node.xml())) switch (*kind) {
-        case java::Kind::INTEGER:
-          type = TypeId::Integer;
-          break;
-        case java::Kind::FLOAT:
-          type = TypeId::Float;
-          break;
-        case java::Kind::DOUBLE:
-          type = TypeId::Double;
-          break;
-        case java::Kind::BOOLEAN:
-          type = TypeId::Boolean;
-          break;
-      }
+    const TypeId type = cpmml::bind::expression_type(node).value_or(TypeId::Double);
     return cpmml::bind::slot_constant(node, attribute, node.required_attribute(attribute), type, slot);
   }
 

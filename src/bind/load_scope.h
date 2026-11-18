@@ -22,8 +22,8 @@
  *     which threw std::out_of_range ("unordered_map::at: key not found");
  *   - today's Indexer slot for the name (Indexer::get_or_set): slots are
  *     still one flat name space until P7;
- *   - the binding's static type as the engine's DataType (integer and the
- *     temporal types are carried as DOUBLE, as DataType::read does).
+ *   - the binding's static type as the engine's DataType (the temporal
+ *     types are carried as DOUBLE, as DataType::read does).
  *
  * A name that resolves nowhere is a load error naming the field and the model
  * (E-SCOPE-UNRESOLVED), where the Indexer threw std::out_of_range.
@@ -160,8 +160,9 @@ class LoadScope {
   mutable std::unique_ptr<pugi::xml_document> blanks_doc_;  // lone_blanks, parsed on demand
 };
 
-// The engine's DataType of a static type (core/datatype.h: integer and the
-// temporal types are carried as DOUBLE).
+// The engine's DataType of a static type (core/datatype.h: integer is its
+// own value since P2.4; the temporal types are Double here, as
+// parse_datatype gives them, until P10).
 inline DataType engine_type(TypeId t) {
   switch (t) {
     case TypeId::String:
@@ -170,9 +171,15 @@ inline DataType engine_type(TypeId t) {
       return DataType::DataTypeValue::FLOAT;
     case TypeId::Boolean:
       return DataType::DataTypeValue::BOOLEAN;
-    default:
+    case TypeId::Integer:
+      return DataType::DataTypeValue::INTEGER;
+    case TypeId::Double:
       return DataType::DataTypeValue::DOUBLE;
+    case TypeId::Missing:
+    case TypeId::Invalid:
+      break;
   }
+  throw std::logic_error("engine_type: a sentinel is not a static type");
 }
 
 struct ResolvedField {
@@ -216,7 +223,7 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
 // type): what P2.2 changes is which type that is (the field's, from
 // scope_resolve, not the enclosing DerivedField's).
 
-// The engine type's TypeId (integer and the temporal types are DOUBLE).
+// The engine type's TypeId (the temporal types are DOUBLE).
 inline TypeId type_id(const DataType& t) {
   switch (t.value) {
     case DataType::DataTypeValue::STRING:
@@ -434,6 +441,132 @@ inline bool is_nan_key(const std::string& text, const DataType& field_type) {
   double d = 0;
   return lexical::parse_double(text, d) && std::isnan(d);
 }
+
+// ---------------------------------------------------------------- node types (P2.4)
+//
+// Design commit P2.4: the static type of an expression element, which the
+// engine's load reads where it used to re-walk the document
+// (BuiltInFunction::expression_kind, deleted): an Apply's argument and
+// result types (expression/apply.h, core/builtinfunctions.h) and the type of
+// a transformedValue's expression (output/transformedvalue.h). Load mode
+// does not type expression bodies (Binder::resolve_expression_names), so the
+// types are worked out on demand here by the binder's §3.4 rows, element by
+// element as Binder::bind_expression gives them in report mode, with the
+// binder's own scope lookup for FieldRef and its typing.h rules for Constant
+// and Apply, and no diagnostics (report mode reports them):
+//   Constant         its dataType (a temporal one is Double until P10); with
+//                    none, the dataType of the built-in parameter it is
+//                    passed to, when the pseudo-declaration gives one (S2,
+//                    inherited_constant_type); else infer_constant
+//                    (Transformations.html: "A Constant that consists solely
+//                    of numbers will be treated as an integer, if a decimal
+//                    point is present among the numbers the Constant will be
+//                    treated as a double ... The presence of any non-numeric
+//                    characters ... will result in the Constant being
+//                    treated as a string");
+//   FieldRef         T(field), the type of the binding the name refers to
+//                    from the FieldRef (Binder::lookup, FieldScope.html), or
+//                    of the undeclared LocalTransformations DerivedField or
+//                    OutputField that shadows it and whose value the engine
+//                    reads (Binder::value_type: a name already a MiningField
+//                    or TransformationDictionary DerivedField, accepted with
+//                    a warning),
+//                    widened to the least restrictive with its mapMissingTo
+//                    text's type when §3.4 rule 2 reads that text as a double
+//                    (bind_fieldref);
+//   NormContinuous, NormDiscrete, TextIndex
+//                    double (§3.4);
+//   Discretize, MapValues
+//                    their dataType, else the nearest enclosing declared type
+//                    (D21: the dataType of the DerivedField or OutputField
+//                    the element is in; unknown in an OutputField without
+//                    one, as the binder's ctx.enclosing is for a
+//                    transformedValue or decision);
+//   Apply            apply_result_type over its arguments (§4.1), except
+//                    that `if` is the type of its THEN argument until P2.6
+//                    (engine_apply_type, B19; the binder's D7 is reported in
+//                    report mode); unknown for a function that is not a
+//                    built-in (the engine refuses it at load);
+//   anything else    unknown (Aggregate, Lag: refused at load).
+// Unknown (nullopt) is a type the binder does not give either: a boolean or
+// string operand of arithmetic (Q7, E-TYPE-BOOLEAN-MIXED / E-TYPE-PARAM in
+// report mode, not yet load errors), a FieldRef to an OutputField without a
+// dataType whose type the binder cannot infer. Each caller says what it does
+// with it.
+
+// The type the dataType attribute of `node` names (temporal: Double, as
+// parse_datatype gives it), or nullopt when it has none or it is not a
+// DATATYPE (the element's own reader refuses that).
+inline StaticType datatype_attribute(pugi::xml_node node) {
+  const pugi::xml_attribute a = node.attribute("dataType");
+  if (!a) return std::nullopt;
+  const auto info = parse_datatype(a.value());
+  return info ? StaticType(info->type) : std::nullopt;
+}
+
+// The position of `node` among the arguments of the Apply holding it (its
+// element siblings after Extension*).
+inline std::size_t argument_position(pugi::xml_node node) {
+  std::size_t i = 0;
+  for (pugi::xml_node s = node.previous_sibling(); s; s = s.previous_sibling())
+    if (s.type() == pugi::node_element && std::strcmp(s.name(), "Extension") != 0) i++;
+  return i;
+}
+
+inline StaticType expression_type(pugi::xml_node node) {
+  const LoadScope* scope = LoadScope::current();
+  if (!scope) throw std::logic_error("expression_type outside a model load");
+  const std::string_view n = node.name();
+  if (n == "Constant") {
+    if (node.attribute("dataType")) return datatype_attribute(node);
+    const pugi::xml_node parent = node.parent();
+    if (std::strcmp(parent.name(), "Apply") == 0)
+      if (const StaticType inherited =
+              inherited_constant_type(parent.attribute("function").value(), argument_position(node)))
+        return inherited;
+    switch (infer_constant(node.text().get())) {
+      case ConstantKind::Integer:
+      case ConstantKind::IntegerOverflow:  // a load error of the Constant's own reader (D4)
+        return TypeId::Integer;
+      case ConstantKind::Double:
+        return TypeId::Double;
+      case ConstantKind::String:
+        break;
+    }
+    return TypeId::String;
+  }
+  if (n == "FieldRef") {
+    StaticType t = scope->binder().value_type(node, node.attribute("field").value());
+    if (!t) return std::nullopt;
+    if (const pugi::xml_attribute mm = node.attribute("mapMissingTo")) {
+      types::StringPool pool;
+      types::ParseContext ctx{&pool, nullptr, nullptr};
+      if (read_document_text(*t, mm.value(), ctx).rule == TextRule::AsDouble)
+        t = least_restrictive(t, TypeId::Double).type;
+    }
+    return t;
+  }
+  if (n == "NormContinuous" || n == "NormDiscrete" || n == "TextIndex") return TypeId::Double;
+  if (n == "Discretize" || n == "MapValues") {
+    if (node.attribute("dataType")) return datatype_attribute(node);
+    for (pugi::xml_node p = node.parent(); p && p.type() == pugi::node_element; p = p.parent()) {
+      const std::string_view pn = p.name();
+      if (pn == "DerivedField" || pn == "OutputField") return datatype_attribute(p);
+    }
+    return std::nullopt;
+  }
+  if (n == "Apply") {
+    const fn::Signature* sig = fn::find(node.attribute("function").value());
+    if (!sig) return std::nullopt;
+    std::vector<StaticType> args;
+    for (pugi::xml_node c : node.children())
+      if (c.type() == pugi::node_element && std::strcmp(c.name(), "Extension") != 0) args.push_back(expression_type(c));
+    return engine_apply_type(*sig, args);
+  }
+  return std::nullopt;
+}
+
+inline StaticType expression_type(const XmlNode& node) { return expression_type(node.xml()); }
 
 }  // namespace cpmml::bind
 
