@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/enum_parser.h"
 #include "core/internal_model.h"
@@ -130,7 +131,8 @@ class GeneralRegressionModel : public InternalModel {
     }
     if (node.exists_attribute("offsetVariable")) {
       has_offset_variable = true;
-      offset_variable_index = indexer->get_index(node.required_attribute("offsetVariable"));
+      offset_variable_index =
+          cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("offsetVariable")).index;
     }
 
     parse_factors(node);
@@ -268,12 +270,14 @@ class GeneralRegressionModel : public InternalModel {
 
       PPCell pc;
       pc.predictor_name = pred;
-      pc.predictor_index = indexer->get_index(pred);
+      // scope.resolve (P2.1): the predictor's slot and declared type.
+      const auto field = cpmml::bind::scope_resolve(*indexer, cell, pred);
+      pc.predictor_index = field.index;
       pc.value = val;
       pc.is_factor = is_factor;
       // Read at load, while the model's Indexer still interns: a string level
       // gets its own code, which no string the model never names can share.
-      if (is_factor) pc.level = Value(val, indexer->get_type(pc.predictor_index));
+      if (is_factor) pc.level = Value(val, field.datatype);
 
       pp_matrix[param].push_back(std::move(pc));
     }

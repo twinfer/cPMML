@@ -43,6 +43,12 @@ class InternalEvaluator {
   DataDictionary data_dictionary;
   bool hasPreprocessing = false;
   TransformationDictionary transformation_dictionary;
+  // The binder that resolved the model's names at load (core/modelbuilder.h,
+  // typed-core P2.1), kept with the model and not read after the load: freed
+  // after the load, its memory was reused by every record's temporaries and
+  // cost the small regression models 2-6% per record. P7 makes its scopes
+  // the engine's.
+  std::shared_ptr<const void> load_scope;
 
   InternalEvaluator() = default;
 

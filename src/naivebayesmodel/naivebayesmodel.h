@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
 #include "core/transformationdictionary.h"
@@ -105,7 +106,7 @@ class NaiveBayesModel : public InternalModel {
                     const std::shared_ptr<Indexer>& indexer) {
     for (const auto& bi : node.get_child("BayesInputs").get_childs("BayesInput")) {
       const std::string field = bi.required_attribute("fieldName");
-      const size_t idx = indexer->get_index(field);
+      const size_t idx = cpmml::bind::scope_resolve(*indexer, bi, field).index;  // scope.resolve (P2.1)
 
       // Discrete: PairCounts → PairValueCounts → TargetValueCounts
       if (bi.exists_child("PairCounts")) {

@@ -7,13 +7,14 @@
 #ifndef CPMML_MODELBUILDER_H
 #define CPMML_MODELBUILDER_H
 
-#include <pugixml.hpp>
 #include <memory>
+#include <pugixml.hpp>
 #include <string>
 
 #include "anomalydetectionmodel/anomalydetectionevaluator.h"
 #include "associationmodel/associationevaluator.h"
 #include "baselinemodel/baselinemodel.h"
+#include "bind/load_scope.h"
 #include "clusteringmodel/clusteringmodel.h"
 #include "datadictionary.h"
 #include "ensemblemodel/ensemblemodel.h"
@@ -48,6 +49,14 @@ class ModelBuilder {
     if (!result) throw cpmml::ParsingException(std::string("XML parsing error: ") + result.description());
 
     XmlNode xmlNode(document.child("PMML"));
+    // The binder decides names and scopes at load (docs/design/typed-core.md
+    // P2.1, bind/load_scope.h): its errors of names and scopes fail the load,
+    // and while the model is built every field reference is resolved through
+    // it (scope_resolve).
+    const auto scope = std::make_shared<const cpmml::bind::LoadScope>(
+        document.child("PMML"), std::string_view(file_data.data(), file_data.size()));
+    scope->check();
+    const cpmml::bind::LoadScope::Active active_scope(*scope);
     // Parse-time indexer scope guard: evaluator constructors set
     // Value::active_indexer (via make_and_activate_indexer); this guard
     // restores the previous value on every exit path so the thread-local never
@@ -66,6 +75,7 @@ class ModelBuilder {
     // Parsing is done: freeze the per-model string map so concurrent scoring
     // threads can read it without synchronization.
     if (evaluator->indexer) evaluator->indexer->freeze();
+    evaluator->load_scope = scope;
 
     return evaluator;
   }

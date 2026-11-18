@@ -9,6 +9,7 @@
 
 #define SET_THRESHOLD 150
 
+#include "bind/load_scope.h"
 #include "datadictionary.h"
 #include "miningschema.h"
 #include "predicatetype.h"
@@ -68,20 +69,19 @@ class PredicateBuilder {
       case PredicateType::PredicateTypeValue::SIMPLE: {
         const Op op = read_enum(node, "operator", PredicateOpType::SIMPLE_OPERATOR_TABLE);
         // isMissing / isNotMissing have no value attribute
-        const std::string field = node.required_attribute("field");
-        if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(indexer->get_index(field), op, Value());
+        // scope.resolve (P2.1): the field's declared type even when it is
+        // declared after this predicate's model element builds it (B12).
+        const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
+        if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(index, op, Value());
         // Every other operator compares with value (Predicates.html).
-        return Predicate(indexer->get_index(field), op,
-                         Value(node.required_attribute("value"), indexer->get_type(field)));
+        return Predicate(index, op, Value(node.required_attribute("value"), datatype));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
         std::vector<std::string> values = parse_array(node.get_child("Array").value());
-        const std::string field = node.required_attribute("field");
-        if (values.size() > SET_THRESHOLD)
-          return Predicate(indexer->get_index(field), op,
-                           Value::createUnorderedValues(values, indexer->get_type(field)));
-        return Predicate(indexer->get_index(field), op, Value::createValues(values, indexer->get_type(field)));
+        const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
+        if (values.size() > SET_THRESHOLD) return Predicate(index, op, Value::createUnorderedValues(values, datatype));
+        return Predicate(index, op, Value::createValues(values, datatype));
       }
       case PredicateType::PredicateTypeValue::COMPOUND: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::COMPOUND_OPERATOR_TABLE);

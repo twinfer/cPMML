@@ -1,18 +1,21 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 380
+# documents: 388
 # E-KEY-NAN: 1
-# E-NAME-DUPLICATE: 9
 # E-REQUIRED: 1
-# E-SCOPE-UNRESOLVED: 2
+# E-SCOPE-UNRESOLVED: 1
 # E-TYPE-BOOLEAN-MIXED: 3
 # U-ELEMENT: 25
 # W-CAST-LOSSY: 113
 # W-CAST-NARROWING: 15
+# W-FORWARD-REF: 10
+# W-NAME-SHADOWS-MININGFIELD: 6
+# W-NAME-SHADOWS-TD: 3
 # W-OUTPUT-NO-DATATYPE: 4
+# W-SCOPE-FLAT: 1
 # W-SCOPE-IMPLICIT: 8
 # W-TEXT-WIDENED: 26
-benchmark/data/model/AuditTree.xml:88	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+benchmark/data/model/AuditTree.xml:88	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": OutputField name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 benchmark/data/model/HousingGBTRegressor.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
 benchmark/data/model/HousingGBTRegressor.xml:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
 benchmark/data/model/HousingGBTRegressor.xml:175	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
@@ -77,13 +80,13 @@ benchmark/data/model/HousingRFRegressor_PCA.xml:662	W-CAST-LOSSY	1	MiningModel	D
 benchmark/data/model/HousingRFRegressor_PCA.xml:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
 benchmark/data/model/HousingRFRegressor_PCA.xml:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
 benchmark/data/model/HousingRFRegressor_PCA.xml:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
-benchmark/data/model/IrisMultinomReg.xml:28	E-NAME-DUPLICATE	1	RegressionModel "Multinom_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
-benchmark/data/model/IrisTree.xml:36	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+benchmark/data/model/IrisMultinomReg.xml:28	W-NAME-SHADOWS-MININGFIELD	1	RegressionModel "Multinom_Model"	OutputField "class": OutputField name "class" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
+benchmark/data/model/IrisTree.xml:36	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "class": OutputField name "class" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 benchmark/data/model/ensemble_audit_dectree.xml:704	W-TEXT-WIDENED	2	MiningModel > Segment #8 > TreeModel "DecisionTree"	SimplePredicate "Age": value="35.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
 benchmark/data/model/ensemble_audit_dectree.xml:828	W-TEXT-WIDENED	2	MiningModel > Segment #10 > TreeModel "DecisionTree"	SimplePredicate "Age": value="27.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
 benchmark/data/model/single_audit_dectree.xml:147	W-TEXT-WIDENED	2	TreeModel "DecisionTree"	SimplePredicate "Age": value="33.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/ARIMA_DynReg.zip:17	E-SCOPE-UNRESOLVED	1	TimeSeriesModel "ARIMA_DynReg"	DynamicRegressor: field "x" is not in scope
-test/data/model/AuditTree.zip:88	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/AuditTree.zip:88	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": OutputField name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 test/data/model/HousingGBTClassifier.zip:58	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
 test/data/model/HousingGBTClassifier.zip:207	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
 test/data/model/HousingGBTClassifier.zip:210	W-CAST-LOSSY	1	MiningModel > Segment "1" > MiningModel	DerivedField "float(standard_scaler(latitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
@@ -148,21 +151,21 @@ test/data/model/HousingRFRegressor_PCA.zip:662	W-CAST-LOSSY	1	MiningModel	Derive
 test/data/model/HousingRFRegressor_PCA.zip:665	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[2])": declares float over an expression of type double: the value is rounded to float (§2.6)
 test/data/model/HousingRFRegressor_PCA.zip:668	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[3])": declares float over an expression of type double: the value is rounded to float (§2.6)
 test/data/model/HousingRFRegressor_PCA.zip:671	W-CAST-LOSSY	1	MiningModel	DerivedField "float(pca@1[4])": declares float over an expression of type double: the value is rounded to float (§2.6)
-test/data/model/IrisMultinomReg.zip:28	E-NAME-DUPLICATE	1	RegressionModel "Multinom_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/IrisMultinomReg.zip:28	W-NAME-SHADOWS-MININGFIELD	1	RegressionModel "Multinom_Model"	OutputField "class": OutputField name "class" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 test/data/model/IrisNaiveBayes.zip:51	E-REQUIRED	1	NaiveBayesModel	BayesOutput: attribute fieldName is required (pmml-4-4.xsd)
 test/data/model/IrisText.zip:34	U-ELEMENT	1	TextModel	ClassLabels: not typed by the binder (no binder rule for it yet); 1 occurrence
-test/data/model/IrisTree.zip:36	E-NAME-DUPLICATE	1	TreeModel "RPart_Model"	OutputField "class": name "class" is already a MiningField of this model (FieldScope.html: OutputField names "must be unique from any other names in their scope")
+test/data/model/IrisTree.zip:36	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "class": OutputField name "class" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 test/data/model/ensemble_audit_dectree.zip:704	W-TEXT-WIDENED	2	MiningModel > Segment #8 > TreeModel "DecisionTree"	SimplePredicate "Age": value="35.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/ensemble_audit_dectree.zip:828	W-TEXT-WIDENED	2	MiningModel > Segment #10 > TreeModel "DecisionTree"	SimplePredicate "Age": value="27.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_anomaly_clustermeandist.zip:35	W-SCOPE-IMPLICIT	1	AnomalyDetectionModel "AnomalyOnKmeans"	MiningField "anomalyScore": field "anomalyScore" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
-test/data/model/fix_derivedfield_shadow.zip:26	E-NAME-DUPLICATE	1	RegressionModel "Shadow"	DerivedField "d": name "d" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope")
+test/data/model/fix_derivedfield_shadow.zip:26	W-NAME-SHADOWS-TD	1	RegressionModel "Shadow"	DerivedField "d": LocalTransformations DerivedField name "d" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope"; accepted, P2.1)
 test/data/model/fix_derivedfield_shadow.zip:31	W-SCOPE-IMPLICIT	1	RegressionModel "Shadow"	NumericPredictor "d": TransformationDictionary DerivedField "d" reads DataField "z", which is not a MiningField of this model (FieldScope.html: an instantiated TD field "can only reference: MiningFields from the MiningSchema of that model element"; accepted, Q3)
 test/data/model/fix_ensemble_chain_display_last.zip:31	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
 test/data/model/fix_ensemble_chain_display_mid.zip:29	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
 test/data/model/fix_ensemble_chain_display_nested.zip:37	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
 test/data/model/fix_ensemble_chain_display_top.zip:37	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
-test/data/model/fix_ensemble_localtrans_scope.zip:4	E-SCOPE-UNRESOLVED	1	MiningModel	MiningField "d": field "d" is not in scope
-test/data/model/fix_ensemble_localtrans_shadow.zip:4	E-NAME-DUPLICATE	2	MiningModel > Segment "0" > RegressionModel (+1 more)	DerivedField "g": name "g" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope")
+test/data/model/fix_ensemble_localtrans_scope.zip:4	W-SCOPE-FLAT	1	MiningModel	MiningField "d": field "d" is not in the parent model's scope; it is a DerivedField of MiningModel > Segment "0" > RegressionModel (MiningSchema.html: "must refer to a field in the scope of the parent of the MiningSchema's model element"; accepted until P7, B14)
+test/data/model/fix_ensemble_localtrans_shadow.zip:4	W-NAME-SHADOWS-TD	2	MiningModel > Segment "0" > RegressionModel (+1 more)	DerivedField "g": LocalTransformations DerivedField name "g" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope"; accepted, P2.1)
 test/data/model/fix_ensemble_outputs_selectall_values.zip:44	W-CAST-LOSSY	2	MiningModel > Segment "1" > RegressionModel (+1 more)	OutputField "f": declares float over its expression of type double: the value is rounded to float (§2.6)
 test/data/model/fix_ensemble_segtarget_chaindisplay.zip:28	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
 test/data/model/fix_ensemble_segtarget_chainprior.zip:26	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "c": field "c" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
@@ -170,6 +173,16 @@ test/data/model/fix_format_classification_double.zip:20	W-OUTPUT-NO-DATATYPE	1	R
 test/data/model/fix_format_classification_double.zip:24	W-CAST-LOSSY	1	RegressionModel	OutputField "p1_f": declares float over a probability of type double: the value is rounded to float (§2.6)
 test/data/model/fix_format_regression_float.zip:23	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
 test/data/model/fix_format_regression_integer.zip:23	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
+test/data/model/fix_forward_ref_derivedfield.zip:13	W-FORWARD-REF	1		NormDiscrete "late" in DerivedField "nd": DerivedField "late" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_derivedfield.zip:14	W-FORWARD-REF	1		FieldColumnPair "tw" in DerivedField "tm": DerivedField "tw" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_derivedfield.zip:27	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w1" in DerivedField "x": DerivedField "w1" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_derivedfield.zip:27	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w2" in DerivedField "x": DerivedField "w2" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_fuzz_c000049.zip:4	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w" in DerivedField "x": DerivedField "w" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_fuzz_c000104.zip:4	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w" in DerivedField "x": DerivedField "w" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_fuzz_c000494.zip:4	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w" in DerivedField "x": DerivedField "w" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_fuzz_c000580.zip:4	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "w" in DerivedField "x": DerivedField "w" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_output.zip:16	W-FORWARD-REF	1	RegressionModel	FieldColumnPair "late" in OutputField "o": OutputField "late" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
+test/data/model/fix_forward_ref_tree.zip:15	W-FORWARD-REF	1	TreeModel	FieldColumnPair "w" in DerivedField "x": DerivedField "w" is declared after the reference (FieldScope.html: "Forward referencing of fields is not allowed"; accepted, Q4/D12)
 test/data/model/fix_mapvalues_nan_key.zip:2	E-KEY-NAN	1		row in DerivedField "x": a NaN key matches no input (§2.7, D26: a NaN key is a load error)
 test/data/model/fix_output_boolean_class_text.zip:17	W-CAST-NARROWING	1	TreeModel	OutputField "pv": declares boolean over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_boolean_class_text.zip:18	W-CAST-NARROWING	1	TreeModel	OutputField "pvi": declares integer over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)

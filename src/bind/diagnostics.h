@@ -33,7 +33,8 @@
  * W-ORDINAL-STRING-NO-VALUES, W-SLOT-WIDENED); the others are listed below
  * with the rule each stands for.
  *
- * Nothing in the engine includes this header (P1.2).
+ * Since P2.1 the engine binds every document at load through
+ * bind/load_scope.h (Binder::Mode::Load).
  */
 
 #include <cstddef>
@@ -129,6 +130,18 @@ inline constexpr std::string_view kCastLossy = "W-CAST-LOSSY";
 // outside the model's MiningSchema (FieldScope.html: "In general, field names
 // in PMML should be unique"; no naming rule forbids it).
 inline constexpr std::string_view kNameShadowsDataField = "W-NAME-SHADOWS-DATAFIELD";
+// A LocalTransformations DerivedField or OutputField named like a MiningField
+// of the same model: FieldScope.html forbids it, real exporters write it and
+// JPMML scores it (decided 2026-11-18, design §9).
+inline constexpr std::string_view kNameShadowsMiningField = "W-NAME-SHADOWS-MININGFIELD";
+// A LocalTransformations DerivedField named like a TransformationDictionary
+// DerivedField: forbidden by the same rule, kept as a warning in P2.1 because
+// documents that load today must keep loading.
+inline constexpr std::string_view kNameShadowsTD = "W-NAME-SHADOWS-TD";
+// A sub-model MiningField that names nothing in the parent model's scope but
+// a field declared elsewhere in the document, which the engine's flat name
+// space reaches today (B14/B16, P7): kept as a warning in P2.1.
+inline constexpr std::string_view kScopeFlat = "W-SCOPE-FLAT";
 // OutputField without the XSD-required dataType (§3.4: "inferred with
 // warning when absent, as today").
 inline constexpr std::string_view kOutputNoDataType = "W-OUTPUT-NO-DATATYPE";

@@ -34,6 +34,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -158,8 +159,30 @@ void rule_cases() {
          pmml(kNum, td(derived("x", "double", ref("y"))) + regression(kMining)), {"E-NAME-DUPLICATE"});
   expect("miningfield-duplicate", "FieldScope.html: \"The names of MiningFields cannot be re-used\"",
          pmml(kNum, regression(kMining + mf("x"))), {"E-NAME-DUPLICATE"});
-  expect("local-duplicates-miningfield", "FieldScope.html: LocalTransformations names \"must be unique\"",
-         pmml(kNum, regression(kMining, lt(derived("x", "double", ref("y"))))), {"E-NAME-DUPLICATE"});
+  // FieldScope.html: LocalTransformations and OutputField names "must be
+  // unique from any other names in their scope"; a name equal to a MiningField
+  // of the same model is a warning (decided 2026-11-18: AuditTree, IrisTree,
+  // IrisMultinomReg), and so is a LocalTransformations DerivedField named like
+  // a TD DerivedField (P2.1: fix_derivedfield_shadow loads today).
+  expect("local-duplicates-miningfield", "FieldScope.html: LocalTransformations names \"must be unique\" (warning)",
+         pmml(kNum, regression(kMining, lt(derived("x", "double", ref("y"))))), {"W-NAME-SHADOWS-MININGFIELD"});
+  expect("output-duplicates-miningfield", "FieldScope.html: OutputField names \"must be unique\" (warning)",
+         pmml(kNum, regression(kMining,
+                               "<Output><OutputField name=\"y\" dataType=\"double\" "
+                               "feature=\"predictedValue\"/></Output>")),
+         {"W-NAME-SHADOWS-MININGFIELD"});
+  expect("local-duplicates-td", "FieldScope.html: LocalTransformations names \"must be unique\" (warning, P2.1)",
+         pmml(kNum, td(derived("d", "double", ref("x"))) + regression(kMining, lt(derived("d", "double", ref("y"))))),
+         {"W-NAME-SHADOWS-TD"});
+  expect("output-duplicates-td", "FieldScope.html: OutputField names \"must be unique\"",
+         pmml(kNum,
+              td(derived("d", "double", ref("x"))) + regression(kMining,
+                                                                "<Output><OutputField name=\"d\" dataType=\"double\" "
+                                                                "feature=\"predictedValue\"/></Output>")),
+         {"E-NAME-DUPLICATE"});
+  expect("local-duplicate", "FieldScope.html: LocalTransformations names \"must be unique\"",
+         pmml(kNum, regression(kMining, lt(derived("d", "double", ref("x")) + derived("d", "double", ref("y"))))),
+         {"E-NAME-DUPLICATE"});
   expect("output-duplicates-local", "FieldScope.html: OutputField names \"must be unique\"",
          pmml(kNum, regression(kMining,
                                "<Output><OutputField name=\"d\" dataType=\"double\" "
@@ -204,6 +227,16 @@ void rule_cases() {
                         "</Segment><Segment id=\"2\"><True/>" + regression(kMining + mf("o1"), "", "s2") +
                         "</Segment></Segmentation></MiningModel>\n"),
          {"E-SCOPE-UNRESOLVED"});
+  // A sub-model MiningField naming an earlier segment's LocalTransformations
+  // field: not in the parent's scope, but today's flat name space reads it
+  // (fix_ensemble_localtrans_scope), so P2.1 keeps it as a warning.
+  expect("chain-sibling-local-flat", "MiningSchema.html: \"must refer to a field in the scope of the parent\" (B14)",
+         pmml(kNum, "<MiningModel functionName=\"regression\"><MiningSchema>" + kMining +
+                        "</MiningSchema><Segmentation multipleModelMethod=\"modelChain\"><Segment id=\"1\"><True/>" +
+                        regression(kMining, lt(derived("d", "double", ref("x"))), "s1") +
+                        "</Segment><Segment id=\"2\"><True/>" + regression(kMining + mf("d"), "", "s2") +
+                        "</Segment></Segmentation></MiningModel>\n"),
+         {"W-SCOPE-FLAT"});
   expect("chain-output-read-by-parent-output", "FieldScope.html modelChain (B15)",
          pmml(kNum, "<MiningModel functionName=\"regression\"><MiningSchema>" + kMining +
                         "</MiningSchema><Output><OutputField name=\"top\" dataType=\"double\" "
@@ -582,6 +615,131 @@ void rule_cases() {
   }
 }
 
+// ---------------------------------------------------------------- Load mode (P2.1)
+// The binder the engine runs at load: declarations and transformation bodies,
+// no model bodies; the engine resolves a model body's names with lookup().
+struct Loaded {
+  std::string text;
+  pugi::xml_document doc;
+  std::unique_ptr<Binder> binder;
+  explicit Loaded(std::string t) : text(std::move(t)) {
+    doc.load_buffer(text.data(), text.size());
+    binder = std::make_unique<Binder>(doc.child("PMML"), text, Binder::Mode::Load);
+  }
+  pugi::xml_node node(const char* xpath) const { return doc.select_node(xpath).node(); }
+  const cpmml::bind::Binding* lookup(const char* xpath, const char* name) const {
+    return binder->lookup(node(xpath), name);
+  }
+};
+
+void load_cases() {
+  using cpmml::bind::Origin;
+  using cpmml::types::TypeId;
+  const char* rule = "FieldScope.html, §3.2 lookup order; §3.5 two-phase declarations";
+  {
+    // A TreeModel whose LocalTransformations field x reads w, declared after
+    // it (B12), and whose predicates test both.
+    const Loaded l(pmml(kNum, "<TreeModel modelName=\"t\" functionName=\"classification\">\n<MiningSchema>" + kTree +
+                                  "<MiningField name=\"c\" usageType=\"target\"/></MiningSchema>\n<Output>"
+                                  "<OutputField name=\"o\" dataType=\"string\" feature=\"predictedValue\"/>"
+                                  "<OutputField name=\"o2\" dataType=\"string\" feature=\"transformedValue\">" +
+                                  ref("o") + "</OutputField></Output>" +
+                                  lt(derived("xx", "double",
+                                             "<MapValues outputColumn=\"v\" dataType=\"double\">"
+                                             "<FieldColumnPair field=\"w\" column=\"k\"/><InlineTable><row><k>3</k>"
+                                             "<v>1</v></row></InlineTable></MapValues>") +
+                                     derived("w", "integer", ref("i"))) +
+                                  "<Node score=\"a\"><True/><Node score=\"a\"><SimplePredicate field=\"xx\" "
+                                  "operator=\"equal\" value=\"1\"/></Node><Node score=\"b\"><SimplePredicate "
+                                  "field=\"nope\" operator=\"equal\" value=\"1\"/></Node></Node>\n</TreeModel>\n"));
+    const auto* w = l.lookup("//FieldColumnPair", "w");
+    check(w && w->origin == Origin::DerivedField && w->type.type == TypeId::Integer,
+          "Load: a forward FieldColumnPair reference has the later field's declared type (B12)", rule);
+    const auto* xx = l.lookup("//SimplePredicate", "xx");
+    check(xx && xx->origin == Origin::DerivedField && xx->type.type == TypeId::Double,
+          "Load: a predicate resolves to M's LocalTransformations (step 2)", rule);
+    const auto* i = l.lookup("//SimplePredicate", "i");
+    // Load mode keeps no FrameLayout: a pass-through MiningField is its source.
+    check(i && i->origin == Origin::DataField && i->name == "i" && i->type.type == TypeId::Integer,
+          "Load: a pass-through MiningField resolves to its DataField, with its type (step 4)", rule);
+    check(l.lookup("//OutputField[@name='o2']/FieldRef", "o") != nullptr &&
+              l.lookup("//OutputField[@name='o2']/FieldRef", "o")->origin == Origin::OutputField,
+          "Load: inside the Output, OutputFields are visible (step 1)", rule);
+    check(l.lookup("//SimplePredicate", "o") == nullptr, "Load: outside the Output, OutputFields are not (step 1)",
+          rule);
+    check(l.lookup("//SimplePredicate", "nope") == nullptr, "Load: a name declared nowhere resolves to nothing", rule);
+    check(l.binder->diagnostics().count(cpmml::bind::Severity::Error) == 0,
+          "Load: the model body is not bound (the engine resolves its names)", "P2.1 Load mode");
+    // Report mode binds the body, and the unresolved predicate is an error.
+    check(Binder(l.text).diagnostics().count(cpmml::bind::Severity::Error) == 1,
+          "Report: the model body is bound (E-SCOPE-UNRESOLVED for \"nope\")", "§3.7 report mode");
+  }
+  {
+    // TD definitions: a forward reference to a later TD field; a DataField.
+    const Loaded l(pmml(
+        kNum + field("z", "double"),
+        td(derived("a", "double", "<NormDiscrete field=\"b2\" value=\"3\"/>") + derived("b2", "integer", ref("i"))) +
+            regression(kMining + mf("z"), lt(derived("e", "double", ref("a"))))));
+    const auto* b2 = l.lookup("//NormDiscrete", "b2");
+    check(b2 && b2->origin == Origin::DerivedField && b2->type.type == TypeId::Integer,
+          "Load: a TD forward reference has the later TD field's type (B12)", rule);
+    check(l.lookup("//TransformationDictionary/DerivedField", "z") &&
+              l.lookup("//TransformationDictionary/DerivedField", "z")->origin == Origin::DataField,
+          "Load: TD definitions read DataFields", rule);
+    check(l.lookup("//TransformationDictionary/DerivedField", "e") == nullptr,
+          "Load: TD definitions do not see a model's LocalTransformations", rule);
+    const auto* a = l.lookup("//LocalTransformations/DerivedField", "a");
+    check(a && a->origin == Origin::DerivedField && a->container == cpmml::bind::Container::TransformationDictionary,
+          "Load: a model reads TD DerivedFields (step 3)", rule);
+  }
+  {
+    // Segments: a segment predicate is evaluated in M; a child's names in the
+    // child; an implicit pass-through reaches the DataField (Q3).
+    const Loaded l(
+        pmml(kNum + field("z", "double"),
+             "<MiningModel functionName=\"regression\"><MiningSchema>" + kMining +
+                 "</MiningSchema><Segmentation multipleModelMethod=\"sum\"><Segment id=\"1\">"
+                 "<SimplePredicate field=\"x\" operator=\"greaterThan\" value=\"0\"/>" +
+                 regression(mf("i") + mf("y", "usageType=\"target\""), lt(derived("x", "integer", ref("i")))) +
+                 "</Segment></Segmentation></MiningModel>\n"));
+    const auto* seg = l.lookup("//Segment/SimplePredicate", "x");
+    check(seg && seg->origin == Origin::DataField && seg->type.type == TypeId::Double,
+          "Load: a Segment predicate resolves in the MiningModel (§3.2 \"Segment predicates evaluated in M\")", rule);
+    const auto* inner = l.lookup("//Segment/RegressionModel/RegressionTable", "x");
+    check(inner && inner->origin == Origin::DerivedField && inner->type.type == TypeId::Integer,
+          "Load: a segment's model body resolves in the segment's scope", rule);
+    const auto* z = l.lookup("//Segment/RegressionModel/RegressionTable", "z");
+    check(z && z->origin == Origin::DataField, "Load: an implicit pass-through reaches the DataField (Q3)", rule);
+  }
+  {
+    // A MiningField whose treatment changes its type (§3.4 slot widening) is
+    // declared, and so is the target: Load mode maps only pass-throughs.
+    const Loaded l(
+        pmml(kNum, regression(mf("x") + mf("i", "missingValueReplacement=\"2.5\"") + mf("y", "usageType=\"target\""),
+                              lt(derived("d", "double", ref("i"))))));
+    const auto* i = l.lookup("//LocalTransformations/DerivedField", "i");
+    check(i && i->origin == Origin::MiningField && i->type.type == TypeId::Double,
+          "Load: a MiningField whose replacement widens it is its own binding, of type double", "§3.4 / N3");
+    const auto* y = l.lookup("//LocalTransformations/DerivedField", "y");
+    check(y && y->origin == Origin::MiningField && y->target_usage, "Load: the target MiningField is declared",
+          "Targets.html / §3.2");
+  }
+  {
+    // Load errors of names and scopes are still found: a cycle, an unresolved
+    // TD reference.
+    const Loaded l(
+        pmml(kNum, td(derived("a", "double", ref("nope"))) +
+                       regression(kMining, lt(derived("p", "double", ref("q")) + derived("q", "double", ref("p"))))));
+    std::vector<std::string> codes;
+    for (const Diagnostic& d : l.binder->diagnostics().all())
+      if (d.severity == cpmml::bind::Severity::Error) codes.emplace_back(d.code);
+    std::sort(codes.begin(), codes.end());
+    check(codes == std::vector<std::string>{"E-CYCLE", "E-SCOPE-UNRESOLVED"},
+          "Load: E-SCOPE-UNRESOLVED in a TD body and E-CYCLE in LocalTransformations",
+          "FieldScope.html: \"circular references ... are not valid PMML\"");
+  }
+}
+
 // ---------------------------------------------------------------- the baseline
 bool read_document(const fs::path& path, std::string& out) {
   if (path.extension() == ".zip") {
@@ -719,6 +877,7 @@ int main(int argc, char** argv) {
   const fs::path root = argv[1];
   const bool update = argc > 2 && std::string(argv[2]) == "--update";
   rule_cases();
+  load_cases();
   std::cout << checks - failures << "/" << checks << " rule checks passed\n";
   const int baseline = run_baseline(root, update);
   return (failures || baseline) ? 1 : 0;

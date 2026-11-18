@@ -143,6 +143,20 @@ class MiningSchema {
 
     return true;
   }
+
+  // The first MiningField whose value fails its DataField's valid values or
+  // Intervals, or nullptr: the field the error of an invalid record names
+  // (B45). Called only once validate() has failed, so the per-record path
+  // stays validate()'s.
+  const MiningField* first_invalid(const Sample& sample) const {
+    for (const auto& mining_field : miningfields) {
+      if (mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET ||
+          mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::GROUP) continue;
+      if (!mining_field.validate(sample)) return &mining_field;
+    }
+
+    return nullptr;
+  }
 };
 
 #endif

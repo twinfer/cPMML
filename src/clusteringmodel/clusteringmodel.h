@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/enum_parser.h"
 #include "core/internal_model.h"
@@ -65,6 +66,7 @@ class ClusteringModel : public InternalModel {
   CompareFunc default_compare_func = CompareFunc::ABS_DIFF;  // model-level ComparisonMeasure/@compareFunction
 
   std::vector<ClusteringField> fields;
+  std::vector<DataType> field_types;  // the declared type of each center field (load only)
   std::vector<Cluster> clusters;
   // MissingValueWeights: Qi per ClusteringField, in field order. Without the
   // element every Qi is 1.
@@ -200,7 +202,10 @@ class ClusteringModel : public InternalModel {
     for (const auto& cf : node.get_childs("ClusteringField")) {
       if (!cf.get_bool_attribute("isCenterField", true)) continue;
       ClusteringField f = read_comparison_field(cf, default_compare_func, true);
-      f.field_index = indexer->get_index(f.field_name);
+      // scope.resolve (P2.1): the field's slot and declared type.
+      const auto field = cpmml::bind::scope_resolve(*indexer, cf, f.field_name);
+      f.field_index = field.index;
+      field_types.push_back(field.datatype);
       fields.push_back(std::move(f));
     }
     // With no center field there is no distance: every cluster would tie at 0
@@ -264,7 +269,7 @@ class ClusteringModel : public InternalModel {
       c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
       for (size_t i = 0; i < vals.size(); i++) {
         const Eigen::Index at = static_cast<Eigen::Index>(i);
-        if (indexer->get_type(fields[i].field_name) != DataType::DataTypeValue::STRING) {
+        if (field_types[i] != DataType::DataTypeValue::STRING) {
           c.centroid[at] = ::to_double(vals[i]);
           continue;
         }

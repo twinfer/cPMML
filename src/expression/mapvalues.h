@@ -7,6 +7,7 @@
 #ifndef CPMML_MAPVALUES_H
 #define CPMML_MAPVALUES_H
 
+#include "bind/load_scope.h"
 #include "expression.h"
 #include "treetable/treetable.h"
 
@@ -48,15 +49,20 @@ class MapValues : public Expression {
         out(node.required_attribute("outputColumn")) {
     std::string tmp_column;
     std::string tmp_input;
+    // scope.resolve (P2.1): a FieldColumnPair may name a field declared later
+    // in its container (a forward reference, accepted with W-FORWARD-REF, Q4),
+    // whose type the keys need now (B12).
+    std::unordered_map<std::string, DataType> column_types;
     for (const auto& n : node.get_childs("FieldColumnPair")) {
       tmp_input = n.required_attribute("field");
       inputs.insert(tmp_input);
       tmp_column = n.required_attribute("column");
       columns.push_back(tmp_column);
       fieldcolumn_pairs[tmp_column] = tmp_input;
+      const auto resolved = cpmml::bind::scope_resolve(*indexer, n, tmp_input);
+      column_types[tmp_column] = resolved.datatype;
+      raw_columns.push_back(resolved.index);
     }
-
-    for (const auto& column : columns) raw_columns.push_back(indexer->get_or_set(fieldcolumn_pairs[column]));
 
     for (const auto& n : raw_node.get_child("InlineTable").get_childs("row")) {
       std::vector<Value> keys;
@@ -65,7 +71,7 @@ class MapValues : public Expression {
         // against at lookup time: with an inferred type, a numeric-looking
         // category like "1" becomes the number 1 while the sample carries the
         // string-indexed value, and no lookup would ever match.
-        keys.push_back(Value(n.get_child(column).value(), indexer->get_type(fieldcolumn_pairs.at(column))));
+        keys.push_back(Value(n.get_child(column).value(), column_types.at(column)));
       }
       tree_table.add(keys, Value(n.get_child(out).value(), output_type));
     }

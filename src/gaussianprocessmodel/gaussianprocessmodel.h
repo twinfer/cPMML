@@ -12,10 +12,11 @@
 #include <string>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
-#include "core/traininginstances.h"
 #include "core/internal_score.h"
+#include "core/traininginstances.h"
 #include "core/transformationdictionary.h"
 #include "core/value.h"
 #include "core/xmlnode.h"
@@ -231,7 +232,7 @@ class GaussianProcessModel : public InternalModel {
       } else {
         feat_names.push_back(field);
         feat_cols.push_back(col);
-        feat_indices.push_back(indexer->get_index(field));
+        feat_indices.push_back(cpmml::bind::scope_resolve(*indexer, f, field).index);  // scope.resolve (P2.1)
       }
     }
     n_feat = feat_names.size();

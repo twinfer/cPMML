@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
 #include "core/miningfunction.h"
@@ -281,11 +282,12 @@ class SupportVectorMachineModel : public InternalModel {
     for (const auto& child : vf.get_childs()) {
       const std::string kind = child.name();
       if (kind == "FieldRef") {
-        vector_fields.push_back({indexer->get_index(child.required_attribute("field")), false, Value()});
-      } else if (kind == "CategoricalPredictor") {
-        const std::string field = child.required_attribute("name");
+        // scope.resolve (P2.1): the field's slot and declared type.
         vector_fields.push_back(
-            {indexer->get_index(field), true, Value(child.required_attribute("value"), indexer->get_type(field))});
+            {cpmml::bind::scope_resolve(*indexer, child, child.required_attribute("field")).index, false, Value()});
+      } else if (kind == "CategoricalPredictor") {
+        const auto field = cpmml::bind::scope_resolve(*indexer, child, child.required_attribute("name"));
+        vector_fields.push_back({field.index, true, Value(child.required_attribute("value"), field.datatype)});
       } else if (kind != "Extension" && !kind.empty()) {
         throw cpmml::ParsingException("SupportVectorMachineModel: unexpected element " + kind + " in VectorFields");
       }

@@ -16,11 +16,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/fieldusagetype.h"
 #include "core/internal_model.h"
-#include "core/traininginstances.h"
 #include "core/miningfunction.h"
+#include "core/traininginstances.h"
 #include "core/transformationdictionary.h"
 #include "core/value.h"
 #include "core/xmlnode.h"
@@ -84,6 +85,7 @@ class NearestNeighborModel : public InternalModel {
   bool uses_derived_inputs = false;  // KNNInputs reference DerivedFields
 
   std::vector<KnnInput> knn_inputs;
+  std::vector<DataType> knn_input_types;  // the declared type of each KNNInput's field (load only)
   Eigen::MatrixXd training_features;  // [n_instances x n_features]
   std::vector<std::string> training_targets;
   std::vector<std::string> training_instance_ids;  // per-instance ID (instanceIdVariable)
@@ -234,7 +236,10 @@ class NearestNeighborModel : public InternalModel {
   void parse_knn_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& ki : node.get_child("KNNInputs").get_childs("KNNInput")) {
       KnnInput input = read_comparison_field(ki, default_compare_func, false);
-      input.field_index = indexer->get_index(input.field_name);
+      // scope.resolve (P2.1): the field's slot and declared type.
+      const auto field = cpmml::bind::scope_resolve(*indexer, ki, input.field_name);
+      input.field_index = field.index;
+      knn_input_types.push_back(field.datatype);
       knn_inputs.push_back(std::move(input));
     }
   }
@@ -323,8 +328,7 @@ class NearestNeighborModel : public InternalModel {
         // compared equal. JPMML 1.7.7 parses the cell with the field's type.
         Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
         for (size_t i = 0; i < feat_cols.size(); i++)
-          fv[static_cast<Eigen::Index>(i)] =
-              Value(xml_row.get_child(feat_cols[i]).value(), indexer->get_type(knn_inputs[i].field_name)).value;
+          fv[static_cast<Eigen::Index>(i)] = Value(xml_row.get_child(feat_cols[i]).value(), knn_input_types[i]).value;
         rows.push_back(fv);
       }
 

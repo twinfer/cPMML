@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 
+#include "bind/load_scope.h"
 #include "core/datatype.h"
 #include "core/sample.h"
 #include "core/value.h"
@@ -39,9 +40,13 @@ class NumericPredictor {
 
   NumericPredictor(const XmlNode& node,  // NumericPredictor node
                    const std::shared_ptr<Indexer>& indexer)
+      : NumericPredictor(node, cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("name"))) {}
+
+  // scope.resolve (P2.1): the field's slot and declared type.
+  NumericPredictor(const XmlNode& node, const cpmml::bind::ResolvedField& field)
       : name(node.required_attribute("name")),
-        index(indexer->get_index(name)),
-        datatype(indexer->get_type(name)),
+        index(field.index),
+        datatype(field.datatype),
         coefficient(node.required_double_attribute("coefficient")),
         exponent(node.get_double_attribute("exponent", 1)) {}
 

@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
 #include "core/internal_score.h"
@@ -62,7 +63,7 @@ class BaselineModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer) {
     XmlNode td = node.get_child("TestDistributions");
     test_field = td.required_attribute("field");
-    test_field_idx = indexer->get_index(test_field);
+    test_field_idx = cpmml::bind::scope_resolve(*indexer, td, test_field).index;  // scope.resolve (P2.1)
 
     parse_test_statistic(td);
 

@@ -1,0 +1,8 @@
+s,i,f,d,b,y,pred,o_s,o_t
+abc,3,2.5,7,false,0.0,0.0,N/A,N/A
+A,4,-1.25,,false,0.0,0.0,0.1,0.1
+abc,-2,3,-1.25,true,0.0,0.0,N/A,N/A
+B,7,3,3.5,true,0.0,0.0,N/A,N/A
+,4,3,0.1,true,0.0,0.0,N/A,N/A
+unseen,4,2.5,0.1,false,0.0,0.0,NaN,NaN
+,0,,,,0.0,0.0,N/A,N/A

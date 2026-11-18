@@ -41,12 +41,15 @@
  *               (E-TYPE-ORDER-MIXED, Q6, Q7), the K1 document-text rule
  *   functions   function_table.h (§4.2)
  *
- * Nothing in the engine includes this header (P1.2).
+ * Since P2.1 the engine binds every document at load through
+ * bind/load_scope.h (Binder::Mode::Load).
  */
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <map>
@@ -100,6 +103,9 @@ inline constexpr std::string_view kModelElements[] = {"AnomalyDetectionModel",
                                                       "TreeModel"};
 
 inline bool is_model_element(std::string_view s) {
+  // Every MODEL-ELEMENT name ends with "Model" but NeuralNetwork and
+  // Scorecard: a cheap test first (the binder asks it of many elements).
+  if (!s.ends_with("Model") && s != "NeuralNetwork" && s != "Scorecard") return false;
   return std::find(std::begin(kModelElements), std::end(kModelElements), s) != std::end(kModelElements);
 }
 
@@ -188,10 +194,20 @@ inline std::string quoted(std::string_view s) { return "\"" + std::string(s) + "
 
 class Binder {
  public:
+  // Report: every element is bound (test/bind_report.cc, §3.7). Load: the
+  // binder the engine runs on every document (P2.1, core/modelbuilder.h):
+  // the scope tree, every declaration (two-phase, §3.5) and the bodies of the
+  // DerivedFields and OutputFields, but not the model bodies (trees, tables,
+  // predicates). A model body's names are resolved when the engine builds it,
+  // through lookup() (bind/load_scope.h); binding all of them here as well
+  // cost 25-56% of the load time of every benchmark model.
+  enum class Mode : std::uint8_t { Report, Load };
+
   // Parses `text` and binds it. Every defect is in diagnostics().
   explicit Binder(std::string_view text) {
     for (std::size_t i = 0; i < text.size(); i++)
       if (text[i] == '\n') newlines_.push_back(i);
+    newlines_ready_ = true;
     // pugixml's default drops whitespace-only PCDATA, which would make
     // <Constant dataType="double"> </Constant> read as empty content (a
     // missing value) when its xs:string content is " " (bind_constant). The
@@ -214,6 +230,18 @@ class Binder {
     bind_pmml(pmml);
   }
 
+  // Binds `pmml`, a PMML element the engine already parsed from `text` (with
+  // pugixml's default flags, so a blanks-only Constant reads as empty there;
+  // P2.3 aligns the reader). `text` must outlive the Binder: lines are
+  // counted in it only when a diagnostic needs one.
+  Binder(pugi::xml_node pmml, std::string_view text, Mode mode) : mode_(mode), text_(text) {
+    if (!pmml) {
+      add(Severity::Error, code::kXml, nullptr, pugi::xml_node(), "the document has no PMML element", 0);
+      return;
+    }
+    bind_pmml(pmml);
+  }
+
   Binder(const Binder&) = delete;
   Binder& operator=(const Binder&) = delete;
 
@@ -221,6 +249,106 @@ class Binder {
   const FrameLayout& layout() const { return layout_; }
   const std::deque<Scope>& scopes() const { return scopes_; }
   const std::vector<ModelBinding>& models() const { return models_; }
+
+  // §3.2 for the engine (P2.1): the binding `name` refers to from `from` (a
+  // node of the bound document), by the rules of resolve() but without
+  // diagnostics, or nullptr when it resolves nowhere. The context is read
+  // from the ancestors of `from`: the nearest model element is the model
+  // scope M, and an Output element on the way puts the reference inside M's
+  // Output (step 1); a TransformationDictionary on the way, or no model
+  // element at all, means the TD definitions' scope. A modelChain's outputs
+  // are those of the segments before the one the reference is in, as
+  // resolve() sees them while it binds the segments in order (FieldScope.html:
+  // "All other fields in PMML must be defined before they are referenced").
+  const Binding* lookup(pugi::xml_node from, std::string_view name) const {
+    if (!document_) return nullptr;
+    // The context of every element walked is remembered (a direct-mapped
+    // cache), so a predicate deep in a tree stops at its parent Node, whose
+    // own predicate was resolved before it.
+    constexpr std::size_t kMaxVisited = 64;
+    const void* visited[kMaxVisited];
+    std::size_t depth = 0;
+    std::size_t output_depth = kMaxVisited;  // the depth of the Output element walked, if any
+    std::size_t segment_depth = kMaxVisited;  // the depth of the modelChain Segment walked, if any
+    std::uint32_t segment = kNoSegment;       // its position: M's chain outputs before it are visible
+    const Scope* model = nullptr;
+    bool outer_in_output = false;  // the context found above the walk is inside an Output
+    for (pugi::xml_node n = from; n && n.type() == pugi::node_element; n = n.parent(), depth++) {
+      const void* id = n.internal_object();
+      const ContextEntry& cached = context_cache_[context_slot(id)];
+      if (cached.node == id) {
+        model = cached.model;
+        outer_in_output = cached.in_output;
+        if (segment == kNoSegment) segment = cached.chain_segment;
+        break;
+      }
+      const std::string_view nn = n.name();
+      if (detail::is_model_element(nn)) {
+        if (const auto it = element_scopes_.find(id); it != element_scopes_.end()) {
+          model = it->second;
+          break;
+        }
+      }
+      if (depth < kMaxVisited) visited[depth] = id;
+      if (nn == "Output" && output_depth == kMaxVisited) output_depth = depth;
+      if (nn == "Segment" && segment == kNoSegment && !chain_segments_.empty())
+        if (const auto it = chain_segments_.find(id); it != chain_segments_.end()) {
+          segment = it->second;
+          segment_depth = depth;
+        }
+      if (nn == "TransformationDictionary") {
+        depth++;
+        break;
+      }
+    }
+    for (std::size_t i = 0; i < depth && i < kMaxVisited; i++)
+      context_cache_[context_slot(visited[i])] =
+          ContextEntry{visited[i], model, outer_in_output || (output_depth != kMaxVisited && i <= output_depth),
+                       segment_depth == kMaxVisited || i <= segment_depth ? segment : kNoSegment};
+    const bool in_output = outer_in_output || output_depth != kMaxVisited;
+    const auto find = [name](const NameMap& map) -> const Binding* {
+      if (map.empty()) return nullptr;
+      const auto it = map.find(name);
+      return it == map.end() ? nullptr : it->second;
+    };
+    if (!model) {  // TransformationDictionary definitions
+      if (const Binding* b = find(document_->td_fields)) return b;
+      return find(document_->data_fields);
+    }
+    // 1. M's OutputFields (only from inside M's Output)
+    if (in_output)
+      if (const Binding* b = find(model->outputs)) return b;
+    // 2. M's LocalTransformations
+    if (const Binding* b = find(model->local)) return b;
+    // 3. TransformationDictionary DerivedFields, unless M has a MiningField
+    // of that name; 4. M's MiningFields
+    const Binding* mining = find(model->mining);
+    if (!mining)
+      if (const Binding* b = find(document_->td_fields)) return b;
+    if (mining) return mining;
+    // modelChain outputs of the segments before the reference's
+    if (const Binding* b = chain_output(*model, name, segment)) return b;
+    // 5. Q3: an implicit pass-through from an enclosing scope (W-SCOPE-IMPLICIT)
+    for (const Scope *inner = model, *s = model->enclosing; s; inner = s, s = s->enclosing) {
+      if (s->kind == Scope::Kind::Document) {
+        if (const Binding* b = find(s->data_fields)) return b;
+        continue;
+      }
+      for (const auto* map : {&s->local, &s->mining})
+        if (const Binding* b = find(*map)) return b;
+      if (const Binding* b = chain_output(*s, name, inner->chain_position)) return b;
+    }
+    return nullptr;
+  }
+
+  // The label of the model scope `from` is in ("" outside any model), for
+  // messages.
+  std::string scope_label(pugi::xml_node from) const {
+    for (pugi::xml_node n = from; n && n.type() == pugi::node_element; n = n.parent())
+      if (const auto it = element_scopes_.find(n.internal_object()); it != element_scopes_.end())
+        return label_of(*it->second);
+    return {};
+  }
 
   // The binding of `name` declared in the scope labelled `scope_label` ("" is
   // the document scope), or nullptr. For tests and the report.
@@ -243,7 +371,20 @@ class Binder {
     Binding* current = nullptr;      // the declaration whose expression is bound
     bool transformed_value = false;  // current is an OutputField with feature="transformedValue"
     StaticType enclosing;            // the nearest enclosing declared type (D21)
-    std::string where;               // "DerivedField \"x\"", for messages
+    // Where the diagnostics of this context are: an element (described only
+    // when a diagnostic needs it: describing every MiningField of a forest
+    // was most of the load-mode binder's time) or a text.
+    pugi::xml_node where_node;
+    std::string where_text;
+    void set_where(pugi::xml_node n) {
+      where_node = n;
+      where_text.clear();
+    }
+    void set_where(std::string text) {
+      where_node = pugi::xml_node();
+      where_text = std::move(text);
+    }
+    std::string where() const { return where_node ? describe(where_node) : where_text; }
   };
 
   struct Typed {
@@ -251,8 +392,37 @@ class Binder {
     const Binding* field = nullptr;  // the expression is a FieldRef to this field
   };
 
+  Mode mode_ = Mode::Report;
   pugi::xml_document doc_;
-  std::vector<std::size_t> newlines_;
+  std::string_view text_;  // Load mode: the engine's text, for line numbers
+  mutable std::vector<std::size_t> newlines_;
+  mutable bool newlines_ready_ = false;
+  // The scope of every model element (lookup()).
+  std::unordered_map<const void*, const Scope*> element_scopes_;
+  // lookup()'s context of an element: its model scope (nullptr: the
+  // TransformationDictionary definitions) and whether it is inside an Output.
+  struct ContextEntry {
+    const void* node = nullptr;
+    const Scope* model = nullptr;
+    bool in_output = false;
+    std::uint32_t chain_segment = kNoSegment;  // inside Segment k of the model's modelChain
+  };
+  static constexpr std::uint32_t kNoSegment = UINT32_MAX;
+  // The position of every Segment of a modelChain (lookup()).
+  std::unordered_map<const void*, std::uint32_t> chain_segments_;
+  // `chain`'s output `name` if it comes from a segment before position
+  // `before` (kNoSegment: any segment, a reference outside the segments).
+  const Binding* chain_output(const Scope& chain, std::string_view name, std::uint32_t before) const {
+    if (chain.chain_outputs.empty()) return nullptr;
+    const auto it = chain.chain_outputs.find(name);
+    if (it == chain.chain_outputs.end()) return nullptr;
+    return scopes_[it->second->scope].chain_position < before ? it->second : nullptr;
+  }
+  static constexpr std::size_t kContextCacheSize = 512;
+  static std::size_t context_slot(const void* id) {
+    return (reinterpret_cast<std::uintptr_t>(id) >> 5) & (kContextCacheSize - 1);
+  }
+  mutable std::array<ContextEntry, kContextCacheSize> context_cache_{};
   std::unique_ptr<types::StringPool> pool_ = std::make_unique<types::StringPool>();
   types::ParseContext parse_ctx_{pool_.get(), nullptr, nullptr};
   Diagnostics diags_;
@@ -273,6 +443,12 @@ class Binder {
 
   // ---------------------------------------------------------------- reporting
   std::uint32_t line_of_offset(std::size_t offset) const {
+    if (!newlines_ready_) {
+      for (const char* p = text_.data();
+           (p = static_cast<const char*>(std::memchr(p, '\n', text_.size() - (p - text_.data())))) != nullptr; p++)
+        newlines_.push_back(static_cast<std::size_t>(p - text_.data()));
+      newlines_ready_ = true;
+    }
     return static_cast<std::uint32_t>(std::upper_bound(newlines_.begin(), newlines_.end(), offset) - newlines_.begin() +
                                       1);
   }
@@ -283,7 +459,10 @@ class Binder {
 
   void add(Severity severity, std::string_view code, const Scope* model, pugi::xml_node node, std::string message,
            std::uint32_t line = 0) {
-    diags_.add(severity, code, std::move(message), model ? model->label : std::string(), line ? line : line_of(node));
+    // Load mode counts lines for errors only: warnings are not shown until the
+    // diagnostics API (Q9, P9), and counting needs a pass over the text.
+    if (!line && (mode_ == Mode::Report || severity == Severity::Error)) line = line_of(node);
+    diags_.add(severity, code, std::move(message), model ? label_of(*model) : std::string(), line);
   }
   void error(std::string_view code, const Ctx& ctx, pugi::xml_node node, const std::string& message) {
     add(Severity::Error, code, ctx.model, node, located(ctx, node, message));
@@ -298,7 +477,8 @@ class Binder {
   // "<element> in <where>: <message>"
   static std::string located(const Ctx& ctx, pugi::xml_node node, const std::string& message) {
     std::string s = describe(node);
-    if (!ctx.where.empty() && s != ctx.where) s += " in " + ctx.where;
+    const std::string where = ctx.where();
+    if (!where.empty() && s != where) s += " in " + where;
     return s + ": " + message;
   }
 
@@ -340,7 +520,7 @@ class Binder {
         u.count++;
         return;
       }
-    list.push_back(Unsupported{node.name(), 1, line_of(node), reason});
+    list.push_back(Unsupported{node.name(), 1, mode_ == Mode::Report ? line_of(node) : 0, reason});
   }
 
   void flush_unsupported(Scope& scope) {
@@ -479,6 +659,7 @@ class Binder {
     if (!type) return std::nullopt;
     const DocumentValue v = read_document_text(*type, text, parse_ctx_);
     if (out) *out = v.value;
+    if (v.rule == TextRule::AsType) return type;
     const std::string of = field ? " of " + std::string(type_name(*type)) + " field " + detail::quoted(field->name)
                                  : " of type " + std::string(type_name(*type));
     switch (v.rule) {
@@ -569,7 +750,7 @@ class Binder {
         note_unsupported(ctx, df, "DataDictionary content other than DataField");
         continue;
       }
-      ctx.where = describe(df);
+      ctx.set_where(df);
       const auto name = attr(df, "name");
       if (!name) {
         error(code::kRequired, ctx, df, "attribute name is required (pmml-4-4.xsd)");
@@ -588,6 +769,9 @@ class Binder {
           declare(std::string(*name), Origin::DataField, Container::DataDictionary, type, *document_, df, index++);
       b.state = Binding::State::Typed;
       document_->data_fields.emplace(b.name, &b);
+      // Load mode: a DataField's Values and Intervals are document text of the
+      // field's type (§3.4), which the engine still reads itself until P2.2.
+      if (mode_ == Mode::Load) continue;
       bind_values(ctx, df, b, /*allow_property=*/true);
       for (pugi::xml_node interval : df.children("Interval")) {
         // DataDictionary.html: "Intervals are not allowed for non-continuous
@@ -666,7 +850,7 @@ class Binder {
         note_unsupported(ctx, child, "TransformationDictionary content other than DerivedField");
         continue;
       }
-      ctx.where = describe(child);
+      ctx.set_where(child);
       const auto name = attr(child, "name");
       if (!name) {
         // Transformations.html: "If a DerivedField is contained in
@@ -699,7 +883,7 @@ class Binder {
     for (Binding* b : declared) {
       Ctx body;
       body.current = b;
-      body.where = describe(b->declaration);
+      body.set_where(b->declaration);
       body.enclosing = b->type.type;
       bind_derived_body(body, *b);
     }
@@ -759,8 +943,8 @@ class Binder {
 
   // The binding `name` refers to from an expression or a model-internal
   // reference in ctx, nearest first (§3.2), or nullptr after a diagnostic.
-  const Binding* resolve(const Ctx& ctx, pugi::xml_node node, std::string_view name) {
-    const std::string key(name);
+  const Binding* resolve(const Ctx& ctx, pugi::xml_node node, std::string_view name, bool report_unresolved = true) {
+    const std::string_view key = name;
     if (!ctx.model) {  // TransformationDictionary definitions
       if (auto it = document_->td_fields.find(key); it != document_->td_fields.end()) {
         check_forward(ctx, node, *it->second);
@@ -817,13 +1001,14 @@ class Binder {
         warning(code::kScopeImplicit, ctx, node,
                 "field " + detail::quoted(name) + " is not in this model's scope; it is a " +
                     std::string(origin_name(found->origin)) +
-                    (s->label.empty() ? std::string(" of the document") : " of " + s->label) +
+                    (s->kind == Scope::Kind::Document ? std::string(" of the document") : " of " + label_of(*s)) +
                     " (FieldScope.html: \"Within a model element, all data must flow in through its "
                     "MiningSchema\"; accepted as a pass-through, Q3)");
         return found;
       }
     }
-    error(code::kScopeUnresolved, ctx, node, "field " + detail::quoted(name) + " is not in scope");
+    if (report_unresolved)
+      error(code::kScopeUnresolved, ctx, node, "field " + detail::quoted(name) + " is not in scope");
     return nullptr;
   }
 
@@ -832,6 +1017,7 @@ class Binder {
   // references ... are not valid PMML"; the same holds in any container, as
   // a cycle has no evaluation order. Returns the dependency order.
   std::vector<const Binding*> check_cycles(const std::vector<Binding*>& container, Scope* model) {
+    if (container.empty()) return {};
     std::unordered_map<const Binding*, int> colour;  // 0 white, 1 grey, 2 black
     std::unordered_set<const Binding*> members(container.begin(), container.end());
     std::unordered_set<const Binding*> reported;
@@ -869,7 +1055,9 @@ class Binder {
   void bind_derived_body(Ctx& ctx, Binding& b) {
     b.state = Binding::State::Typing;
     const pugi::xml_node expr = expression_child(ctx, b.declaration);
-    if (expr) {
+    if (expr && mode_ == Mode::Load) {
+      resolve_expression_names(ctx, expr);
+    } else if (expr) {
       const Typed t = bind_expression(ctx, expr, std::nullopt);
       // §3.4: "DerivedField dataType=X -> Cast<X>(expression); widening
       // implicit, narrowing per §2.6".
@@ -877,6 +1065,47 @@ class Binder {
     }
     bind_values(ctx, b.declaration, b, /*allow_property=*/false);
     b.state = Binding::State::Typed;
+  }
+
+  // Load mode: the names an expression references, resolved in ctx as
+  // bind_expression() resolves them (so scopes, forward references, reads for
+  // E-CYCLE and TD instantiation are the same), without its typing, whose
+  // diagnostics are report-only until P2.2-P2.7 and which a DerivedField does
+  // not need (its dataType is declared). Typing every Apply was a third of
+  // the binder's time on a model with LocalTransformations.
+  void resolve_expression_names(Ctx& ctx, pugi::xml_node node) {
+    const std::string_view n = node.name();
+    if (n == "Constant") return;
+    if (n == "Apply") {
+      for (pugi::xml_node c : node.children())
+        if (c.type() == pugi::node_element && std::string_view(c.name()) != "Extension")
+          resolve_expression_names(ctx, c);
+      return;
+    }
+    if (n == "FieldRef" || n == "NormContinuous" || n == "NormDiscrete" || n == "Discretize") {
+      if (const auto f = attr(node, "field")) resolve(ctx, node, *f);
+      return;
+    }
+    if (n == "MapValues") {
+      for (pugi::xml_node pair : node.children("FieldColumnPair"))
+        if (const auto f = attr(pair, "field")) resolve(ctx, pair, *f);
+      return;
+    }
+    if (n == "TextIndex") {
+      if (const auto f = attr(node, "textField")) resolve(ctx, node, *f);
+      for (pugi::xml_node c : node.children())
+        if (c.type() == pugi::node_element && detail::is_expression(c.name())) {
+          resolve_expression_names(ctx, c);  // the term (the first EXPRESSION)
+          break;
+        }
+      return;
+    }
+    if (n == "Aggregate" || n == "Lag") {
+      if (const auto f = attr(node, "field")) resolve(ctx, node, *f);
+      if (const auto g = attr(node, "groupField")) resolve(ctx, node, *g);
+      for (pugi::xml_node bi : node.children("BlockIndicator"))
+        if (const auto f = attr(bi, "field")) resolve(ctx, bi, *f);
+    }
   }
 
   // The one EXPRESSION child of a DerivedField or OutputField (after
@@ -902,7 +1131,7 @@ class Binder {
   void bind_inline_derived(const Ctx& outer, pugi::xml_node df) {
     Ctx ctx = outer;
     ctx.current = nullptr;
-    ctx.where = describe(df) + " in " + describe(df.parent());
+    ctx.set_where(describe(df) + " in " + describe(df.parent()));
     const StaticType declared = declared_type(ctx, df, true);
     declared_optype(ctx, df, true);
     ctx.enclosing = declared;
@@ -1364,8 +1593,8 @@ class Binder {
                   std::string(sig->name) + " takes a date or time, carried as double until P10 (Q8)");
     // Comparisons (§2.7).
     const std::string_view name = sig->name;
-    const std::string what = "Apply " + detail::quoted(name);
     if (sig->params[0] == fn::Param::Comparable && n >= 2) {
+      const std::string what = "Apply " + detail::quoted(name);
       const bool ordering = detail::one_of(name, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"});
       for (std::size_t i = 1; i < n; i++) check_comparable(ctx, node, ordering, types[0], types[i], what);
     }
@@ -1418,8 +1647,10 @@ class Binder {
 
   void check_param(Ctx& ctx, pugi::xml_node apply, const fn::Signature& sig, std::size_t i, fn::Param p,
                    pugi::xml_node arg, const Typed& t, bool& temporal) {
-    const std::string what =
-        "argument " + std::to_string(i + 1) + " of " + std::string(sig.name) + " is " + type_name(t.type);
+    // Built only for a message (the binder runs at every load).
+    const auto what = [&] {
+      return "argument " + std::to_string(i + 1) + " of " + std::string(sig.name) + " is " + type_name(t.type);
+    };
     if (p == fn::Param::Temporal) {
       temporal = true;
       return;
@@ -1441,22 +1672,22 @@ class Binder {
       case fn::Param::Double:
         if (boolean)
           error(code::kTypeBooleanMixed, ctx, apply,
-                what +
+                what() +
                     ", where a number is expected (Functions.html: boolean \"can not be mixed with other types\", "
                     "Q7)");
         else if (!is_numeric(x))
           // §2.5: "no arithmetic accepts" string.
-          error(code::kTypeParam, ctx, apply, what + ", where a number is expected (§2.5)");
+          error(code::kTypeParam, ctx, apply, what() + ", where a number is expected (§2.5)");
         return;
       case fn::Param::Integer:
         if (boolean)
           error(code::kTypeBooleanMixed, ctx, apply,
-                what + ", where an integer is expected (Functions.html: boolean \"can not be mixed\", Q7)");
+                what() + ", where an integer is expected (Functions.html: boolean \"can not be mixed\", Q7)");
         else if (x != TypeId::Integer)
           // The pseudo-declaration declares dataType="integer"; Functions.html:
           // "a double expression can not be implicitly cast as an integer".
           error(code::kTypeParam, ctx, apply,
-                what +
+                what() +
                     ", where the parameter is declared integer (Functions.html: \"a double expression can not "
                     "be implicitly cast as an integer\")");
         return;
@@ -1465,12 +1696,12 @@ class Binder {
         // float integer"); boolean is outside the list.
         if (boolean)
           error(code::kTypeBooleanMixed, ctx, apply,
-                what + ", where a string is expected (Functions.html: boolean \"can not be mixed\", Q7)");
+                what() + ", where a string is expected (Functions.html: boolean \"can not be mixed\", Q7)");
         return;
       case fn::Param::Boolean:
         if (!boolean)
           error(code::kTypeBooleanMixed, ctx, apply,
-                what +
+                what() +
                     ", where the parameter is declared boolean (Functions.html: boolean \"can not be mixed with "
                     "other types\", Q7)");
         return;
@@ -1577,16 +1808,36 @@ class Binder {
   }
 
   // ---------------------------------------------------------------- models
-  std::string model_label(pugi::xml_node model, const std::string& prefix) {
+  static std::string model_label(pugi::xml_node model, const std::string& prefix) {
     std::string s = prefix.empty() ? std::string() : prefix + " > ";
     s += model.name();
     if (const auto name = attr(model, "modelName")) s += " " + detail::quoted(*name);
     return s;
   }
 
+  // "Segment \"3\"", or "Segment #k" (the k-th Segment) without an id.
+  static std::string segment_label(pugi::xml_node segment) {
+    if (const auto id = attr(segment, "id")) return "Segment " + detail::quoted(*id);
+    std::size_t k = 0;
+    for (pugi::xml_node s = segment; s; s = s.previous_sibling("Segment")) k++;
+    return "Segment #" + std::to_string(k);
+  }
+
+  // A scope's label (Scope::label), made on first use in Load mode.
+  const std::string& label_of(const Scope& s) const {
+    if (!s.label.empty() || s.kind == Scope::Kind::Document) return s.label;
+    std::string prefix = s.enclosing && s.enclosing->kind == Scope::Kind::Model ? label_of(*s.enclosing) : "";
+    if (const pugi::xml_node parent = s.element.parent(); std::string_view(parent.name()) == "Segment")
+      prefix += " > " + segment_label(parent);
+    s.label = model_label(s.element, prefix);
+    return s.label;
+  }
+
   // Returns the index of the ModelBinding.
   std::size_t bind_model(pugi::xml_node node, Scope& parent, Scope* parent_model, const std::string& prefix) {
-    Scope& m = new_scope(Scope::Kind::Model, &parent, model_label(node, prefix), node);
+    Scope& m =
+        new_scope(Scope::Kind::Model, &parent, mode_ == Mode::Report ? model_label(node, prefix) : std::string(), node);
+    element_scopes_.emplace(node.internal_object(), &m);
     const std::size_t index = models_.size();
     models_.push_back(ModelBinding{m.id, node.name(), {}, {}, {}});
     Ctx ctx;
@@ -1614,7 +1865,7 @@ class Binder {
     for (Binding* b : locals) {
       Ctx body = ctx;
       body.current = b;
-      body.where = describe(b->declaration);
+      body.set_where(b->declaration);
       body.enclosing = b->type.type;
       bind_derived_body(body, *b);
     }
@@ -1643,10 +1894,11 @@ class Binder {
       }
       if (detail::is_model_element(n)) {
         // AnomalyDetectionModel: "whose inner model is a child scope" (§5.2).
-        const std::size_t c = bind_model(child, m, &m, m.label);
+        const std::size_t c = bind_model(child, m, &m, mode_ == Mode::Report ? m.label : std::string());
         models_[index].children.push_back(c);
         continue;
       }
+      if (mode_ == Mode::Load) continue;  // the engine resolves the body's names (lookup())
       visit_body(ctx, child);
     }
 
@@ -1667,13 +1919,13 @@ class Binder {
         continue;
       }
       Ctx fctx = ctx;
-      fctx.where = describe(mf);
+      fctx.set_where(mf);
       const auto name = attr(mf, "name");
       if (!name) {
         error(code::kRequired, fctx, mf, "attribute name is required (pmml-4-4.xsd)");
         continue;
       }
-      const std::string key(*name);
+      const std::string_view key = *name;
       // FieldScope.html: "The names of MiningFields cannot be re-used within
       // the same model element."
       if (m.mining.count(key)) {
@@ -1685,22 +1937,80 @@ class Binder {
       }
       const Binding* source = resolve_mining_source(fctx, mf, key, parent_model);
       FieldType type = source ? source->type : FieldType{};
+      // The attributes present, in one pass: every reader below is skipped for
+      // an absent attribute, which it would only have looked for (a
+      // MiningField has a dozen optional attributes and usually one or two).
+      enum : unsigned {
+        kOptype = 1,
+        kInvalid = 2,
+        kMissingTreatment = 4,
+        kOutliers = 8,
+        kImportance = 16,
+        kMissingReplacement = 32,
+        kInvalidReplacement = 64,
+        kLow = 128,
+        kHigh = 256,
+        kOther = 512
+      };
+      unsigned present = 0;
+      for (pugi::xml_attribute a = mf.first_attribute(); a; a = a.next_attribute()) {
+        const std::string_view an = a.name();
+        if (an == "name" || an == "usageType") continue;
+        present |= an == "optype"                    ? kOptype
+                   : an == "invalidValueTreatment"   ? kInvalid
+                   : an == "missingValueTreatment"   ? kMissingTreatment
+                   : an == "outliers"                ? kOutliers
+                   : an == "importance"              ? kImportance
+                   : an == "missingValueReplacement" ? kMissingReplacement
+                   : an == "invalidValueReplacement" ? kInvalidReplacement
+                   : an == "lowValue"                ? kLow
+                   : an == "highValue"               ? kHigh
+                                                     : kOther;
+      }
+      const bool plain = present == 0;  // no attribute but name and usageType
+      if (plain) {
+        // The MiningFields of a typical forest: no treatment and nothing else
+        // to check -- the source's type, and an alias of its slot (§3.2
+        // "Aliasing"). The general path below reads every attribute.
+        const auto usage = enum_attr(
+            fctx, mf, "usageType",
+            {"active", "predicted", "target", "supplementary", "group", "order", "frequencyWeight", "analysisWeight"});
+        const bool target_usage = usage && (*usage == "target" || *usage == "predicted");
+        if (mode_ == Mode::Load && source && !target_usage) {
+          // Load mode keeps no FrameLayout of its own (the engine's slots are
+          // the Indexer's until P7): a pass-through is its source.
+          m.mining.emplace(key, const_cast<Binding*>(source));
+          index++;
+          continue;
+        }
+        Binding& b = declare(std::string(key), Origin::MiningField, Container::MiningSchema, type, m, mf, index++);
+        b.source = source;
+        b.state = Binding::State::Typed;
+        b.target_usage = usage && (*usage == "target" || *usage == "predicted");
+        m.mining.emplace(key, &b);
+        if (source) layout_.slots[b.slot].alias_of = source->slot;
+        continue;
+      }
       const auto usage = enum_attr(
           fctx, mf, "usageType",
           {"active", "predicted", "target", "supplementary", "group", "order", "frequencyWeight", "analysisWeight"});
-      const auto optype = declared_optype(fctx, mf, false);
+      const auto optype = present & kOptype ? declared_optype(fctx, mf, false) : std::nullopt;
       if (optype) type.optype = optype;
-      const auto invalid =
-          enum_attr(fctx, mf, "invalidValueTreatment", {"returnInvalid", "asIs", "asMissing", "asValue"});
-      enum_attr(fctx, mf, "missingValueTreatment",
-                {"asIs", "asMean", "asMode", "asMedian", "asValue", "returnInvalid"});
-      const auto outliers = enum_attr(fctx, mf, "outliers", {"asIs", "asMissingValues", "asExtremeValues"});
-      number_attr(fctx, mf, "importance");
+      const auto invalid = present & kInvalid ? enum_attr(fctx, mf, "invalidValueTreatment",
+                                                          {"returnInvalid", "asIs", "asMissing", "asValue"})
+                                              : std::nullopt;
+      if (present & kMissingTreatment)
+        enum_attr(fctx, mf, "missingValueTreatment",
+                  {"asIs", "asMean", "asMode", "asMedian", "asValue", "returnInvalid"});
+      const auto outliers = present & kOutliers
+                                ? enum_attr(fctx, mf, "outliers", {"asIs", "asMissingValues", "asExtremeValues"})
+                                : std::nullopt;
+      if (present & kImportance) number_attr(fctx, mf, "importance");
       // MiningSchema.html: "asValue specifies that an invalid input value
       // should be replaced with the value specified by attribute
       // invalidValueReplacement which must be present in this case, or the
       // PMML is invalid."
-      if (invalid && *invalid == "asValue" && !attr(mf, "invalidValueReplacement"))
+      if (invalid && *invalid == "asValue" && !(present & kInvalidReplacement))
         error(code::kRequired, fctx, mf,
               "invalidValueTreatment=\"asValue\" without invalidValueReplacement (MiningSchema.html: \"which must be "
               "present in this case, or the PMML is invalid\")");
@@ -1708,6 +2018,7 @@ class Binder {
       // field's type widens the slot (N3, W-SLOT-WIDENED).
       const StaticType field_type = type.type;
       for (const char* rep : {"missingValueReplacement", "invalidValueReplacement"}) {
+        if (!(present & (kMissingReplacement | kInvalidReplacement))) break;
         const auto text = attr(mf, rep);
         if (!text || !field_type) continue;
         const DocumentValue v = read_document_text(*field_type, *text, parse_ctx_);
@@ -1722,8 +2033,8 @@ class Binder {
                       detail::quoted(*name) + " is widened to double (§3.4, N3, D22)");
         }
       }
-      const auto low = number_attr(fctx, mf, "lowValue");
-      const auto high = number_attr(fctx, mf, "highValue");
+      const auto low = present & kLow ? number_attr(fctx, mf, "lowValue") : std::nullopt;
+      const auto high = present & kHigh ? number_attr(fctx, mf, "highValue") : std::nullopt;
       if (outliers && *outliers == "asExtremeValues" && field_type == TypeId::Integer) {
         for (const auto& bound : {low, high})
           if (bound && std::trunc(*bound) != *bound) {
@@ -1734,23 +2045,30 @@ class Binder {
             break;
           }
       }
-      Binding& b = declare(key, Origin::MiningField, Container::MiningSchema, type, m, mf, index++);
+      const bool target_usage = usage && (*usage == "target" || *usage == "predicted");
+      if (mode_ == Mode::Load && source && !target_usage && type.type == source->type.type) {
+        // Load mode: the field reads its source with the source's type (its
+        // treatments are the engine's MiningField's): a pass-through, as above.
+        m.mining.emplace(key, const_cast<Binding*>(source));
+        index++;
+        continue;
+      }
+      Binding& b = declare(std::string(key), Origin::MiningField, Container::MiningSchema, type, m, mf, index++);
       b.source = source;
       b.state = Binding::State::Typed;
-      b.target_usage = usage && (*usage == "target" || *usage == "predicted");
+      b.target_usage = target_usage;
       m.mining.emplace(key, &b);
       // §3.2 "Aliasing": no treatment attributes -> an alias of the parent's
       // slot.
-      const bool treats = attr(mf, "missingValueReplacement") || attr(mf, "invalidValueReplacement") ||
-                          (invalid && *invalid != "returnInvalid") || (outliers && *outliers != "asIs") || optype ||
-                          attr(mf, "lowValue") || attr(mf, "highValue");
+      const bool treats = (present & (kMissingReplacement | kInvalidReplacement | kLow | kHigh)) ||
+                          (invalid && *invalid != "returnInvalid") || (outliers && *outliers != "asIs") || optype;
       if (source && !treats) layout_.slots[b.slot].alias_of = source->slot;
     }
   }
 
   // MiningSchema.html: "name: symbolic name of field, must refer to a field
   // in the scope of the parent of the MiningSchema's model element".
-  const Binding* resolve_mining_source(Ctx& ctx, pugi::xml_node mf, const std::string& key, Scope* parent_model) {
+  const Binding* resolve_mining_source(Ctx& ctx, pugi::xml_node mf, std::string_view key, Scope* parent_model) {
     if (!parent_model) {
       // FieldScope.html: "For top-level Models, their MiningSchema can refer
       // only to DataFields in the DataDictionary".
@@ -1771,9 +2089,31 @@ class Binder {
     // Segments that appear above/earlier in the parent MiningModel".
     Ctx parent_ctx;
     parent_ctx.model = parent_model;
-    parent_ctx.where = ctx.where;
-    const Binding* b = resolve(parent_ctx, mf, key);
-    return b;
+    parent_ctx.where_node = ctx.where_node;
+    parent_ctx.where_text = ctx.where_text;
+    const Binding* b = resolve(parent_ctx, mf, key, /*report_unresolved=*/false);
+    if (b) return b;
+    // Not in the parent's scope. When the name is a LocalTransformations
+    // DerivedField of another model (an earlier segment's:
+    // fix_ensemble_localtrans_scope), the engine's flat name space reaches it
+    // today and the document loads; P2.1 keeps it loading (W-SCOPE-FLAT)
+    // until P7 gives each scope its slots (B14, B16). Anything else is
+    // E-SCOPE-UNRESOLVED.
+    const auto declared = std::find_if(bindings_.begin(), bindings_.end(), [&key](const Binding& d) {
+      return d.name == key && d.container == Container::LocalTransformations;
+    });
+    if (declared != bindings_.end()) {
+      warning(code::kScopeFlat, parent_ctx, mf,
+              "field " + detail::quoted(key) + " is not in the parent model's scope; it is a " +
+                  std::string(origin_name(declared->origin)) + " of " +
+                  (scopes_[declared->scope].kind == Scope::Kind::Document ? std::string("the document")
+                                                                          : label_of(scopes_[declared->scope])) +
+                  " (MiningSchema.html: \"must refer to a field in the scope of the parent of the MiningSchema's model "
+                  "element\"; accepted until P7, B14)");
+      return &*declared;  // what the flat name space reads: its slot and type
+    }
+    error(code::kScopeUnresolved, parent_ctx, mf, "field " + detail::quoted(key) + " is not in scope");
+    return nullptr;
   }
 
   void declare_locals(Ctx& ctx, pugi::xml_node lt, Scope& m, std::vector<Binding*>& out) {
@@ -1785,7 +2125,7 @@ class Binder {
         continue;
       }
       Ctx fctx = ctx;
-      fctx.where = describe(df);
+      fctx.set_where(df);
       const auto name = attr(df, "name");
       if (!name) {
         error(code::kRequired, fctx, df, "attribute name is required in LocalTransformations (Transformations.html)");
@@ -1797,6 +2137,7 @@ class Binder {
       // LocalTransformations must be unique from any other names in their
       // scope."
       if (const std::string clash = name_clash(m, key, /*outputs=*/false); !clash.empty()) {
+        if (shadow_warning(fctx, df, m, key, "LocalTransformations DerivedField", /*td_too=*/true)) continue;
         error(code::kNameDuplicate, fctx, df,
               "name " + detail::quoted(*name) + " is already " + clash +
                   " (FieldScope.html: LocalTransformations names \"must be unique from any other names in their "
@@ -1808,6 +2149,40 @@ class Binder {
       m.local.emplace(key, &b);
       out.push_back(&b);
     }
+  }
+
+  // The two name clashes the engine scores and which are therefore warnings,
+  // not E-NAME-DUPLICATE, now that the binder decides at load (P2.1). The
+  // second declaration is not declared: lookups find the first, which is the
+  // slot type today's Indexer keeps (first declaration wins).
+  //   - a LocalTransformations DerivedField or OutputField named like a
+  //     MiningField of the same model. FieldScope.html: "The names of
+  //     DerivedFields in the LocalTransformations must be unique from any
+  //     other names in their scope", "The names of OutputFields must be unique
+  //     from any other names in their scope"; but real exporters write it
+  //     (AuditTree, IrisTree, IrisMultinomReg) and JPMML scores those
+  //     documents: decided 2026-11-18 (design §9).
+  //   - a LocalTransformations DerivedField named like a TransformationDictionary
+  //     DerivedField (fix_derivedfield_shadow, fix_ensemble_localtrans_shadow):
+  //     the same FieldScope.html rule, kept as a warning because documents
+  //     that load today must keep loading (P2.1; a decision for the user).
+  bool shadow_warning(const Ctx& ctx, pugi::xml_node node, const Scope& m, const std::string& key,
+                      std::string_view what, bool td_too) {
+    if (m.mining.count(key)) {
+      warning(code::kNameShadowsMiningField, ctx, node,
+              std::string(what) + " name " + detail::quoted(key) +
+                  " is already a MiningField of this model (FieldScope.html: names \"must be unique from any other "
+                  "names in their scope\"; accepted, decided 2026-11-18)");
+      return true;
+    }
+    if (td_too && !m.local.count(key) && document_->td_fields.count(key)) {
+      warning(code::kNameShadowsTD, ctx, node,
+              std::string(what) + " name " + detail::quoted(key) +
+                  " is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "
+                  "\"must be unique from any other names in their scope\"; accepted, P2.1)");
+      return true;
+    }
+    return false;
   }
 
   // What `key` already names in model scope m, or "".
@@ -1883,7 +2258,7 @@ class Binder {
       }
       Ctx fctx = ctx;
       fctx.in_output = true;
-      fctx.where = describe(of);
+      fctx.set_where(of);
       const auto name = attr(of, "name");
       if (!name) {
         error(code::kRequired, fctx, of, "attribute name is required (pmml-4-4.xsd)");
@@ -1894,6 +2269,7 @@ class Binder {
       // other names in their scope, i.e. within a model or model segment and
       // across all model segments in a model chain."
       if (const std::string clash = name_clash(m, key, /*outputs=*/true); !clash.empty()) {
+        if (shadow_warning(fctx, of, m, key, "OutputField", /*td_too=*/false)) continue;
         error(code::kNameDuplicate, fctx, of,
               "name " + detail::quoted(*name) + " is already " + clash +
                   " (FieldScope.html: OutputField names \"must be unique from any other names in their scope\")");
@@ -1924,7 +2300,7 @@ class Binder {
     Ctx ctx = model_ctx;
     ctx.in_output = true;
     ctx.current = &b;
-    ctx.where = describe(of);
+    ctx.set_where(of);
     ctx.enclosing = b.type.type;
     b.state = Binding::State::Typing;
     const auto feature_attr = attr(of, "feature");
@@ -2013,7 +2389,7 @@ class Binder {
         continue;
       }
       Ctx tctx = ctx;
-      tctx.where = describe(t);
+      tctx.set_where(t);
       // Targets.html: Target@field names the target; absent, the model's
       // single target.
       const Binding* field = nullptr;
@@ -2067,15 +2443,21 @@ class Binder {
         continue;
       }
       k++;
+      if (m.chain) chain_segments_.emplace(s.internal_object(), static_cast<std::uint32_t>(k));
       Ctx sctx = ctx;
       const auto id = attr(s, "id");
-      sctx.where = "Segment " + (id ? detail::quoted(*id) : "#" + std::to_string(k));
+      if (mode_ == Mode::Report)
+        sctx.set_where("Segment " + (id ? detail::quoted(*id) : "#" + std::to_string(k)));
+      else
+        sctx.set_where(s);
       number_attr(sctx, s, "weight");
       // Segment predicates are "evaluated in M" (§3.2), after the chain
-      // outputs of the segments above.
-      bind_predicate_child(sctx, s);
-      for (pugi::xml_node vw : s.children("VariableWeight"))
-        if (const auto f = attr(vw, "field")) resolve(sctx, vw, *f);
+      // outputs of the segments above. Load mode: the engine resolves them.
+      if (mode_ == Mode::Report) {
+        bind_predicate_child(sctx, s);
+        for (pugi::xml_node vw : s.children("VariableWeight"))
+          if (const auto f = attr(vw, "field")) resolve(sctx, vw, *f);
+      }
       pugi::xml_node child;
       for (pugi::xml_node c : s.children())
         if (c.type() == pugi::node_element && detail::is_model_element(c.name())) child = c;
@@ -2083,9 +2465,11 @@ class Binder {
         error(code::kRequired, sctx, s, "a model element is required (pmml-4-4.xsd)");
         continue;
       }
-      const std::size_t c = bind_model(child, m, &m, m.label + " > " + sctx.where);
+      const std::size_t c =
+          bind_model(child, m, &m, mode_ == Mode::Report ? m.label + " > " + sctx.where_text : std::string());
       models_[model_index].children.push_back(c);
       if (!m.chain) continue;
+      scopes_[models_[c].scope].chain_position = static_cast<std::uint32_t>(k);
       // FieldScope.html: "In a model chain, all Outputs from the segment
       // models become part of the enclosing mining model scope"; "Outputs
       // cannot be duplicated across segment since they all belong to the
@@ -2101,11 +2485,16 @@ class Binder {
         if (m.chain_outputs.count(o->name) || m.mining.count(o->name) || m.local.count(o->name) ||
             m.outputs.count(o->name)) {
           Ctx octx = sctx;
+          if (!m.chain_outputs.count(o->name) && !m.local.count(o->name) && !m.outputs.count(o->name) &&
+              shadow_warning(octx, o->declaration, m, o->name, "OutputField of a model chain segment", false))
+            continue;
           error(code::kNameDuplicate, octx, o->declaration,
                 "OutputField " + detail::quoted(o->name) +
                     " is already a name in the model chain's scope (FieldScope.html: \"Outputs cannot be duplicated "
                     "across segment since they all belong to the same scope\")");
-          continue;
+          // Still a chain output unless an earlier segment's is (emplace
+          // keeps the first): a later segment's MiningField naming it then
+          // resolves, and the duplicate is the document's only error.
         }
         m.chain_outputs.emplace(o->name, o);
       }
@@ -2114,8 +2503,9 @@ class Binder {
 
   // ---------------------------------------------------------------- model bodies
   void resolve_field_attributes(Ctx& ctx, pugi::xml_node node) {
+    const std::string_view n = node.name();
     for (const auto& e : detail::kFieldNameAttributes) {
-      if (e.element != node.name()) continue;
+      if (e.element != n) continue;
       for (std::string_view a : e.attributes)
         if (const auto v = attr(node, std::string(a).c_str())) resolve(ctx, node, *v);
     }

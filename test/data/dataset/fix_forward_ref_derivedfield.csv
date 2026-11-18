@@ -1,0 +1,7 @@
+s,i,b,y,pred,o_nd,o_tm,o_x
+a,3,true,1.0,1.0,1.0,three,a-t
+b,4,false,1.0,1.0,0.0,four,b-f
+a,4,false,1.0,1.0,1.0,four,other
+z,5,true,1.0,1.0,0.0,N/A,other
+,3,,1.0,1.0,N/A,three,miss
+b,,true,1.0,1.0,0.0,N/A,other

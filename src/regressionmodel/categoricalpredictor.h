@@ -7,6 +7,7 @@
 #ifndef CPMML_CATEGORICALPREDICTOR_H
 #define CPMML_CATEGORICALPREDICTOR_H
 
+#include "bind/load_scope.h"
 #include "core/datatype.h"
 #include "core/sample.h"
 #include "core/value.h"
@@ -71,8 +72,10 @@ class CategoricalPredictor {
     for (const auto& node : regressiontable_node.get_childs("CategoricalPredictor")) {
       field_name = node.required_attribute("name");
       if (seen.find(field_name) == seen.cend()) {
-        field_index = indexer->get_index(field_name);
-        field_datatype = indexer->get_type(field_name);
+        // scope.resolve (P2.1): the field's slot and declared type.
+        const auto field = cpmml::bind::scope_resolve(*indexer, node, field_name);
+        field_index = field.index;
+        field_datatype = field.datatype;
         result.push_back(CategoricalPredictor(regressiontable_node, field_name, field_index, field_datatype));
         seen.insert(field_name);
       }

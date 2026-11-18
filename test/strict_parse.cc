@@ -15,6 +15,10 @@
  *      NumberFormatException (asIs). Where JPMML departs from the XSD lexical
  *      space the spec defines PMML values over, the spec is followed and the
  *      case says so.
+ *   5. Names and scopes, decided by the binder at load (typed-core P2.1,
+ *      bind/load_scope.h): FieldScope.html's errors fail the load and name
+ *      the field; the clashes real documents contain still load; an invalid
+ *      input names its field (B45).
  *
  * Exit status is the number of failed checks.
  *******************************************************************************/
@@ -471,6 +475,221 @@ static void invalid_inputs() {
   }
 }
 
+// The ParsingException a document's load throws, "" when it loads, or
+// "OTHER: <what>" for any other exception (the base build threw
+// std::out_of_range for an unresolved name).
+static std::string load_error(const std::string& document) {
+  const std::string path = write_document(document);
+  std::string error;
+  try {
+    cpmml::Model model(path, false);
+  } catch (const cpmml::ParsingException& e) {
+    error = e.what();
+    if (error.empty()) error = "?";
+  } catch (const std::exception& e) {
+    error = std::string("OTHER: ") + e.what();
+  }
+  std::remove(path.c_str());
+  return error;
+}
+
+static bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+static std::string scoped(const std::string& dictionary, const std::string& td, const std::string& mining,
+                          const std::string& output, const std::string& lt, const std::string& table) {
+  return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>)" +
+         dictionary + "\n  </DataDictionary>" + td + R"(
+  <RegressionModel modelName="m" functionName="regression">
+    <MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/>)" +
+         mining + "</MiningSchema>" + output + lt + "<RegressionTable intercept=\"1\">" + table +
+         "</RegressionTable>\n  </RegressionModel>\n</PMML>";
+}
+
+static std::string lt_fields(const std::string& fields) {
+  return "<LocalTransformations>" + fields + "</LocalTransformations>";
+}
+
+static std::string derived(const std::string& name, const std::string& expression) {
+  return R"(<DerivedField name=")" + name + R"(" optype="continuous" dataType="double">)" + expression +
+         "</DerivedField>";
+}
+
+static std::string field_ref(const std::string& name) { return R"(<FieldRef field=")" + name + R"("/>)"; }
+
+static void names_and_scopes() {
+  // Sanity: the plain document loads.
+  CHECK(load_error(scoped("", "", "", "", "", R"(<NumericPredictor name="x" coefficient="2"/>)")).empty());
+
+  // FieldScope.html: "DerivedFields in the TransformationDictionary that have
+  // circular references ... are not valid PMML" (here in LocalTransformations,
+  // which has no evaluation order either). The base build loaded it.
+  const std::string cycle =
+      load_error(scoped("", "", "", "", lt_fields(derived("a", field_ref("b")) + derived("b", field_ref("a"))), ""));
+  CHECK(contains(cycle, "E-CYCLE") && contains(cycle, "circular reference"));
+  // A name that resolves nowhere (§3.2 step 5): in a transformation (the base
+  // build loaded it and the field was always missing) and in a model body (the
+  // base build threw std::out_of_range "unordered_map::at: key not found").
+  const std::string in_lt = load_error(scoped("", "", "", "", lt_fields(derived("a", field_ref("nope"))), ""));
+  CHECK(contains(in_lt, "E-SCOPE-UNRESOLVED") && contains(in_lt, "\"nope\""));
+  const std::string in_body =
+      load_error(scoped("", "", "", "", "", R"(<NumericPredictor name="nope" coefficient="2"/>)"));
+  CHECK(contains(in_body, "E-SCOPE-UNRESOLVED") && contains(in_body, "\"nope\"") &&
+        contains(in_body, "RegressionModel \"m\""));
+  // DataDictionary.html: "The name of a DataField must be unique".
+  CHECK(
+      contains(load_error(scoped(R"(<DataField name="x" optype="continuous" dataType="double"/>)", "", "", "", "", "")),
+               "E-NAME-DUPLICATE"));
+  // FieldScope.html: "For top-level Models, their MiningSchema can refer only
+  // to DataFields in the DataDictionary".
+  CHECK(contains(
+      load_error(scoped("", "<TransformationDictionary>" + derived("t", field_ref("x")) + "</TransformationDictionary>",
+                        R"(<MiningField name="t"/>)", "", "", "")),
+      "E-SCOPE-TOP-LEVEL"));
+
+  // Accepted with a warning: a forward reference (Q4, B12), a name equal to
+  // a MiningField of the same model (decided 2026-11-18), a LocalTransformations
+  // field named like a TransformationDictionary field (fix_derivedfield_shadow).
+  CHECK(load_error(scoped("", "", "", "", lt_fields(derived("a", field_ref("b")) + derived("b", field_ref("x"))),
+                          R"(<NumericPredictor name="a" coefficient="2"/>)"))
+            .empty());
+  CHECK(
+      load_error(
+          scoped(
+              "", "", "",
+              R"(<Output><OutputField name="y" optype="continuous" dataType="double" feature="predictedValue"/></Output>)",
+              "", ""))
+          .empty());
+  CHECK(
+      load_error(scoped("", "<TransformationDictionary>" + derived("t", field_ref("x")) + "</TransformationDictionary>",
+                        "", "", lt_fields(derived("t", field_ref("y"))), ""))
+          .empty());
+
+  // Segment OutputFields across siblings. Two segments of `method`, the first
+  // with OutputField `segment_output`; the second reads `o` in its MiningSchema
+  // (chain) or its Segment predicate (otherwise); the MiningModel has OutputField
+  // `parent_output`.
+  const auto segments = [](const std::string& method, const std::string& parent_output,
+                           const std::string& segment_output) {
+    const bool chain = method == "modelChain";
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary><DataField name="i" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/></DataDictionary>
+  <MiningModel functionName="regression">
+    <MiningSchema><MiningField name="i"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output><OutputField name=")" +
+           parent_output + R"(" optype="continuous" dataType="double" feature="predictedValue"/></Output>
+    <Segmentation multipleModelMethod=")" +
+           method + R"(">
+      <Segment id="1"><True/><RegressionModel functionName="regression">
+        <MiningSchema><MiningField name="i"/></MiningSchema>
+        <Output><OutputField name=")" +
+           segment_output + R"(" optype="continuous" dataType="double" feature="predictedValue"/></Output>
+        <RegressionTable intercept="1"><NumericPredictor name="i" coefficient="1"/></RegressionTable>
+      </RegressionModel></Segment>
+      <Segment id="2">)" +
+           (chain ? std::string("<True/>")
+                  : std::string(R"(<SimplePredicate field="o" operator="greaterThan" value="2"/>)")) +
+           R"(<RegressionModel functionName="regression">
+        <MiningSchema><MiningField name=")" +
+           (chain ? "o" : "i") + R"("/></MiningSchema>
+        <RegressionTable intercept="0"><NumericPredictor name=")" +
+           (chain ? "o" : "i") + R"(" coefficient="2"/></RegressionTable>
+      </RegressionModel></Segment>
+    </Segmentation>
+  </MiningModel>
+</PMML>)";
+  };
+  // FieldScope.html: "In a model chain, all Outputs from the segment models
+  // become part of the enclosing mining model scope."
+  CHECK(load_error(segments("modelChain", "p", "o")).empty());
+  // "Note that for model chaining, Outputs cannot be duplicated across segment
+  // since they all belong to the same scope": one error, and the later
+  // segment's MiningField "o" still resolves (no follow-on E-SCOPE-UNRESOLVED).
+  const std::string chain_duplicate = load_error(segments("modelChain", "o", "o"));
+  CHECK(contains(chain_duplicate, "has 1 error:") && contains(chain_duplicate, "E-NAME-DUPLICATE") &&
+        !contains(chain_duplicate, "E-SCOPE-UNRESOLVED"));
+  // "Outputs are generally local to a model, except when the model is used in
+  // a model chain": outside a chain an earlier sibling's OutputField is not in
+  // the parent's scope. JPMML 1.7.7 and the base build score this document
+  // (JPMML evaluates the predicate lazily, after segment 1); a departure.
+  CHECK(contains(load_error(segments("selectFirst", "p", "o")), "E-SCOPE-UNRESOLVED"));
+  // Within a model chain, only the Outputs of the segments before a reference
+  // are defined: FieldScope.html "All other fields in PMML must be defined
+  // before they are referenced" (Q4/D12 accept forward references within one
+  // container, not to a later segment's Output). Segment 1 reads segment 2's
+  // OutputField "q" in its predicate and in its model body (an implicit
+  // pass-through, Q3). JPMML 1.7.7: 'Field "q" is not defined'; the base build
+  // threw std::out_of_range; a first P2.1 build loaded both and read q missing.
+  const auto chain_forward = [](bool in_body) {
+    return std::string(R"(<?xml version="1.0"?><PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary><DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="y" optype="continuous" dataType="double"/></DataDictionary>
+  <MiningModel functionName="regression">
+    <MiningSchema><MiningField name="x"/><MiningField name="s"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Segmentation multipleModelMethod="modelChain">
+      <Segment id="1">)") +
+           (in_body ? "<True/>" : R"(<SimplePredicate field="q" operator="greaterThan" value="1"/>)") +
+           R"(<TreeModel functionName="regression" noTrueChildStrategy="returnLastPrediction">
+        <MiningSchema><MiningField name="x"/><MiningField name="s"/></MiningSchema>
+        <Output><OutputField name="p1" optype="continuous" dataType="double" feature="predictedValue"/></Output>
+        <Node score="7"><True/>)" +
+           (in_body ? R"(<Node score="8"><SimplePredicate field="q" operator="greaterThan" value="1"/></Node>)" : "") +
+           R"(</Node>
+      </TreeModel></Segment>
+      <Segment id="2"><True/><TreeModel functionName="regression">
+        <MiningSchema><MiningField name="x"/><MiningField name="s"/></MiningSchema>
+        <Output><OutputField name="q" optype="continuous" dataType="double" feature="predictedValue"/></Output>
+        <Node score="3"><True/></Node>
+      </TreeModel></Segment>
+    </Segmentation>
+  </MiningModel>
+</PMML>)";
+  };
+  for (const bool in_body : {false, true}) {
+    const std::string forward = load_error(chain_forward(in_body));
+    CHECK(contains(forward, "E-SCOPE-UNRESOLVED") && contains(forward, "\"q\""));
+  }
+  // The backward reference loads: segment 2's predicate reads segment 1's p1.
+  std::string backward = chain_forward(true);
+  const auto swap = [&backward](const std::string& from, const std::string& to) {
+    const std::size_t at = backward.find(from);
+    if (at != std::string::npos) backward.replace(at, from.size(), to);
+    return at != std::string::npos;
+  };
+  CHECK(swap(R"(<Node score="8"><SimplePredicate field="q" operator="greaterThan" value="1"/></Node>)", "") &&
+        swap(R"(<Segment id="2"><True/>)",
+             R"(<Segment id="2"><SimplePredicate field="p1" operator="greaterThan" value="1"/>)"));
+  CHECK(load_error(backward).empty());
+  // A Segment's predicate is evaluated before its model: the segment's own
+  // OutputField is not defined there (JPMML 1.7.7: 'Field "q" is not defined').
+  std::string own = backward;
+  own.replace(own.find(R"(field="p1")"), 10, R"(field="q")");
+  const std::string own_error = load_error(own);
+  CHECK(contains(own_error, "E-SCOPE-UNRESOLVED") && contains(own_error, "\"q\""));
+
+  // B45: the record is invalid when any MiningField fails its valid values
+  // (D25), and the error names that field, read by the model or not.
+  cpmml::Model model =
+      load(scoped(R"(<DataField name="z" optype="categorical" dataType="string"><Value value="a"/></DataField>)", "",
+                  R"(<MiningField name="z"/>)", "", "", ""));
+  cpmml::Input input;
+  input["x"] = "1";
+  input["z"] = "b";
+  std::string message;
+  try {
+    model.evaluate(input);
+  } catch (const cpmml::InvalidValueException& e) {
+    message = e.what();
+  }
+  CHECK(contains(message, "Invalid value for field: z") && contains(message, "\"b\""));
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -499,6 +718,7 @@ int main() {
   malformed_documents();
   absent_attributes();
   invalid_inputs();
+  names_and_scopes();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

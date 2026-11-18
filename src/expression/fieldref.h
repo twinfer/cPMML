@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "bind/load_scope.h"
 #include "core/value.h"
 #include "expression.h"
 
@@ -74,12 +75,15 @@ class SimpleFieldRef {
   SimpleFieldRef() : exist_missingreplacement(false), index(std::numeric_limits<size_t>::max()) {}
 
   SimpleFieldRef(const XmlNode& node, const std::shared_ptr<Indexer>& indexer)
+      : SimpleFieldRef(node, cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"))) {}
+
+  // scope.resolve (P2.1): the field's slot and declared type.
+  SimpleFieldRef(const XmlNode& node, const cpmml::bind::ResolvedField& field)
       : exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.required_attribute("field")),
-        index(indexer->get_index(field_name)),
-        mapmissing_to(exist_missingreplacement
-                          ? Value(node.required_attribute("mapMissingTo"), indexer->get_type(field_name))
-                          : Value()) {}
+        index(field.index),
+        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), field.datatype)
+                                               : Value()) {}
 
   inline Value value(const Sample& sample) const {
     Value value = sample[index].value;

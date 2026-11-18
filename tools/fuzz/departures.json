@@ -450,7 +450,7 @@
           "unreferenced_field": "Invalid value for field:? (\\w+)"
         }
       ],
-      "note": "cPMML's other message for the same rule, 'Sample: {...} didn't pass input validation', does not name the field, so v0 cannot match it"
+      "note": "since P2.1 (B45) both of cPMML's messages for this rule name the field ('Invalid value for field: NAME'); before, one was 'Sample: {...} didn't pass input validation', which v0 could not match"
     }
   ]
 }

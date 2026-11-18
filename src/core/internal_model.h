@@ -435,8 +435,7 @@ class InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
-    if (!mining_schema.validate(internal_sample))
-      throw cpmml::InvalidValueException("Sample: " + to_string(sample) + "didn't pass input validation");
+    if (!mining_schema.validate(internal_sample)) invalid_input(mining_schema, internal_sample, sample);
 
     // Load actual target value if provided in the raw input (needed for
     // feature="residual" output computation).  MiningSchema::prepare skips the
@@ -499,11 +498,25 @@ class InternalModel {
       for (const auto& derivedfield_name : derivedfields_dag)
         transformation_dictionary[derivedfield_name].prepare(internal_sample);
 
-    if (!mining_schema.validate(internal_sample))
-      throw cpmml::InvalidValueException("Sample: " + to_string(sample) + "didn't pass input validation");
+    if (!mining_schema.validate(internal_sample)) invalid_input(mining_schema, internal_sample, sample);
 
     return finish(predict_raw(internal_sample));
   };
+
+  // B45: the error names the field and its input (it used to print the whole
+  // record as "Sample: {...}didn't pass input validation"), as
+  // MiningField::handle_invalid does for returnInvalid. Out of line and cold:
+  // the field is looked for only after validate() has failed, so a valid
+  // record costs what it did before.
+  [[noreturn]] [[gnu::cold]] [[gnu::noinline]] static void invalid_input(
+      const MiningSchema& mining_schema, const Sample& internal_sample,
+      const std::unordered_map<std::string, std::string>& sample) {
+    const MiningField* field = mining_schema.first_invalid(internal_sample);
+    if (!field) throw std::logic_error("invalid_input: no MiningField fails validation");
+    const auto it = sample.find(field->name);
+    throw cpmml::InvalidValueException("Invalid value for field: " + field->name +
+                                       (it == sample.end() ? std::string() : " (input \"" + it->second + "\")"));
+  }
 
   static inline Target get_target(const XmlNode& node, const MiningSchema& mining_schema,
                                   const TransformationDictionary& transformation_dictionary,
