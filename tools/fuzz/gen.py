@@ -138,7 +138,7 @@ FUNCTIONS = {
     "threshold": (2, 2, [N, N], always("integer")), "floor": (1, 1, [N], to_integer),
     "ceil": (1, 1, [N], to_integer), "round": (1, 1, [N], to_integer), "modulo": (2, 2, [N, N], promote),
     "rint": (1, 1, [N], double_only), "expm1": (1, 1, [N], double_only), "ln1p": (1, 1, [N], double_only),
-    "hypot": (2, 2, [N, N], double_only), "sin": (1, 1, [N], double_only), "atan2": (2, 2, [N, N], double_only),
+    "hypot": (2, 2, [N, N], double_only), "sin": (1, 1, [N], double_only),
     "stdNormalCDF": (1, 1, [N], double_only), "erf": (1, 1, [N], double_only),
     "isMissing": (1, 1, [A], always("boolean")), "isNotMissing": (1, 1, [A], always("boolean")),
     "isValid": (1, 1, [A], always("boolean")), "isNotValid": (1, 1, [A], always("boolean")),
