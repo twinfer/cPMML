@@ -118,8 +118,20 @@ commit.
 | B30 | a class with a prediction but no distribution: only the first TargetValue keeps its prior | 3547cd9 | 4 | P8 |
 | B31 | a one-sided outlier bound (`lowValue` only) is ignored | 90847c1 | 4 | P7 |
 | B32 | date, time, dateTime and the `*Since` types are read as XSD doubles (`2020-01-01` is invalid) | 6914ecd, c9e8731 | 1 | P10 |
-| B33 | `pmml_tester` checks only the `output_name()` column, never the target column on its own | ceb6cec | test | P0 |
+| B33 | `pmml_tester` checks only the `output_name()` column, never the target column on its own: 38 fixtures whose `output_name()` is an OutputField had an unchecked target column. Fixed in 4298b39; a model with a residual OutputField keeps the actual value in that column, an input (Output.html), and it is not checked | ceb6cec, 4298b39 | test | P0 (done) |
 | B34 | OutputField `@segmentId` is not supported ("output fields from other segments may always be included by specifying the segmentId attribute", MultipleModels.html) | review N6 | 4 | P8 |
+| B35 | a MapValues InlineTable with a `NaN` key over a float or double field crashes the load (`TreeTableNode::add` dereferenced the null slot a second, never-matching lookup inserted) | fuzzer v0 `s20261118_c000152`, 16 crash cases | 3 | fixed in 7146160 (`fix_mapvalues_nan_key`); the §2.7 rule (NaN key is a load error, D26) in P2.2 |
+| B36 | `and`, `or`, `isValid`, `isNotValid`, `formatNumber` are refused at load | fuzzer v0 | — | P4.8, P7b.5, P4.9 |
+| B37 | an empty input cell `""` is treated as missing; for a string field it is the empty string, for any other type it is not in the lexical space, so invalid | fuzzer v0 (JPMML: empty string, or invalid for a number) | 1 | P6.8 |
+| B38 | a numeric field computed over a string input uses the string's internal code: `"3"` gives `-1.0` | fuzzer v0 | 1 | P6.8 |
+| B39 | a `NaN` input to a float or double field is rejected as invalid; the XSD float and double value spaces contain NaN | fuzzer v0 | 1 | P6.8 |
+| B40 | an `INF` input to Discretize gives missing instead of the open last bin (`rightMargin` absent means +∞) | fuzzer v0 | 3 | P4.4 |
+| B41 | built-ins outside their domain keep scoring: `substring` with `startPos` < 1, `sqrt` of a negative, `ln`/`log10` of a non-positive, `modulo` by 0 (spec: invalid, then invalidValueTreatment) | fuzzer v0 | 3 | P4.2 |
+| B42 | two MapValues rows whose keys are equal once typed are accepted; one of them silently wins | fuzzer v0 | 3 | P2.2 |
+| B43 | MiningField `invalidValueTreatment="asIs"` against an Interval throws; the spec says the value is used as is | fuzzer v0 checks | 4 | P7b.5 |
+| B44 | `equal(INF, INF)` is true; BuiltinFunctions.html: comparing ±INF with itself "is indeterminate and will result in a missing value" (JPMML is also true, so the fuzzer cannot see it: hand-written fixture) | review of D9 | 1 | P6.3 |
+| B45 | the validation error for an invalid value in a field the model does not read does not name the field | fuzzer v0 | — | P2.1 (diagnostics) |
+| B46 | weightedMajorityVote probabilities differ from JPMML in the last digit on large ensembles (summation order) | fuzzer v0 checks | 4 | P8.14 |
 
 ### 1.3 Probes behind the table
 
@@ -1121,15 +1133,14 @@ MiningSchema" (90847c1) cannot recur.
   libomp, which carries TSan annotations; libgomp is not TSan-instrumented),
   as a CI job, from P7 on.
 
-The OpenMP path is benchmarked as part of the gate (§6.4). Measured now
-(`design/aab_stats.txt`, Homebrew libomp, `THREADS=4`): it is faster only for
-AuditRandomForest (0.57×) and **slower** for every other ensemble —
-ensemble_iris_dectree 3.06×, IrisRandomForest 2.10×, HousingGBT* 1.46–1.76×,
-ensemble_audit_dectree 1.25× — because the parallel branch allocates a
-`unique_ptr` per segment even when the `if (ensemble.size() > 25)` clause keeps
-the loop sequential. That is a finding for the current code, outside this
-design's scope; P7 records both builds' numbers and the follow-up is noted in
-§9 (Q12).
+The OpenMP path is benchmarked as part of the gate (§6.4). Before Q12 the
+OpenMP build was faster only for AuditRandomForest (0.57×) and slower for
+every other ensemble (up to 3.06×), because the parallel branch allocated per
+segment even when the loop stayed sequential. Q12 (da1098e, §9) fixed it: an
+ensemble not worth a parallel loop runs the plain loop, and the decision is
+taken at load from estimated work. OpenMP head vs sequential head: geomean
+0.977, 0 of 23 models fail the gate, AuditRandomForest 0.521. The OpenMP
+build therefore joins the base-vs-head gate (§6.4 item 6).
 
 ### 5.3 Lazy DerivedFields
 
@@ -1286,16 +1297,28 @@ each round; `design/aab_stats.txt`) shows:
 **The gate (review S11).** `tools/bench-ab.sh BASE HEAD`:
 
 1. Interleaved rounds, base and head alternating with the order rotated each
-   round; 15 rounds per model (31 for models whose A/A interval is wider than
-   ±5%: AuditRandomForest, IrisLinearReg, IrisMultinomReg, single_iris_dectree,
-   HousingRFRegressor_PCA).
+   round; 15 rounds per model, 31 for the NOISY models. One rule decides
+   NOISY for every model: the five whose A/A interval is wider than ±5%
+   (AuditRandomForest, IrisLinearReg, IrisMultinomReg, single_iris_dectree,
+   HousingRFRegressor_PCA), plus every model wider than ±5% in at least 2 of
+   the 4 build × mode groups of the P0 A/A run (ensemble_iris_dectree,
+   IrisTree, HousingLRClassifier_PCA, HousingLinearRegressor_PCA,
+   fix_nn_missing_classification, fix_svm_ovo_tie, fix_nb_threshold,
+   IrisRuleSet, IrisText). The list lives in `benchmark/CMakeLists.txt`.
+   One discarded warm-up pass precedes round 1.
 2. Per model: ratio r = median(head)/median(base) and its 95% bootstrap
    interval (4 000 resamples of each side). **Fail** when the interval's lower
    bound exceeds 1.03, i.e. the slowdown is above 3% with 97.5% confidence.
    A failing model is re-run once with fresh rounds; it fails the gate only if
    it fails again. In the A/A study this rule fired on 0 of 23.
 3. Across models: the geometric mean of r and its bootstrap interval
-   (resampling rounds jointly). **Fail** when the geomean exceeds 1.01 and its
+   (resampling rounds jointly, 4 000 resamples). Models have 15 or 31
+   rounds, so each model draws k rounds per resample, uniform over its own
+   k, with base and head sharing the draw: with c the fewest rounds of any
+   model, a draw takes a shared round among the first c with probability
+   c/k and otherwise one of the remaining k − c. Every round has probability
+   1/k, and draws in the first c rounds stay aligned across models, where
+   the sweeps coincide. **Fail** when the geomean exceeds 1.01 and its
    lower bound exceeds 1.00, i.e. a broad 1% slowdown that is statistically
    real. The A/A geomean, 0.994, sits within that band's noise.
 4. Load: same method, per-model threshold 1.10.
@@ -1332,8 +1355,12 @@ Ground rules for every commit:
 - **Green.** All tests pass (341 today plus the fixtures the commit adds).
 - **Behaviour-preserving or behaviour-fixing, never both.** P0 adds
   `tools/fixture-dump-diff.sh`: it runs `pmml_tester --dump` over every
-  fixture (and the fuzz corpus, §8) with the base build and the head build and
-  diffs the text of every cell. A refactoring commit shows **no** diff. A fix
+  fixture (and, once P0.4 adds it, the fuzz corpus, §8) with the base build
+  and the head build and diffs the text of every cell. By default this
+  checkout's tester is built over each revision, as `bench-ab.sh` does. The
+  dump feeds every column of a fixture row, target included, exactly as ctest
+  does, so residual OutputFields are covered; an empty or N/A cell is left
+  out of the input. A refactoring commit shows **no** diff. A fix
   commit shows diffs only in the cells its message lists, each tied to a bug
   id and a fixture that fails on base with a quoted sentinel.
 - **Small.** One concern per commit; the files touched are listed below.
@@ -1353,10 +1380,10 @@ comes after it, one per commit.
 | commit | files | why green alone |
 |---|---|---|
 | P0.1 bench tooling | `tools/bench-ab.sh`, `tools/bench-compare.py`, `benchmark/model_benchmark.cc` (`--read-all`, `--zip`, `--repeat`), `benchmark/CMakeLists.txt` (`benchmark_all` with Housing and per-family models) | tools only |
-| P0.2 dump diff | `tools/fixture-dump-diff.sh` | tool only |
-| P0.3 tester checks the target column | `test/pmml_tester.cc` (B33) | the target columns already agree (verified with P0.2 before committing) |
-| P0.4 fuzzer v0 | `tools/fuzz/gen.py`, `tools/fuzz/JpmmlOracle.java`, `tools/fuzz/compare.py`, `tools/pmmltext.py` (shared with `tools/cross-validate-text.py`), `test/fuzz_runner.cc`, `tools/fuzz/departures.json` | not in ctest |
-| P0.5 staged fixtures | `test/data/pending/` (20 fixtures, `MANIFEST.md` naming the commit that registers each) | not registered |
+| P0.2 dump diff | `tools/fixture-dump-diff.sh`, `tools/fixture-dump-cells.py`, `test/pmml_tester.cc` (`--dump` for time series) | tool only (done: d3bb746, 391e3db) |
+| P0.3 tester checks the target column | `test/pmml_tester.cc` (B33). The target column holds the predicted value (JPMML's output) and is checked; for a model with a residual OutputField it holds the actual value, an input (Output.html: "the input data must include target values"), and is not checked | the target columns already agree (verified with P0.2 before committing; done: 4298b39) |
+| P0.4 fuzzer v0 | `tools/fuzz/gen.py`, `tools/fuzz/JpmmlOracle.java`, `tools/fuzz/compare.py`, `tools/pmmltext.py` (shared with `tools/cross-validate-text.py`), `test/fuzz_runner.cc`, `tools/fuzz/departures.json`, `tools/fuzz/run.py`, `test/CMakeLists.txt` (`fuzz_runner.exe`, `EXCLUDE_FROM_ALL`) | not in ctest (done: fcc1ddf, 4467498) |
+| P0.5 staged fixtures | `test/data/pending/` (20 fixtures, `MANIFEST.md` naming the commit that registers each) | not registered (done: 444fc92, 0d513c9) |
 
 ### P1 — type library and binder in report mode (nothing in the engine uses them)
 
@@ -1460,6 +1487,7 @@ for performance, now without semantic changes mixed in).
 | P6.5 | binary measures over strings | B3 | `fix_binsim_*` (re-derived cells) |
 | P6.6 | trailing blanks of categorical inputs | — | new fixture |
 | P6.7 | remaining fixtures of the failed patches | — | `fix_string_derived_set`, `fix_string_typed_values`, `fix_typed_derived_conversions`, `fix_string_sum_avg`, `fix_derived_cast_novalue`, `fix_output_integer_nonintegral` |
+| P6.8 | inputs parsed by the XSD lexical rules: `""` is the empty string or invalid, `NaN` is a float/double value, a string never reaches a numeric slot as a code | B37, B38, B39 | fuzzer v0 cases as fixtures |
 
 Each touches the comparison/cast/marker code it names and nothing else; each
 is green because its dump diff is exactly its listed cells.
@@ -1518,17 +1546,20 @@ cells are recomputed from the spec and the change is stated in the header.
 |---|---|---|---|
 | fix_string_unseen_equal | both | P6.1 | no |
 | fix_string_builtin_recode | type_value_tag | P6.1 | no |
-| fix_float_equal, fix_float_set_narrow | typed_values / type_value_tag | P6.2 | no |
+| fix_float_equal, fix_float_set_narrow | typed_values / type_value_tag | P6.2 | fix_float_equal: yes for `e_isin` (untyped Constants are double, D1: rows 1–2 true → false); fix_float_set_narrow: no |
 | fix_output_double_float_target | both | P6.2 | no |
-| fix_string_number_equal | both | P6.3 | yes for cells with the number on the left (symmetric rule) |
-| fix_typed_equal_mixed | typed_values | P6.3 | yes: float vs double compares in double (e.g. `e_f_c01` false) |
+| fix_string_number_equal | both | P6.3 | no (it has no cell with the number on the left) |
+| fix_typed_equal_mixed | typed_values | P6.3 | yes: float vs double compares in double (`e_f_c01` false), and `e_d_s3` (rows 1–2) and `e_i_s30` (rows 1, 2, 4) under D2; `e_b_ct`, `e_b_c1`, `e_s_b` mix boolean with another type, a load error under §2.7/Q7, so they move to a separate load-error check |
 | fix_binsim_clustering_string, _declared, fix_binsim_knn_string | type_value_tag | P6.5 | yes: strings `1`/`0` are XSD boolean literals (D15) |
-| fix_string_derived_set, fix_string_typed_values, fix_typed_derived_conversions, fix_string_sum_avg | both | P6.7 | no (checked against Q1) |
-| fix_derived_cast_novalue, fix_output_integer_nonintegral | both | P6.7 (after P4.7) | yes if Q2 is "record invalid" (they expect no value) |
-| fix_output_integer_chain | both | P7b.4 | depends on Q2 |
+| fix_string_derived_set, fix_string_typed_values, fix_typed_derived_conversions, fix_string_sum_avg | both | P6.7 | fix_typed_derived_conversions: yes for `e_d_s3` (D2: row 1 true → false); the others no (checked against Q1) |
+| fix_derived_cast_novalue, fix_output_integer_nonintegral | both | P6.7 (after P4.7) | yes, Q2 is "record invalid": fix_derived_cast_novalue rows 3–6, fix_output_integer_nonintegral rows 4–6 and 8 become invalid records; P4.7 adds an invalid-record marker to `pmml_tester` |
+| fix_output_integer_chain | both | P7b.4 | yes (Q2): rows 2 and 5 become invalid records |
 | fix_builtin_text_if | concat_formatnumber | P4.3 | no |
 | fix_builtin_text_concat | concat_formatnumber | P4.6 | yes if Q1 is Java text (it uses XQuery casts); add the spec's `month-year` row |
 | fix_builtin_text_formatnumber | concat_formatnumber | P4.9 | add the float-narrowing column |
+
+fix_float_set_narrow and fix_string_sum_avg have an empty `<Header/>`; the
+commit that registers them writes a header quoting the spec.
 
 The verifiers' probe models become fixtures in the commit that closes them:
 `vprobe2/q3,q4` (P2.2), `vp/p2` (P2.1), `vp/p6,p8` and `vx/probe/pa,pb,pd`
@@ -1555,6 +1586,7 @@ defects one at a time.
 | `tools/fuzz/JpmmlOracle.java` | loads many PMML files in one JVM (`javac -cp tools/pmml-evaluator-...jar`) and scores each case's rows, writing per-row values or the exception class and message | P0 |
 | `test/fuzz_runner.cc` | the same for cPMML, in one process | P0 |
 | `tools/pmmltext.py` | `same_number`, `classify`, CSV helpers moved out of `tools/cross-validate-text.py`, which imports them | P0 |
+| `tools/fuzz/run.py` | drives both runners over a corpus; a case on which `fuzz_runner` crashes is recorded as `CRASH` and the run resumes | P0 |
 | `tools/fuzz/compare.py` | cell classification and departure matching | P0 |
 | `tools/fuzz/departures.json` | the known departures (§8.5) | P0 |
 | coverage feedback, `tools/fuzz/shrink.py`, `fuzz_runner --dump-function-table` | biasing toward unhit (function, types) pairs; delta debugging to a minimal fixture; the generator reading `kBuiltins` | P11 (review O2) |
@@ -1595,10 +1627,13 @@ likewise; string `'', ' a', 'a ', a declared Value, an unseen text, '3',
 Per cell: identical text → pass; `FORMAT` and `ROUNDING` as in
 `cross-validate-text.py`; otherwise `VALUE`, `ERROR_CPMML_ONLY`,
 `ERROR_JPMML_ONLY`, `ERROR_BOTH` (pass), and at load `LOAD_CPMML_ONLY`,
-`LOAD_JPMML_ONLY`, `LOAD_BOTH` (pass). A non-pass cell is matched against the
+`LOAD_JPMML_ONLY`, `LOAD_BOTH` (pass: both sides refuse the document at
+load, nothing else) and `LOAD_CPMML_ROWS_JPMML` (a finding: cPMML refuses at
+load, JPMML loads and fails every row; grouped by JPMML's error), and
+`CRASH`. A non-pass cell is matched against the
 departure rules; a match is reported as expected with the rule id; anything
 else is a finding, written (by hand in P0–P10, by the shrinker from P11) as
-`test/data/pending/fuzz_<case-id>.zip` + `.csv` with a header annotation.
+`test/data/pending/model/fuzz_<case-id>.zip` + `test/data/pending/dataset/fuzz_<case-id>.csv` with a header annotation (the layout `tools/cross-validate-text.py` and `fixture-dump-diff.sh` read with `--fixtures test/data/pending`). In v0 the departure rules key on the case's tags, not on the failing sub-expression, so they are approximate; the P11 shrinker narrows them.
 Every case is reproducible from `--seed S --case N`. Budgets: quick mode 500
 cases with a fixed seed (~30 s, ctest label `fuzz` in P11); nightly 50 000.
 
@@ -1617,20 +1652,24 @@ Departures from JPMML that follow the spec, and departures from the spec
 | D6 | an aggregate's type comes from declared argument types even when one is skipped (`max(int, double missing)` is `-7.0`) | `-7` | "the least restrictive dataType will be inherited" |
 | D7 | `if` has the common type of THEN and ELSE | type of the branch taken | static typing; spec silent |
 | D8 | pow of integers with a negative exponent is invalid and follows invalidValueTreatment | throws regardless | Apply output table |
-| D9 | ±INF against the same INF → missing; **NaN in comparisons → missing (extrapolation)** | IEEE | Transformations.html / BuiltinFunctions.html for INF; for NaN the spec says only that arithmetic with NaN is NaN — chosen so NaN never silently compares false |
-| D10 | untyped Constant `NaN`/`INF`/`-INF` is a string | (measured in P0) | Transformations.html Constant |
+| D9 | ±INF against the same INF → missing; **NaN in comparisons → missing (extrapolation)** | Java `Double.compare`: `equal(INF, INF)` and `equal(NaN, NaN)` are true (measured in P0) | Transformations.html / BuiltinFunctions.html for INF; for NaN the spec says only that arithmetic with NaN is NaN — chosen so NaN never silently compares false |
+| D10 | untyped Constant `NaN`/`INF`/`-INF` is a string | a number: NaN, Infinity, -Infinity (measured in P0) | Transformations.html Constant |
 | D11 | **spec**: inputs, attributes and Array members use the strict, case-sensitive XSD lexical forms (`TRUE`, `inf`, `1d` invalid); only Constant text accepts INF/NaN in any case | lenient | DataDictionary.html → XML Schema Part 2; the case-insensitivity sentence is about Constants (§2.6) |
 | D12 | forward-referenced OutputFields and DerivedFields accepted, ordered by dependency | refuses forward OutputField references | leniency on invalid PMML (Q4) |
 | D13 | a FieldRef to a missing predictedValue applies mapMissingTo | fails the record | FieldRef: "The optional attribute mapMissingTo may be used to map a missing result" |
-| D14 | number → boolean only for 0 and 1 | refuses integers, accepts double 1.0 | XSD boolean lexical space |
+| D14 | number → boolean only for 0 and 1 | the same rule: accepts integer 0/1 and double 0.0/1.0, refuses 2, NaN, INF (measured in P0; not a departure, kept for the record) | XSD boolean lexical space |
 | D15 | binary measures read strings `1`/`0` as booleans | only `true`/`false` | XSD boolean lexical space |
 | D16 | `median` implemented | no `median` | BuiltinFunctions.html lists it |
 | D17 | (Q1) number → string text inside expressions is Java text, including in `concat` | Java text | **spec**: `concat` points to XQuery `fn:concat`, whose casts write a whole double as `2`; one text rule for the whole library is preferred (Q1) |
-| D18 | input `-0` stays `-0.0` | `0.0` | XSD double has −0 (confirmed in P0) |
+| D18 | input `-0` stays `-0.0` | `0.0` (measured in P0) | XSD double has −0 |
 | D19 | ordering over a categorical or Values-less ordinal string operand evaluates with a warning | refuses categorical | Q6 |
 | D20 | **spec**: integer `x/0` (x ≠ 0) is invalid, not INF | invalid (N/A under asMissing) | the spec's "INF will be returned" meets "INF and -INF can only be floating point numbers"; XQuery raises `err:FOAR0001` for integer division by zero |
 | D21 | Discretize/MapValues without `dataType` take the nearest enclosing declared type | same | spec and XSD silent; JPMML and today's cPMML |
 | D22 | **spec**: integer-field document text with a decimal point (`33.0`) is a double and the field is widened to compare; a replacement or clamp bound that is not an integer widens the slot | scores | Functions.html implicit casts only toward less restriction (§3.4) |
+| D23 | an arithmetic result NaN is NaN | fails the record (`Function "+" returned invalid value`) | Transformations.html: "All arithmetic expressions involving NaN will evaluate to NaN" (`departures.json` P0-NaN-result) |
+| D24 | a missing argument of any built-in gives missing (then mapMissingTo/defaultValue), except where the spec says otherwise; D3 is the case of `if` | `+` and `-` give missing; `abs`, `equal`, `threshold`, `floor`, `ceil`, `round`, `sqrt`, `uppercase`, `substring`, `replace`, … throw MissingArgumentException | BuiltinFunctions.html: "Except as noted below, any missing inputs to a built-in function will result in a missing value being returned" (P0-missing-argument) |
+| D25 | an invalid value in any MiningField with returnInvalid makes the record invalid, read or not | checks only fields the model reads | MiningSchema.html returnInvalid: "when an invalid input is encountered, the model should return a value indicating an invalid result" (P0-unread-invalid-input) |
+| D26 | a `NaN` key in a hashed table (MapValues InlineTable, large SimpleSetPredicate) is a load error (§2.7) | loads; the row never matches | spec silent; a NaN key can match nothing, so the row is dead text and most likely an export error. Until P2.2 cPMML loads it like JPMML (B35) |
 
 ---
 
@@ -1785,6 +1824,15 @@ Revision 2 answers `design-review/review.md` (approve with changes).
 | O3 ModelEvaluator concept | optional (§5.4) |
 | O4 Diagnostic fields | code, message, line; path and rule deferred (§3.6) |
 | Open questions | Q2 includes the integer target; Q6 rewritten per S5/S6; Q9 structured entries; Q11 conditional on S8/S9; Q12 added |
+
+**After P0 (2026-11-18).** The P0 agents' corrections: §5.2 and Q12 record
+the OpenMP fix; §6.4 states one NOISY rule and how models with different
+round counts are resampled jointly; §7 P0 rows list the files the commits
+actually touch and the target-column rule; §8.2 adds `run.py`; §8.4 defines
+`LOAD_BOTH`, `LOAD_CPMML_ROWS_JPMML` and the pending layout; §8.5 corrects
+D9, D10, D14 and D18 from measurement and adds D23–D26; the P-fixtures table
+lists the cells that need re-deriving; B33 is closed, and B35–B46 are the
+fuzzer v0 findings not already in the table.
 
 **Where this revision disagrees with the review.**
 
