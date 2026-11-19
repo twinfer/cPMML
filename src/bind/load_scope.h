@@ -32,13 +32,16 @@
  * cpmml::ParsingException listing the first 20 errors whose code is a rule of
  * names and scopes, the rules P2.1 makes authoritative: E-SCOPE-UNRESOLVED,
  * E-SCOPE-TOP-LEVEL, E-NAME-DUPLICATE, E-CYCLE. Every other binder error
- * stays report-only until the design commit that owns it (P2.7 ordering,
- * ...); P2.3's Constant errors are raised by the Constant constructor
+ * stays report-only until the design commit that owns it (Q7, ...); P2.3's
+ * Constant errors are raised by the Constant constructor
  * (expression/constant.h). P2.2's document-text errors (E-VALUE-MALFORMED,
  * E-ATTRIBUTE-MALFORMED, E-KEY-NAN, E-KEY-DUPLICATE) are raised by the
  * engine's constructors as they read the text, through the helpers at the
  * end of this file: Load mode does not bind expression or model bodies, and
  * the constructors read every such element, inline DerivedFields included.
+ * So is P2.7's E-TYPE-ORDER-MIXED (string x number ordering, §2.7), by the
+ * Apply constructor over expression_type's argument types
+ * (order_mixed_message).
  * The clashes that documents
  * which load today contain are warnings (W-NAME-SHADOWS-MININGFIELD,
  * W-NAME-SHADOWS-TD, W-SCOPE-FLAT; binder.h).
@@ -566,6 +569,19 @@ inline StaticType expression_type(pugi::xml_node node) {
 }
 
 inline StaticType expression_type(const XmlNode& node) { return expression_type(node.xml()); }
+
+// The load error of an Apply that orders a string against a number (§2.7,
+// design commit P2.7; typing.h order_mixed), raised by the Apply constructor
+// (core/builtinfunctions.h) with the argument types expression_type gives,
+// in the binder's words for E-TYPE-ORDER-MIXED (Binder::check_comparable).
+inline std::string order_mixed_message(const XmlNode& apply, const std::string& function, TypeId a, TypeId b) {
+  const LoadScope* scope = LoadScope::current();
+  const std::string model = scope ? scope->binder().scope_label(apply.xml()) : std::string();
+  return std::string(code::kTypeOrderMixed) + ": Apply \"" + function + "\" in " +
+         (model.empty() ? std::string("the TransformationDictionary") : model) + " orders " +
+         std::string(type_name(a)) + " against " + std::string(type_name(b)) +
+         " (§2.7; DataDictionary.html: \"Categorical field values can only be tested for equality\")";
+}
 
 }  // namespace cpmml::bind
 

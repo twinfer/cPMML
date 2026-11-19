@@ -1138,6 +1138,109 @@ static void no_silent_fallbacks() {
             .empty());
 }
 
+// Design commit P2.7 (§2.7, review S5): ordering a string against a number,
+// in either order, is a load error, E-TYPE-ORDER-MIXED. DataDictionary.html:
+// "Categorical field values can only be tested for equality, while ordinal
+// field values in addition have an order defined"; an ordinal string is
+// ordered by its Value sequence, an order of strings, and the least
+// restrictive type of a string and a number is string (Functions.html:
+// "string double float integer"), whose text order is no order of numbers.
+// §2.7 makes no carve-out for a number whose text is a declared Value.
+// Each document loads on the base build (af0485b), which compares the
+// string's code with the number. JPMML 1.7.7 refuses most at evaluation
+// (lazily): "Categorical value cannot be used in comparison operations" for a
+// categorical string field on the left, NumberFormatException for a number on
+// the left or a non-numeric string Constant on the right of a number field,
+// 'Values "10" and "4" cannot be ordered' for an ordinal string field against
+// a number that is not one of its Values. Departures, the spec deciding: it
+// orders a continuous string field against a number as text, an ordinal
+// string field against a number that is one of its Values by the Value
+// sequence, and a number field against a numeric-text string Constant as
+// numbers.
+static void ordering() {
+  const auto output_error = [](const std::string& expression, const std::string& td = "") {
+    return load_error(output_doc(transformed("boolean", expression), td));
+  };
+  const std::string mixed = "E-TYPE-ORDER-MIXED";
+  // Every ordering built-in (typing.h is_ordering), either order. An untyped Constant "solely
+  // of numbers" is an integer (Transformations.html).
+  for (const std::string f : {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"}) {
+    CHECK(contains(output_error("<Apply function=\"" + f + "\"><FieldRef field=\"s\"/><Constant>10</Constant></Apply>"),
+                   mixed));
+    CHECK(contains(output_error("<Apply function=\"" + f + "\"><Constant>10</Constant><FieldRef field=\"s\"/></Apply>"),
+                   mixed));
+  }
+  // The message names the function and the types, as the binder's does.
+  CHECK(contains(output_error(R"(<Apply function="lessThan"><FieldRef field="s"/><FieldRef field="i"/></Apply>)"),
+                 "E-TYPE-ORDER-MIXED: Apply \"lessThan\" in "));
+  CHECK(contains(output_error(R"(<Apply function="lessThan"><FieldRef field="s"/><FieldRef field="i"/></Apply>)"),
+                 "orders string against integer"));
+  CHECK(contains(output_error(R"(<Apply function="greaterThan"><FieldRef field="d"/><FieldRef field="s"/></Apply>)"),
+                 "orders double against string"));
+  // A string Constant, typed or inferred, against a number field.
+  CHECK(contains(output_error(R"(<Apply function="lessOrEqual"><FieldRef field="d"/><Constant dataType="string">abc</Constant></Apply>)"),
+                 mixed));
+  CHECK(contains(output_error(R"(<Apply function="lessOrEqual"><FieldRef field="i"/><Constant>abc</Constant></Apply>)"),
+                 mixed));
+  CHECK(contains(output_error(R"(<Apply function="lessThan"><FieldRef field="s"/><Constant dataType="float">2.5</Constant></Apply>)"),
+                 "orders string against float"));
+  // A numeric-text string Constant on the right of a number field (JPMML
+  // 1.7.7 orders it as a number: i = 3, 20, 1 give true, false, true).
+  CHECK(contains(output_error(R"(<Apply function="lessThan"><FieldRef field="i"/><Constant dataType="string">10</Constant></Apply>)"),
+                 "orders integer against string"));
+  // A number-typed expression (a numeric Apply) and a string-typed one.
+  CHECK(contains(output_error(R"(<Apply function="lessThan"><Apply function="uppercase"><FieldRef field="s"/></Apply>
+        <Apply function="+"><FieldRef field="i"/><Constant>1</Constant></Apply></Apply>)"),
+                 mixed));
+  // A continuous string DerivedField: the optype gives no order to text
+  // against a number (JPMML 1.7.7 orders the texts).
+  const std::string sc =
+      R"(<DerivedField name="sc" optype="continuous" dataType="string"><FieldRef field="s"/></DerivedField>)";
+  CHECK(contains(output_error(R"(<Apply function="greaterThan"><FieldRef field="sc"/><FieldRef field="d"/></Apply>)", sc),
+                 mixed));
+  // An ordinal string field with Values against a number whose text is one
+  // of them (JPMML 1.7.7 orders it by the Value sequence: so = 1, 10, 2 give
+  // true, false, false); §2.7 has no carve-out.
+  CHECK(contains(load_error(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="so" optype="ordinal" dataType="string"><Value value="1"/><Value value="2"/><Value value="10"/></DataField>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <TransformationDictionary>
+    <DerivedField name="t" optype="categorical" dataType="boolean"><Apply function="lessThan"><FieldRef field="so"/><Constant>2</Constant></Apply></DerivedField>
+  </TransformationDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="so"/><MiningField name="d"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="p" optype="continuous" dataType="double" feature="predictedValue"/>
+      <OutputField name="o" optype="categorical" dataType="boolean" feature="transformedValue"><FieldRef field="t"/></OutputField>
+    </Output>
+    <RegressionTable intercept="0"><NumericPredictor name="d" coefficient="1"/></RegressionTable>
+  </RegressionModel>
+</PMML>)"),
+                 "orders string against integer"));
+  // In a DerivedField, nested in if, and in an OutputField's inner Apply.
+  CHECK(contains(load_error(output_doc("", R"(<DerivedField name="t" optype="categorical" dataType="boolean">
+        <Apply function="greaterOrEqual"><FieldRef field="i"/><FieldRef field="s"/></Apply></DerivedField>)")),
+                 mixed));
+  CHECK(contains(output_error(R"(<Apply function="if"><Apply function="lessThan"><FieldRef field="s"/><Constant>3</Constant></Apply>
+        <Constant dataType="boolean">true</Constant><Constant dataType="boolean">false</Constant></Apply>)"),
+                 mixed));
+  // Controls that load. Equality of a string and a number (§2.7 D2: the
+  // number as text), either order.
+  CHECK(output_error(R"(<Apply function="equal"><FieldRef field="s"/><Constant>10</Constant></Apply>)").empty());
+  CHECK(output_error(R"(<Apply function="notEqual"><Constant>3</Constant><FieldRef field="s"/></Apply>)").empty());
+  // string x string ordering (Q6: a warning in report mode, D19).
+  CHECK(output_error(R"(<Apply function="lessThan"><FieldRef field="s"/><Constant dataType="string">10</Constant></Apply>)")
+            .empty());
+  CHECK(output_error(R"(<Apply function="lessThan"><FieldRef field="sc"/><FieldRef field="s"/></Apply>)", sc).empty());
+  // number x number in the promoted type (§2.5, D1).
+  CHECK(output_error(R"(<Apply function="lessThan"><FieldRef field="i"/><FieldRef field="d"/></Apply>)").empty());
+  CHECK(output_error(R"(<Apply function="greaterOrEqual"><Constant>10</Constant><FieldRef field="d"/></Apply>)").empty());
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -1170,6 +1273,7 @@ int main() {
   document_text();
   constants();
   no_silent_fallbacks();
+  ordering();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

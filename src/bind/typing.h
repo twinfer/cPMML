@@ -127,6 +127,38 @@ constexpr CommonType least_restrictive(StaticType a, StaticType b) {
   return {Common::Ok, TypeId::String};  // string with a number
 }
 
+// ---------------------------------------------------------------- ordering (§2.7)
+// The built-ins that order their two arguments. BuiltinFunctions.html lists
+// them under one heading with the equality tests ("equal, notEqual, lessThan,
+// lessOrEqual, greaterThan, greaterOrEqual ... Result is dependent on applying
+// either function to two input parameters") and does not name the ordering
+// subset; it is these four by what each tests (lessThan: "Check if field A is
+// less than field B"). equal, notEqual, isIn and isNotIn only test equality.
+constexpr bool is_ordering(std::string_view function) {
+  return function == "lessThan" || function == "lessOrEqual" || function == "greaterThan" ||
+         function == "greaterOrEqual";
+}
+
+// §2.7 (design commit P2.7, review S5): ordering a string against a number,
+// in either order, is a load error (E-TYPE-ORDER-MIXED). DataDictionary.html:
+// "Categorical field values can only be tested for equality, while ordinal
+// field values in addition have an order defined"; the order of an ordinal
+// string is its Value sequence ("For ordinal fields, if a sequence of Value
+// elements is given, the sequence defines the ascending order"), which is an
+// order of strings, and Functions.html's least restrictive type of a string
+// and a number is string ("string double float integer"), whose text order
+// ("10" < "3") is no order the spec gives the number. §2.7 makes no
+// carve-out for a number whose text is one of an ordinal string's Values
+// (JPMML 1.7.7 orders that one by the Value sequence; design P2.7 "As
+// built"). Unknown types give no answer (the defect that made them unknown
+// is reported once).
+// Shared by the binder (Binder::check_comparable, report mode) and the
+// engine's load (the Apply constructor, core/builtinfunctions.h).
+constexpr bool order_mixed(StaticType a, StaticType b) {
+  if (!a || !b) return false;
+  return (*a == TypeId::String && is_numeric(*b)) || (is_numeric(*a) && *b == TypeId::String);
+}
+
 // ---------------------------------------------------------------- dataType, optype
 struct DataTypeInfo {
   TypeId type;

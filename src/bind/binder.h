@@ -1534,8 +1534,9 @@ class Binder {
                 " (Functions.html: boolean \"can not be mixed with other types\", Q7)");
       return;
     }
-    if (ordering && ((x == TypeId::String && is_numeric(y)) || (is_numeric(x) && y == TypeId::String))) {
-      // §2.7: string x number ordering is a load error (P2.7).
+    if (ordering && order_mixed(x, y)) {
+      // §2.7: string x number ordering is a load error (P2.7; typing.h
+      // order_mixed, raised at load by the Apply constructor).
       error(code::kTypeOrderMixed, ctx, node,
             what + " orders " + std::string(type_name(x)) + " against " + std::string(type_name(y)) +
                 " (§2.7; DataDictionary.html: \"Categorical field values can only be tested for equality\")");
@@ -1609,7 +1610,7 @@ class Binder {
     const std::string_view name = sig->name;
     if (sig->params[0] == fn::Param::Comparable && n >= 2) {
       const std::string what = "Apply " + detail::quoted(name);
-      const bool ordering = detail::one_of(name, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"});
+      const bool ordering = is_ordering(name);
       for (std::size_t i = 1; i < n; i++) check_comparable(ctx, node, ordering, types[0], types[i], what);
     }
     // Result (§4.1, typing.h apply_result_type, shared with the engine's load).

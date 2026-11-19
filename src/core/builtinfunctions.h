@@ -151,6 +151,12 @@ class BuiltInFunction {  // inputs are mapped by position
     for (const auto& type : argument_types)
       if (type == TypeId::Float) narrow_arguments = true;
     if (comparison) {
+      // §2.7 (design commit P2.7): string x number ordering is a load error.
+      if (cpmml::bind::is_ordering(function_string))
+        for (std::size_t i = 1; i < argument_types.size(); i++)
+          if (cpmml::bind::order_mixed(argument_types[0], argument_types[i]))
+            throw cpmml::ParsingException(cpmml::bind::order_mixed_message(apply, function_string, *argument_types[0],
+                                                                           *argument_types[i]));
       typed_call = narrow_arguments;
       return;
     }
