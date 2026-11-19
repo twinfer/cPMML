@@ -56,7 +56,7 @@ class NumericPredictor {
 
   inline double get_term(const Sample& sample) const {
     const Value& value = sample[index].value;
-    return value.missing ? 0 : coefficient * std::pow(value.value, exponent);
+    return value.is_missing() ? 0 : coefficient * std::pow(value.as_double(), exponent);
   }
 
   static std::vector<NumericPredictor> to_numericpredictors(const std::vector<XmlNode>& nodes,

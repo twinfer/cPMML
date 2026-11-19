@@ -90,6 +90,8 @@ static void accessors() {
   const std::string rule = "§7 P3: each accessor is the field it names";
   static_assert(std::is_same_v<decltype(std::declval<const Value&>().text()), const std::string&>,
                 "text() returns the field, not a copy");
+  static_assert(std::is_same_v<decltype(std::declval<Value>().text()), std::string&&>,
+                "text() of a temporary is the field as an xvalue, as tmp.svalue was, so it moves");
   static_assert(std::is_same_v<decltype(std::declval<const Value&>().as_double()), double>);
   static_assert(std::is_same_v<decltype(std::declval<const Value&>().is_missing()), bool>);
 
@@ -116,6 +118,14 @@ static void accessors() {
   CHECK(text.empty() && w.has_numeric_text(), rule + " (clear_text writes the text only, as svalue.clear() did)");
   w.set_missing(true);
   CHECK(w.is_missing() && std::signbit(w.as_double()), rule);
+
+  // A text too long for the small-string buffer: moving it hands over its
+  // heap buffer, copying it allocates another one.
+  Value long_text(std::string(64, 'x'), DataType::DataTypeValue::STRING);
+  const char* const buffer = long_text.text().data();
+  const std::string taken = std::move(long_text).text();
+  CHECK(taken == std::string(64, 'x') && taken.data() == buffer,
+        rule + " (text() of a temporary moves the field, as tmp.svalue did)");
 }
 
 static void missing_values(t::ParseContext& ctx) {

@@ -48,11 +48,11 @@ class PredictorTerm {
     double partial = 1;
     for (const auto& field : fields) {
       const Value& value = field.value(sample);
-      if (value.missing)
+      if (value.is_missing())
         throw cpmml::MissingValueException("missing value index: " + std::to_string(field.index) +
                                            " name: " + field.field_name);
       else
-        partial *= value.value;
+        partial *= value.as_double();
     }
 
     return coefficient * partial;

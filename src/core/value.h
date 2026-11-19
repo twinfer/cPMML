@@ -83,7 +83,11 @@ class Value {
   // more (no copy, no check).
   inline double as_double() const { return value; }
   inline bool is_missing() const { return missing; }
-  inline const std::string& text() const { return svalue; }
+  inline const std::string& text() const& { return svalue; }
+  // The text of a temporary is the field as an xvalue, as `tmp.svalue` was,
+  // so a caller that takes it (return f().text();) moves it, not copies it
+  // (P3.2: TransformedValue::eval_str).
+  inline std::string&& text() && { return std::move(svalue); }
   inline bool has_numeric_text() const { return numeric_text; }
 
   inline void set_double(const double number) { value = number; }

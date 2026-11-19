@@ -432,8 +432,8 @@ Query build_query(const SampleT& sample, const std::vector<ComparisonField>& fie
   for (size_t i = 0; i < fields.size(); i++) {
     total_weight += qi(i);
     const auto& value = sample[fields[i].field_index].value;
-    if (value.missing) continue;
-    query.values[static_cast<Eigen::Index>(i)] = value.value;
+    if (value.is_missing()) continue;
+    query.values[static_cast<Eigen::Index>(i)] = value.as_double();
     query.present.push_back(i);
     present_weight += qi(i);
   }

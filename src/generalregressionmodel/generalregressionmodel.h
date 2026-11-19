@@ -179,10 +179,10 @@ class GeneralRegressionModel : public InternalModel {
 
  private:
   bool has_missing_input(const Sample& sample) const {
-    if (has_offset_variable && sample[offset_variable_index].value.missing) return true;
+    if (has_offset_variable && sample[offset_variable_index].value.is_missing()) return true;
     for (const auto& [param, cells] : pp_matrix)
       for (const auto& cell : cells)
-        if (sample[cell.predictor_index].value.missing) return true;
+        if (sample[cell.predictor_index].value.is_missing()) return true;
     return false;
   }
 
@@ -382,8 +382,8 @@ class GeneralRegressionModel : public InternalModel {
     double result = 1.0;
     for (const auto& cell : cells) {
       const Value& xv = sample[cell.predictor_index].value;
-      if (xv.missing) throw cpmml::MissingValueException("missing value for GeneralRegression predictor");
-      const double x = xv.value;
+      if (xv.is_missing()) throw cpmml::MissingValueException("missing value for GeneralRegression predictor");
+      const double x = xv.as_double();
       if (cell.is_factor) {
         // "set x_i to 1 if the case being scored matches this row, 0 if it
         // does not" (GeneralRegression, scoring). The level used to be read
@@ -406,8 +406,8 @@ class GeneralRegressionModel : public InternalModel {
     if (has_offset_value) off += offset_value;
     if (has_offset_variable) {
       const Value& v = sample[offset_variable_index].value;
-      if (v.missing) throw cpmml::MissingValueException("missing value for offset variable");
-      off += v.value;
+      if (v.is_missing()) throw cpmml::MissingValueException("missing value for offset variable");
+      off += v.as_double();
     }
     return off;
   }

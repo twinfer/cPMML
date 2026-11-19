@@ -63,10 +63,10 @@ class RegressionTable {
   // indicator 0, so categorical fields are deliberately not checked here.
   inline bool has_missing_input(const Sample& sample) const {
     for (const auto& numeric_predictor : numeric_predictors)
-      if (sample[numeric_predictor.index].value.missing) return true;
+      if (sample[numeric_predictor.index].value.is_missing()) return true;
     for (const auto& predictor_term : predictor_terms)
       for (const auto& field : predictor_term.fields)
-        if (field.value(sample).missing) return true;
+        if (field.value(sample).is_missing()) return true;
     return false;
   }
 

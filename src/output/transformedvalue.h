@@ -94,15 +94,15 @@ class TransformedValue : public OutputExpression {
   // The text of a string value; a number is written by OutputField::add_output
   // through value_kind.
   inline std::string eval_str(const Sample& sample, const InternalScore& /*score*/) const override {
-    return expression->eval(sample).svalue;
+    return expression->eval(sample).text();
   };
 
   inline double eval_double(const Sample& sample, const InternalScore& /*score*/) const override {
     const Value v = expression->eval(sample);
-    if (v.missing) return double_min();
+    if (v.is_missing()) return double_min();
     // A number or boolean constant held as a string slot's text (Value::
     // numeric_text): a numeric OutputField reads its number.
-    return v.numeric_text ? v.text_number() : v.value;
+    return v.has_numeric_text() ? v.text_number() : v.as_double();
   };
 };
 

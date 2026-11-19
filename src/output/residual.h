@@ -34,7 +34,7 @@ class Residual : public OutputExpression {
   inline virtual double eval_double(const Sample& sample, const InternalScore& score) const override {
     if (target_index == std::numeric_limits<size_t>::max()) return double_min();
     const Value& actual_val = sample[target_index].value;
-    if (actual_val.missing) return double_min();
+    if (actual_val.is_missing()) return double_min();
 
     // Classification residual (JPMML semantics): X − p(predicted), where
     // X = 1 if the actual value equals the predicted category, 0 otherwise.
@@ -43,13 +43,13 @@ class Residual : public OutputExpression {
     auto it = score.probabilities.find(score.score);
     if (it == score.probabilities.end() && !score.raw_score.empty()) it = score.probabilities.find(score.raw_score);
     if (it != score.probabilities.end()) {
-      const double x = (actual_val.svalue == score.score || actual_val.svalue == score.raw_score) ? 1.0 : 0.0;
+      const double x = (actual_val.text() == score.score || actual_val.text() == score.raw_score) ? 1.0 : 0.0;
       return x - it->second;
     }
 
     // Regression: actual_value - predicted_value
     if (is_double_min(score.double_score)) return double_min();
-    return actual_val.value - score.double_score;
+    return actual_val.as_double() - score.double_score;
   }
 };
 

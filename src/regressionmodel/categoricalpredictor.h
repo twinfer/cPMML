@@ -44,7 +44,7 @@ class CategoricalPredictor {
   inline double get_term(const Sample& sample) const {
     Value value = sample[index].value;
 
-    if (value.missing || coefficients.find(value) == coefficients.cend()) return 0;
+    if (value.is_missing() || coefficients.find(value) == coefficients.cend()) return 0;
 
     return coefficients.at(value);
   }
