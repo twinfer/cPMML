@@ -1563,6 +1563,32 @@ only strings the kernel builds are packed. The P4 dump diff (empty) checks it.
 | P4.8 `and`, `or` | `fn/table.h`, `fn/kernels.h` | — | new functions only |
 | P4.9 `formatNumber` | `fn/kernels.h` (ported from the concat_formatnumber attempt with its verifier's float-narrowing fix) | — | new function only |
 
+As built (P4.1, base 33bc1dc): one table, `src/fn/table.h`, which is the binder's former `src/bind/function_table.h` moved there (binder.h and typing.h include it; `bind/function_table.h` is gone), with one new column, `op`. That column names the kernel, and `fn::instantiate(op)` in `fn/kernels.h` maps it to a function pointer, once, at load. This departs from §4.1, which puts a `KernelFactory instantiate` pointer in the row. With a pointer, the table header the binder includes would depend on the engine's `Value`. A constexpr check ties the column to `engine`: a row has a kernel exactly when `engine == Today`, and names and kernels are distinct. The rows are reordered: the 59 that the engine evaluates come first, in the order of the old `BuiltInFunction::TABLE`, then the 11 that it refuses. This keeps the load error `unsupported value "and" for Apply@function; cPMML supports +, -, *, ...` word for word, because that error is a LOAD-ERROR cell of the dumps (the pending `fix_builtin_text_formatnumber`). Every row's typing columns are unchanged, checked field by field against the old table. `fn::engine_row` gives the old load errors in the old order: the log/ceiling hints from `fn::hint_for`, the unknown name, a refused function, then E-ARITY, E-TYPE-ORDER-MIXED, mapMissingTo, defaultValue and invalidValueTreatment. `core/builtinfunctions.h` is deleted. `output/transformedvalue.h` included it only for `bind/load_scope.h` and now includes that directly. `expression/apply.h`'s `Apply` derives from `fn::ApplyNode` (`fn/apply_node.h`, §4.3) and only builds the argument expressions. `expression/expressionbuilder.h` needed no change.
+
+Kernels: `fn::scalar` computes over the P1 types (`types::Double plus(types::Double, types::Double)`, ...). Each expression is the old one, operation for operation, so the floating-point results are bit-identical. `fn::adapter` reads the operands from the old `Value`. While D4 stands, a numeric operand is a `types::Double` of the stored double, narrowed to a float when its static type is float, as before. It is not `unpack<Integer>`, which would make 3.5 in an integer slot invalid (B17 is P4.7's to change). Comparisons delegate to `LegacyCompare` (the Value operators). uppercase, lowercase and trimBlanks delegate to `LegacyStringEdit` (the Value's in-place edit), and substring edits a copy of its argument the same way. Each of the four therefore returns its argument's Value and keeps its string code (B2). Only concat and replace pack a string they built, as `Value(text, STRING)`. No string makes a round trip through unpack/pack (decided 2026-11-19 after P3). Kernels never throw for data: they return `Status::Invalid` in the places where the old code threw. Those places are: pow of integers with a negative exponent, normalCDF/normalPDF with sigma ≤ 0, substring with a startPos past the end (`std::out_of_range` before), and a `std::regex_error` in replace or matches. `ApplyNode` applies today's treatment to `Status::Invalid`. The one behaviour lost is that the old `catch (const std::exception&)` also turned the Indexer's "no active Indexer" `InvalidValueException` into invalidValueTreatment. Every scoring entry point sets an Indexer, so that path is unreachable, and it now propagates. Per record: the arguments are constructed in place in an `ArgBuffer` (four inline, then the heap) instead of a `std::vector<Value>` per call. The kernel is a function pointer, so there is no `std::function`, no table lookup and no copy of the arguments, except for narrowed float comparisons, as before.
+
+Legacy switches (`fn::legacy`, `fn/kernels.h`). Each is a `constexpr bool` with a static_assert, so it cannot be turned off without writing its spec rule. The code each keeps is under `if constexpr` or named in a comment:
+
+- `B22` (P4.2): the old invalid handling in `ApplyNode::eval`. asIs turns an invalid result into missing. asMissing prefers mapMissingTo. returnInvalid throws "evaluating apply function".
+- `B41` (P4.2): no domain checks for sqrt, ln, log10, modulo by 0 and substring's startPos < 1.
+- `D3` (P4.3): `if` is evaluated by `ApplyNode::eval_if`, and its row's kernel is null.
+- `B21` and `D20` (P4.4): 0/0 is NaN, integer x/0 is ±INF, and floor/ceil/round/modulo of INF give a number.
+- `D4` (P4.5): integers are computed and carried as doubles.
+- `B23` (P4.6): concat reads `text()`.
+- `B2` and `LegacyCompare` (P6).
+
+Tests: `test/fn_table.cc` (160 checks) covers several things:
+
+- The table/engine agreement, all 59 kernels and the four load messages.
+- The kernels against BuiltinFunctions.html's modulo examples, threshold, §4.2's integer division, D8, the normal sigma rule, the six comparisons, isIn/isNotIn, and float narrowing of arguments and result.
+- Functions.html's Apply output table on a whole document (pow of integers with exponent -2), on the rows where spec and engine agree. returnInvalid makes the record invalid. asMissing gives missing, then defaultValue.
+- Each switch, pinned by its §1.2 symptom (B22 included: asIs gives missing, and asMissing prefers mapMissingTo).
+- `ArgBuffer` both inline and on the heap.
+
+18 mutations of `fn/` were run on a copy of the tree, and every one fails the suite.
+
+The fixture `fix_builtin_kernels_coverage` covers the functions that no fixture applied before. These are log10, greaterOrEqual, isNotIn, lowercase, replace, matches, asin, acos, sinh, cosh and tan. It also covers six- and five-argument aggregates (the heap path) with and without mapMissingTo. Its expected values come from JPMML 1.7.7, except the cells of rows with a missing input that JPMML refuses (D24), which are spec-derived. JPMML also gives `isNotIn(missing, ...)` true, where the spec ("any missing inputs ... missing value") gives missing. The fixture passes on base by construction, since the item preserves behaviour. Its purpose is to catch kernel mutations.
+
 ### P5 — representation swap (behaviour-preserving)
 
 One commit, now small: `core/value.h` becomes `types::Value`; the document

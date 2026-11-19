@@ -70,6 +70,19 @@ target_link_libraries(value_adapters.exe ${PROJECT_NAME} pugixml::pugixml miniz 
 add_dependencies(unit_tests value_adapters.exe)
 add_test(value_adapters value_adapters.exe)
 
+# The built-in function table, its kernels and the Apply wrapper's argument
+# buffer (src/fn/, docs/design/typed-core.md §4, commit P4.1): a kernel for
+# every function the engine evaluates, the engine's load errors for the
+# others, the kernels against BuiltinFunctions.html's examples, and the
+# legacy switches pinned by the symptoms of the bugs they keep.
+add_executable(fn_table.exe fn_table.cc)
+target_include_directories(fn_table.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(fn_table.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(fn_table.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(fn_table.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests fn_table.exe)
+add_test(fn_table fn_table.exe)
+
 # Must-not-compile cases of the type library (§2.2, §6.4): each is compiled
 # at test time with this build's compiler, once with its control (must
 # compile) and once as written (must fail with the intended diagnostic, the

@@ -39,7 +39,7 @@
  *               allowed, with one exception" (§3.5; Q4: W-FORWARD-REF), cycles
  *   types       §3.4 per element, §2.5 promotion, §2.6 casts, §2.7 comparison
  *               (E-TYPE-ORDER-MIXED, Q6, Q7), the K1 document-text rule
- *   functions   function_table.h (§4.2)
+ *   functions   fn/table.h (§4.2)
  *
  * Since P2.1 the engine binds every document at load through
  * bind/load_scope.h (Binder::Mode::Load).
@@ -64,7 +64,7 @@
 #include <vector>
 
 #include "bind/diagnostics.h"
-#include "bind/function_table.h"
+#include "fn/table.h"
 #include "bind/scope.h"
 #include "bind/typing.h"
 #include "core/types/cast.h"
@@ -198,7 +198,7 @@ inline std::string quoted(std::string_view s) { return "\"" + std::string(s) + "
 // defined in the same way and have two parameters"), "a variable number of
 // <FieldRef/>" for the aggregates, "two or more parameters" (concat), "THEN
 // part is required ... ELSE part is optional" (if). Shared by the binder's
-// E-ARITY and the engine's load (design commit P2.8b2, core/builtinfunctions.h
+// E-ARITY and the engine's load (design commit P2.8b2, fn/apply_node.h
 // through load_scope.h arity_message).
 inline bool arity_fits(const fn::Signature& sig, std::size_t n) {
   return n >= sig.min_args && (sig.max_args == fn::kVariadic || n <= sig.max_args);

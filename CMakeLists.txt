@@ -221,7 +221,9 @@ add_library(
         src/core/sample.h
         src/core/transformationdictionary.h
         src/core/datatype.h
-        src/core/builtinfunctions.h
+        src/fn/table.h
+        src/fn/kernels.h
+        src/fn/apply_node.h
         src/core/invalidvaluetreatmentmethod.h
         src/core/outliertreatmentmethod.h
         src/core/derivedfield.h

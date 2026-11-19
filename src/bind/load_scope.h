@@ -516,7 +516,7 @@ inline bool is_nan_key(const std::string& text, const DataType& field_type) {
 // Design commit P2.4: the static type of an expression element, which the
 // engine's load reads where it used to re-walk the document
 // (BuiltInFunction::expression_kind, deleted): an Apply's argument and
-// result types (expression/apply.h, core/builtinfunctions.h) and the type of
+// result types (expression/apply.h, fn/apply_node.h) and the type of
 // a transformedValue's expression (output/transformedvalue.h). Load mode
 // does not type expression bodies (Binder::resolve_expression_names), so the
 // types are worked out on demand here by the binder's §3.4 rows, element by
@@ -638,7 +638,7 @@ inline StaticType expression_type(const XmlNode& node) { return expression_type(
 
 // The load error of an Apply that orders a string against a number (§2.7,
 // design commit P2.7; typing.h order_mixed), raised by the Apply constructor
-// (core/builtinfunctions.h) with the argument types expression_type gives,
+// (fn/apply_node.h) with the argument types expression_type gives,
 // in the binder's words for E-TYPE-ORDER-MIXED (Binder::check_comparable).
 // 'Apply "f" in <model>' (the TransformationDictionary when no model is above
 // it), how the engine's load errors of an Apply name it.
@@ -656,7 +656,7 @@ inline std::string order_mixed_message(const XmlNode& apply, const std::string& 
 
 // The load error of a built-in Apply with the wrong number of arguments
 // (design commit P2.8b2; binder.h arity_fits), raised by the Apply
-// constructor (core/builtinfunctions.h), in the binder's words for E-ARITY:
+// constructor (fn/apply_node.h), in the binder's words for E-ARITY:
 // 'E-ARITY: Apply "+" in RegressionModel ... has 1 argument; + takes 2
 // (BuiltinFunctions.html)'. `n` counts the element children after
 // Extension* (pmml-4-4.xsd Apply; B25).

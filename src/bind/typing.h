@@ -66,7 +66,7 @@
 #include <string_view>
 #include <vector>
 
-#include "bind/function_table.h"
+#include "fn/table.h"
 #include "core/types/parse.h"
 #include "core/types/value.h"
 #include "utils/lexical.h"
@@ -156,7 +156,7 @@ constexpr bool is_ordering(std::string_view function) {
 // built"). Unknown types give no answer (the defect that made them unknown
 // is reported once).
 // Shared by the binder (Binder::check_comparable, report mode) and the
-// engine's load (the Apply constructor, core/builtinfunctions.h).
+// engine's load (the Apply constructor, fn/apply_node.h).
 constexpr bool order_mixed(StaticType a, StaticType b) {
   if (!a || !b) return false;
   return (*a == TypeId::String && is_numeric(*b)) || (is_numeric(*a) && *b == TypeId::String);
@@ -298,7 +298,7 @@ inline ConstantKind infer_constant(std::string_view text) {
 // (`dataType="string"`), and the distribution, expm1, hypot, ln1p, rint and
 // trigonometric functions (`dataType="double"`; normalPDF, normalIDF,
 // stdNormalPDF, stdNormalIDF and erf "have similar to above
-// pseudo-declarations"). The function table (function_table.h) gives some
+// pseudo-declarations"). The function table (fn/table.h) gives some
 // parameters a type the spec's declarations do not: and and or ("The
 // function takes a variable number of fields as parameters", no
 // ParameterField) and the referenceYear of dateDaysSinceYear and
@@ -384,7 +384,7 @@ inline types::Value parse_constant(TypeId type, std::string_view text, types::Pa
 //                     is, and `boolean_mixed` when one is boolean and the
 //                     other is not (no common type, Q7).
 // Shared by the binder (Binder::bind_apply, which reports what it finds) and
-// the engine's load (the Apply constructor, core/builtinfunctions.h, and
+// the engine's load (the Apply constructor, fn/apply_node.h, and
 // load_scope.h expression_type).
 struct ApplyType {
   StaticType type;

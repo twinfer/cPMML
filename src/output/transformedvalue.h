@@ -9,7 +9,7 @@
 #ifndef CPMML_SRC_EXPRESSION_TRANSFORMED_VALUE_H_
 #define CPMML_SRC_EXPRESSION_TRANSFORMED_VALUE_H_
 
-#include "core/builtinfunctions.h"
+#include "bind/load_scope.h"
 #include "expression/fieldref.h"
 #include "outputexpression.h"
 
