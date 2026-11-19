@@ -17,7 +17,9 @@ ComplexPartialScore, the SVM alternate category and the GRM offset, base
 28fbb83), each the rows on which cPMML disagrees with JPMML and the spec:
 `fix_scorecard_complex_score_missing` (B49), `fix_scorecard_reasoncode_negative`
 (B50), `fix_grm_offset_general_linear` (B51) and `fix_svm_binary_no_alternate`
-(B48) (notes 11-14).
+(B48) (notes 11-14). Design item P4.3b registered
+`fix_scorecard_reasoncode_negative` (B50 decided not a bug, D35) and added
+`fix_grm_offset_multinomial` (B51, multinomialLogistic; note 15).
 
 Layout: `model/<name>.zip` (one `<name>.pmml` inside) and
 `dataset/<name>.csv`, the same layout as `test/data/`, with LF line endings.
@@ -95,8 +97,9 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`) | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
 | fix_segment_outer_localtrans_derived | P7b.3 | no (note 10) | FAIL `predicted:   expected: 1553.0` (base 9123c4f, row 1) | all 3 rows agree |
 | fix_scorecard_complex_score_missing | a fix item before P5, P8.9 at the latest (note 11) | no | FAIL `predicted: 29.0  expected: no prediction` (base 28fbb83, row 2) | row 1 agrees; rows 2-3 refused (UndefinedResultException `Undefined result`), N/A here |
-| fix_scorecard_reasoncode_negative | P8.9 (note 12) | no | FAIL `output 'rc3': predicted: RC_INCOME  expected: no value` (base 28fbb83, row 1) | all 3 rows agree |
+| fix_scorecard_reasoncode_negative | **registered by P4.3b** (planned P8.9; B50 decided not a bug, D35; moved to `test/data/`, as are its files) | **yes: every reason-code cell, re-derived from Scorecard.html's routine** (note 12) | FAIL `output 'rc3': predicted: RC_INCOME  expected: no value` (base 28fbb83, row 1, the old JPMML cells); with the spec cells, PASS on P4.3b's base cc0f81e | row 3 agrees; rows 1, 2, 4, 5 differ (JPMML drops totals below 0, D35) |
 | fix_grm_offset_general_linear | P8.3 (note 13) | no | FAIL `predicted: 1.9  expected: 0.9` (base 28fbb83, row 2) | all 7 rows agree |
+| fix_grm_offset_multinomial | P8.3 (note 15) | no | FAIL `predicted: c  expected: a` (base cc0f81e, row 1: x = 0, off = -2, cPMML pa 0.17095 for 0.50648) | all 6 rows agree (within 1e-15) |
 | fix_svm_binary_no_alternate | P8.5, after a decision (note 14) | **expectation is a load error** | loads and scores `pos`, `neg`, `pos` (`--dump`, base 28fbb83; no `LOAD-ERROR` cell); `pmml_tester` itself stops at `output column 'cls' not found in fixture CSV` | rows 1, 3 refused (MissingAttributeException `Required attribute SupportVectorMachine@alternateTargetCategory is not defined`); row 2 scores `neg` |
 
 ### Notes
@@ -268,19 +271,34 @@ JPMML gives up on the whole file at the first row it refuses.
    fix belongs before P5, because P5 changes what a missing Value holds
    under `as_double()`, and a behaviour-preserving swap would have to keep
    this 0 on purpose.
-12. **fix_scorecard_reasoncode_negative** (P3.4b, base 28fbb83; bug B50).
-   The same model. A reason code whose total points missed is below 0 is
-   not returned. Scorecard.html, on its own example: the partial score of
-   "RC3" "is higher than the baseline score ("26 > 10") and so it is
-   meaningless in explaining a possible adverse decision", and "only two
-   partial scores are lower than their respective baselineScores". JPMML
-   1.7.7 drops each code whose total is below 0 and keeps a total of 0
-   (row 3, RC_DEBT). cPMML ranks every code, so row 1 returns RC_AGE (-5)
-   and RC_INCOME (-8) at ranks 2 and 3, and row 2 RC_INCOME (-8) at rank
-   3. The page's next sentence ("the second and third reason codes would
-   be populated with the same code") is not followed by JPMML, and
-   `fix_scorecard_reasoncode` already expects no value for an absent rank;
-   this fixture keeps that.
+12. **fix_scorecard_reasoncode_negative** (P3.4b, base 28fbb83; B50,
+   registered by P4.3b, base cc0f81e). The model is
+   `fix_scorecard_complex_partial_score`'s. P3.4b staged it with JPMML
+   1.7.7's cells, which drop every reason code whose total points missed is
+   below 0 (and keep a total of 0). Decided 2026-11-19: B50 is not a bug
+   (D35). Scorecard.html's routine ranks every total: "For each unique
+   reason code, R_1, R_2, ..., R_n, initialize points missed P_i = 0 ... For
+   each scorecard characteristic ... compute point differential d_j ...
+   pointsBelow d_j = baselineScore_j - partialScore_j; pointsAbove d_j =
+   partialScore_j - baselineScore_j. Note that negative differences are
+   possible and should be expected when the baselineMethod is other than min
+   or max ... add d_j to that P_i. Rank the total points, P_1, ... P_n from
+   largest to smallest, and return the corresponding reason codes", with
+   ties to "the one associated with the Attribute or Characteristic that
+   appears first in the PMML file", and baselineMethod "is purely
+   informational". The example's "meaningless" RC3 is illustration, not the
+   rule. P4.3b re-derived every reason-code cell with an independent Python
+   implementation of that routine (not from cPMML) and added two tie rows:
+   row 4 ties RC_AGE and RC_INCOME at -20 (RC_AGE first in the file), row 5
+   ties RC_INCOME and RC_DEBT at -8 (RC_INCOME first in the file, against
+   alphabetical order). Two points the routine leaves open are read as
+   cPMML already does: the unique reason codes are those the scored
+   Attributes cite (RC_YOUNG, uncited on rows 1 and 3-5, is not ranked at
+   0), and a rank past the last code has no value (`fix_scorecard_reasoncode`
+   expects the same; the example's "the second and third reason codes would
+   be populated with the same code" is followed by neither evaluator). The
+   fixture passes on cc0f81e: cPMML ranks with a stable sort in order of
+   first citation (`scorecard/scorecardmodel.h:203`).
 13. **fix_grm_offset_general_linear** (P3.4b, base 28fbb83; bug B51).
    `fix_grm_offset_variable` with `modelType="generalLinear"` and the
    identity link. GeneralRegression.html: offsetVariable "if present, this
@@ -315,3 +333,20 @@ JPMML gives up on the whole file at the first row it refuses.
    `pos`, `neg`, `pos`. This is the
    only document that reaches `svmmodel.h:154`, so until then no
    registered fixture covers that line.
+15. **fix_grm_offset_multinomial** (P4.3b, base cc0f81e; bug B51,
+   multinomialLogistic). Categories a, b and the reference c ("the one from
+   DataDictionary that does not appear in the ParamMatrix"), r_a = 0.5 + x,
+   r_b = -0.5 + 0.3x, offsetVariable `off`. GeneralRegression.html lists
+   multinomialLogistic among the models that use the offset, but its
+   procedure has no offset term: "Set r_j = <x,beta_j> and s_j = exp r_j.
+   The probability that our case falls into category j is then p_j = s_j /
+   (s_1 + ... + s_k)". Decided 2026-11-19: the offset is added to every
+   category's linear predictor, the reference's 0 included, so it cancels
+   and the probabilities are those without it. The cells were computed by
+   that formula in Python and JPMML 1.7.7 agrees on every cell (within
+   1e-15). Row 2 (off = 0) is a control. cPMML adds the offset to the
+   non-reference categories only: row 1 gives pa 0.17095 (0.50648), and
+   rows 1, 4 and 6 change their predicted category (c, a, b for a, c, c).
+   No missing-offset row: JPMML scores it (the offset is ignored), cPMML
+   gives no prediction (`generalregressionmodel.h:182`), and the spec says
+   nothing; P8.3 decides, with the generalLinear question of note 13.
