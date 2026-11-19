@@ -54,7 +54,9 @@ class OutputExpressionBuilder {
                                                       AssociationOutput::RuleFeature::RULE_ID);
         return std::make_shared<EntityId>(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::RESIDUAL:
-        return std::make_shared<Residual>(node, indexer, output_index, output_type, model_target);
+        return std::make_shared<Residual>(
+            node, indexer, output_index, output_type, model_target,
+            indexer->contains(model_target) ? indexer->get_type(model_target) : DataType::DataTypeValue::STRING);
       case OutputExpressionType::OutputExpressionTypeValue::RULE_VALUE:
         return AssociationOutput::from_rule_value(node, indexer, output_index, output_type);
       case OutputExpressionType::OutputExpressionTypeValue::ANTECEDENT:
