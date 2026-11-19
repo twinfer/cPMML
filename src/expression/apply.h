@@ -122,6 +122,8 @@ class Apply : public Expression {
   }
 
   inline Value eval(const Sample& sample) const override {
+    if (function.function_type == BuiltInFunction::BuiltInFunctionType::IF) return eval_if(sample);
+
     std::vector<Value> input;
     input.reserve(expressions.size());
     bool missing_input = false;
@@ -130,7 +132,7 @@ class Apply : public Expression {
       if (input.back().missing) missing_input = true;
     }
 
-    // isMissing/isNotMissing/if must receive their missing arguments; for any
+    // isMissing/isNotMissing must receive their missing arguments; for any
     // other function a missing argument makes the result missing, with
     // mapMissingTo (then defaultValue) taking over when given. The aggregates
     // skip missing arguments unless mapMissingTo is given.
@@ -164,6 +166,42 @@ class Apply : public Expression {
 
     if (result.missing && exist_defaultvalue) return defaultValue;
     return result;
+  }
+
+  // `if` (design commit P2.8b4; §4.2 "if laziness", §4.3 LazyIf; D3, D24).
+  // Functions.html, Apply: "The optional attribute mapMissingTo defines the
+  // output value for the cases when any of the function inputs are missing.
+  // This means that if it is specified and any of the input values of the
+  // function are missing then the function is not applied at all and the
+  // mapMissingTo value is returned instead", and "when a defaultValue value is
+  // provided, the function is applied first and if it produces a missing
+  // value the defaultValue is returned instead". BuiltinFunctions.html, if:
+  // "Implements IF-THEN-ELSE logic. The ELSE part is optional. If the ELSE
+  // part is absent and the boolean value is false then a missing value is
+  // returned." Read as a conditional, the inputs are the condition and the
+  // branch it takes (§4.2), evaluated in that order; the other branch is not
+  // evaluated, so its missing value is not an input. A missing condition is a
+  // missing input (BuiltinFunctions.html: "Except as noted below, any missing
+  // inputs to a built-in function will result in a missing value being
+  // returned"; D3): mapMissingTo, else a missing result, then defaultValue.
+  // A false condition without an ELSE part is a missing result, not a
+  // missing input: defaultValue applies and mapMissingTo does not. The base
+  // build passed `if` its missing arguments and never read mapMissingTo, and
+  // took the ELSE branch for a missing condition (B20). JPMML 1.7.7 agrees on
+  // every case but the missing condition without mapMissingTo, which it
+  // refuses (MissingArgumentException; D3).
+  inline Value eval_if(const Sample& sample) const {
+    const Value condition = expressions[0]->eval(sample);
+    if (condition.missing) {
+      if (exist_missingreplacement) return mapmissing_to;
+      return exist_defaultvalue ? defaultValue : Value();
+    }
+    const size_t taken = condition.value != 0.0 ? 1 : 2;
+    if (taken >= expressions.size()) return exist_defaultvalue ? defaultValue : Value();
+    const Value result = expressions[taken]->eval(sample);
+    if (!result.missing) return result;
+    if (exist_missingreplacement) return mapmissing_to;
+    return exist_defaultvalue ? defaultValue : result;
   }
 };
 

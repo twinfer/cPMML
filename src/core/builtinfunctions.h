@@ -438,10 +438,11 @@ class BuiltInFunction {  // inputs are mapped by position
   }
 
   // True for functions that must receive missing arguments instead of having
-  // Apply short-circuit them (PMML: isMissing/isNotMissing/if).
+  // Apply short-circuit them (PMML: isMissing/isNotMissing). `if` is not
+  // called with its arguments: Apply::eval_if evaluates the condition and the
+  // branch it takes (design commit P2.8b4).
   inline bool handles_missing() const {
-    return function_type == BuiltInFunctionType::IS_MISSING || function_type == BuiltInFunctionType::IS_NOT_MISSING ||
-           function_type == BuiltInFunctionType::IF;
+    return function_type == BuiltInFunctionType::IS_MISSING || function_type == BuiltInFunctionType::IS_NOT_MISSING;
   }
 
   // The aggregates, for which "Missing values in the input to an aggregate
@@ -546,9 +547,13 @@ class BuiltInFunction {  // inputs are mapped by position
     return Value(std::pow(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
   }
   // PMML if(condition, then-value[, else-value]); without an else part the
-  // result is missing when the condition does not hold.
+  // result is missing when the condition is false. A missing condition is a
+  // missing result (D3), not false (B20). Apply evaluates `if` itself
+  // (Apply::eval_if, lazily and with mapMissingTo); this is the same rule
+  // over arguments already evaluated.
   inline static Value if_then_else(const std::vector<Value>& input) {
-    if (input[0].value != 0.0 && !input[0].missing) return input[1];
+    if (input[0].missing) return Value();
+    if (input[0].value != 0.0) return input[1];
     return input.size() > 2 ? input[2] : Value();
   }
   inline static Value is_in(const std::vector<Value>& input) {
