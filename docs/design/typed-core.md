@@ -1534,6 +1534,13 @@ Kernels take P1 scalar types; `ApplyNode` unpacks its arguments with
 `LegacyCompare` that calls today's `Value` operators, so string and float
 comparison semantics do not change here (they change in P6).
 
+Decided 2026-11-19 after P3: a kernel never round-trips a string through
+`unpack`/`pack`. P3.1's adapters drop the `numeric_text` mark (a number held
+as text in a string slot, §9 "Decided 2026-11-18 after P2.1") and give an
+in-place edited string (B2) its new text's code, so an argument string that
+the kernel passes through or returns must keep the old `Value` it came in as;
+only strings the kernel builds are packed. The P4 dump diff (empty) checks it.
+
 | commit | files | closes | why green alone |
 |---|---|---|---|
 | P4.1 table, kernels, `ApplyNode` with today's semantics | new `src/fn/{table.h,kernels.h,apply_node.h}`; `expression/apply.h`, `expression/expressionbuilder.h`; delete `BuiltInFunction` (`core/builtinfunctions.h`) | — | kernels reproduce today's results including today's missing/invalid handling (behind per-rule switches the following commits remove); dump diff empty; gate on Housing (151 Applies) |
@@ -1568,7 +1575,10 @@ commit. Deletes: `Indexer::get_string_value`, `string_value_map`, `freeze`;
 `Value::to_double`, `Value::ValueHash`, `createValues`,
 `createUnorderedValues`; the `Value` operator set; `BuiltInFunction::typed`
 leftovers. Green: dump diff empty; gate on all models (the riskiest commit
-for performance, now without semantic changes mixed in).
+for performance, now without semantic changes mixed in). Also here (found in
+P3.2, performance only): `regressionmodel/categoricalpredictor.h:45` copies a
+whole `Value`, string included, per record (`Value value =
+sample[index].value;`); it becomes a reference.
 
 ### P6 — semantic fixes on the new representation, one per commit
 
