@@ -111,7 +111,7 @@ class BuiltInFunction {  // inputs are mapped by position
   // Typing of this application, set by the Apply constructor from the
   // binder's static types (design commit P2.4: bind::expression_type, the
   // §3.4 rows and the function table's result rules, typing.h
-  // engine_apply_type); all false for a function built from its name alone.
+  // apply_result_type); all false for a function built from its name alone.
   //   narrow_arguments  a float argument of a numeric function or a
   //                     comparison is a 32-bit float (XSD float), so it is
   //                     narrowed before use: the inputs are carried as
@@ -158,7 +158,7 @@ class BuiltInFunction {  // inputs are mapped by position
     // binder's table.
     const cpmml::fn::Signature* sig = cpmml::fn::find(function_string);
     if (!sig) throw std::logic_error("BuiltInFunction: \"" + function_string + "\" is not in the function table");
-    const cpmml::bind::StaticType result = cpmml::bind::engine_apply_type(*sig, argument_types);
+    const cpmml::bind::StaticType result = cpmml::bind::apply_result_type(*sig, argument_types).type;
     float_result = result == TypeId::Float;
     integer_division = function_type == BuiltInFunctionType::DIV && result == TypeId::Integer;
     integer_power = function_type == BuiltInFunctionType::POW && result == TypeId::Integer;
@@ -769,7 +769,7 @@ class BuiltInFunction {  // inputs are mapped by position
   //
   // The functions whose arguments or result the Apply constructor types (the
   // static types themselves are the binder's, P2.4: bind::expression_type
-  // and typing.h engine_apply_type, §3.4 and §4.1): every numeric function,
+  // and typing.h apply_result_type, §3.4 and §4.1): every numeric function,
   // for a float argument, a float result, an integer "/" or pow.
   static bool is_numeric(const BuiltInFunctionType& type) {
     switch (type) {

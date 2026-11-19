@@ -334,10 +334,19 @@ inline types::Value parse_constant(TypeId type, std::string_view text, types::Pa
 //   AtLeastDouble     the same, integer giving double (avg and median of
 //                     integers are not integers);
 //   IfBranches        D7: the common type of THEN and ELSE (THEN alone with
-//                     no ELSE); `boolean_mixed` when one is boolean and the
+//                     no ELSE), by the same inheritance rule: BuiltinFunctions.html
+//                     declares no result dataType for `if` (`<DefineFunction
+//                     name="if">` with `<ParameterField name="A"/>` and
+//                     `<ParameterField name="B"/>` untyped), so it inherits
+//                     the least restrictive type of its value arguments, and
+//                     the type is static, whichever branch a record takes
+//                     (design commit P2.6, B19; JPMML 1.7.7 gives the type of
+//                     the branch taken, §8.5 D7); unknown when either branch
+//                     is, and `boolean_mixed` when one is boolean and the
 //                     other is not (no common type, Q7).
 // Shared by the binder (Binder::bind_apply, which reports what it finds) and
-// the engine's load (engine_apply_type, below, and load_scope.h expression_type).
+// the engine's load (the Apply constructor, core/builtinfunctions.h, and
+// load_scope.h expression_type).
 struct ApplyType {
   StaticType type;
   bool boolean_mixed = false;  // IfBranches only: THEN and ELSE have no common type
@@ -367,20 +376,6 @@ inline ApplyType apply_result_type(const fn::Signature& sig, const std::vector<S
     }
   }
   return {};
-}
-
-// The result type the engine gives an Apply until design commit P2.6: the
-// table's rule (apply_result_type) for every function except `if`, which
-// keeps the engine's pre-P2.4 typing, the type of its THEN argument, unknown
-// with no THEN (BuiltinFunctions.html declares no result dataType for `if`:
-// `<DefineFunction name="if">` with `<ParameterField name="A"/>` and
-// `<ParameterField name="B"/>` untyped). D7 (the common type of THEN and
-// ELSE, which the binder reports) is B19, which the commit table closes in
-// P2.6 (`bind/typing.h`, `core/builtinfunctions.h`); P2.4, a refactoring
-// commit, does not change it. P2.6 deletes this function.
-inline StaticType engine_apply_type(const fn::Signature& sig, const std::vector<StaticType>& args) {
-  if (sig.result == fn::Result::IfBranches) return args.size() > 1 ? args[1] : StaticType{};
-  return apply_result_type(sig, args).type;
 }
 
 // ---------------------------------------------------------------- Array content

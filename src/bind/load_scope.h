@@ -482,11 +482,10 @@ inline bool is_nan_key(const std::string& text, const DataType& field_type) {
 //                    the element is in; unknown in an OutputField without
 //                    one, as the binder's ctx.enclosing is for a
 //                    transformedValue or decision);
-//   Apply            apply_result_type over its arguments (§4.1), except
-//                    that `if` is the type of its THEN argument until P2.6
-//                    (engine_apply_type, B19; the binder's D7 is reported in
-//                    report mode); unknown for a function that is not a
-//                    built-in (the engine refuses it at load);
+//   Apply            apply_result_type over its arguments (§4.1; `if` the
+//                    common type of THEN and ELSE, D7, P2.6); unknown for a
+//                    function that is not a built-in (the engine refuses it
+//                    at load);
 //   anything else    unknown (Aggregate, Lag: refused at load).
 // Unknown (nullopt) is a type the binder does not give either: a boolean or
 // string operand of arithmetic (Q7, E-TYPE-BOOLEAN-MIXED / E-TYPE-PARAM in
@@ -561,7 +560,7 @@ inline StaticType expression_type(pugi::xml_node node) {
     std::vector<StaticType> args;
     for (pugi::xml_node c : node.children())
       if (c.type() == pugi::node_element && std::strcmp(c.name(), "Extension") != 0) args.push_back(expression_type(c));
-    return engine_apply_type(*sig, args);
+    return apply_result_type(*sig, args).type;
   }
   return std::nullopt;
 }
