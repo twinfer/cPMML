@@ -10,7 +10,8 @@ subdirectories, so `pending/` is never picked up.
 
 Two more, `fix_mapmissing_string_slot_equal` and
 `fix_mapmissing_string_slot_numeric`, are known gaps that design commit
-P2.2 left for P4.7 (notes 8 and 9).
+P2.2 left for P4.7 (notes 8 and 9). `fix_segment_outer_localtrans_derived`
+is bug B14, found by design item P2.8c and left for P7b.3 (note 10).
 
 Layout: `model/<name>.zip` (one `<name>.pmml` inside) and
 `dataset/<name>.csv`, the same layout as `test/data/`, with LF line endings.
@@ -86,6 +87,7 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_builtin_text_if | **registered by P2.8b4** (planned P4.3; moved to `test/data/`, as are its files) | no | FAIL `output 'if_full': predicted: E  expected: no value` (also the sentinel on P2.8b4's base a6eeee4) | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
 | fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23) | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`) | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
+| fix_segment_outer_localtrans_derived | P7b.3 | no (note 10) | FAIL `predicted:   expected: 1553.0` (base 9123c4f, row 1) | all 3 rows agree |
 
 ### Notes
 
@@ -218,3 +220,27 @@ JPMML gives up on the whole file at the first row it refuses.
    Cast<string>(`d`); if P4.7's Cast<double> over the old storage still
    reads a string's code, the fixture moves with B38 to P6.8 ("a string
    never reaches a numeric slot as a code").
+10. **fix_segment_outer_localtrans_derived** (added by design item P2.8c,
+   base 9123c4f; bug B14). The MiningModel's LocalTransformations define
+   `g` = round(x) (integer) and `gd` = x * 2 (double). Segment 1 lists `g` in
+   its MiningSchema and its own LocalTransformations reads it: `h` = g / 2.
+   Segment 2 does the same with `gd`: `k` = gd + 1. The prediction is the
+   `sum` h + 100 * k. FieldScope.html allows this: "For sub-models, their
+   MiningSchema can refer to any fields defined within the parent model's
+   scope, including ... DerivedFields defined in the LocalTransformations of
+   the parent model". JPMML 1.7.7 gives 1553, -1253 and 150. `h` is an
+   integer division that truncates (`7 / 2` = 3, `-7 / 2` = -3, design
+   §4.2). On base every row has no prediction. The cause is
+   `core/dagbuilder.h`. The segment copies the parent's TransformationDictionary,
+   so `g` is in it, and the segment builds its DerivedField DAG against its
+   own MiningSchema. `g`'s input `x` is not a segment MiningField, so `g`
+   goes into the silent `removed` set, and so does `h`, which reads `g`.
+   `scope_under` then leaves `h` out of `segment_dag`, and `h` is never
+   evaluated. The integer type and `round` play no part: a double `g` and a
+   `g` = FieldRef x fail the same way. A NumericPredictor that reads `g`
+   directly scores, and so does the same document with `x` added to each
+   segment's MiningSchema (1553, -1253, 150 on base). That control rules out
+   every cause except the DAG. P7b.3 deletes `dagbuilder.h`: a parent-scope
+   field is an input of the segment and is not instantiated again. JPMML
+   refuses a missing `x` (`Function "round" cannot accept missing value`),
+   so the fixture has no missing row.
