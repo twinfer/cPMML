@@ -26,8 +26,8 @@
  *            the old `::Value` (§7 P4: "Kernels take P1 scalar types;
  *            ApplyNode unpacks its arguments ... and packs the result").
  *
- * P4.1 reproduces today's results exactly (dump diff empty), including the
- * departures from the spec that P4.2-P4.6 fix one at a time. Each departure
+ * P4.1 reproduced the base build's results exactly (dump diff empty),
+ * including the departures from the spec that P4.2-P4.6 fix one at a time. Each departure
  * is behind a named switch in `legacy` below; the code a switch keeps is in
  * an `if constexpr (legacy::X)` branch, or names the switch in a comment
  * where the legacy rule is the absence of a check. The commit that fixes the
@@ -55,6 +55,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <regex>
 #include <string>
 #include <vector>
@@ -71,19 +72,6 @@ namespace cpmml::fn {
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
 namespace legacy {
-// B41 (P4.2): built-ins outside their domain keep scoring: sqrt of a
-// negative and ln/log10 of a non-positive give NaN/-INF, modulo by 0 gives
-// NaN, substring with startPos < 1 returns its whole argument (spec:
-// invalid, then invalidValueTreatment).
-inline constexpr bool B41 = true;
-// B21 (P4.4): 0/0 gives NaN (spec: missing); floor, ceil, round and modulo
-// of +-INF give a number (spec: "Since INF and -INF can only be floating
-// point numbers, they will cause floor, ceil, round, and modulo to return an
-// invalid value").
-inline constexpr bool B21 = true;
-// D20 (P4.4): integer x/0 with x != 0 gives +-INF (D20: invalid; XQuery
-// err:FOAR0001).
-inline constexpr bool D20 = true;
 // D4 (P4.5): integer arithmetic is computed in double and carried as one:
 // no int64 kernel, no overflow check (D4: "integers are int64; overflow
 // invalid"), floor/ceil/round give a double.
@@ -100,8 +88,7 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B41, "B41's fix removes this switch together with the code it keeps");
-static_assert(B21 && D20 && D4 && B23, "P4.4-P4.6 remove these switches together with the code they keep");
+static_assert(D4 && B23, "P4.5-P4.6 remove these switches together with the code they keep");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
 
@@ -141,21 +128,54 @@ inline Double plus(Double a, Double b) { return {a.v + b.v}; }
 inline Double minus(Double a, Double b) { return {a.v - b.v}; }
 inline Double times(Double a, Double b) { return {a.v * b.v}; }
 // Integer division truncates toward zero (§4.2; Java and XQuery's idiv).
-// legacy::B21: 0/0 is NaN; legacy::D20: an integer x/0 is +-INF.
+// Division by zero (P4.4, B21, D20), "Division by Zero": "If a positive
+// number is divided by zero, INF will be returned. If zero is divided by
+// zero, the result is indeterminate and a missing value will be returned. If
+// a negative number is divided by zero, -INF will be returned." So 0/0 is a
+// missing result (then defaultValue), for integers too (§4.2); a zero
+// divisor of either sign gives INF signed by the numerator (XSD's "only one
+// zero", core/types/arithmetic.h; IEEE would give -INF for 1/-0.0); NaN/0 is
+// NaN (Transformations.html: "All arithmetic expressions involving NaN will
+// evaluate to NaN", D23). An integer x/0 has no value: "INF and -INF can only
+// be floating point numbers", so it is invalid (D20; XQuery err:FOAR0001).
+// `divide` is the quotient by a divisor that is not zero, a Double on the
+// per-record path; `divide_by_zero` the rest (adapter::divide picks one).
 inline Double divide(Double a, Double b, bool integer) {
   double r = a.v / b.v;
-  if (integer && b.v != 0.0) r = std::trunc(r);
+  if (integer) r = std::trunc(r);
   return {r};
 }
+inline types::Value divide_by_zero(Double a, bool integer) {
+  if (a.v == 0.0) return types::Missing{};
+  if (integer) return types::Invalid{types::InvalidReason::DivisionByZero};
+  if (std::isnan(a.v)) return a;
+  return Double{a.v > 0.0 ? std::numeric_limits<double>::infinity() : -std::numeric_limits<double>::infinity()};
+}
 
-// log10, ln, sqrt, abs, exp (legacy::B41: no domain check).
+// log10, ln, sqrt, abs, exp: "Semantics are as usual", and outside the
+// domain the spec gives the value, so none of them is invalid (P4.4, B41
+// settled): "The logarithm of a negative number is undefined, so NaN should
+// be returned in such a case. The logarithm of INF is to be taken as INF.
+// The logarithm of 0 is to be taken as -INF. The square root of a INF is to
+// be taken as INF. The square root of a negative number is to be taken as
+// NaN since complex numbers are not supported by PMML. The exponential of
+// INF is to be taken as INF. The exponential of -INF is to be taken as 0."
+// NaN is a value (Transformations.html: "This is the value returned from
+// such meaningless expressions as the logarithm of a negative number. It
+// should not be used as a generic missing value"); IEEE 754, which the C
+// library follows, gives each of these (log of -0 is -INF, as of 0).
 inline Double log10(Double x) { return {std::log10(x.v)}; }
 inline Double ln(Double x) { return {std::log(x.v)}; }
 inline Double sqrt(Double x) { return {std::sqrt(x.v)}; }
 inline Double abs(Double x) { return {std::abs(x.v)}; }
 inline Double exp(Double x) { return {std::exp(x.v)}; }
 // "Functions floor, ceil, and round return an integer"; legacy::D4: the
-// integer is carried as a double; legacy::B21: +-INF and NaN pass through.
+// integer is carried as a double. "Since INF and -INF can only be floating
+// point numbers, they will cause floor, ceil, round, and modulo to return an
+// invalid value" (P4.4, B21); NaN is no integer either, so it is invalid too
+// (§4.2's row: "±INF, NaN"). `to_integer_domain` is that domain; outside
+// it the result is invalid (adapter::checked_unary).
+inline bool to_integer_domain(Double x) { return std::isfinite(x.v); }
 inline Double round(Double x) { return {std::round(x.v)}; }
 inline Double floor(Double x) { return {std::floor(x.v)}; }
 inline Double ceil(Double x) { return {std::ceil(x.v)}; }
@@ -170,7 +190,23 @@ inline Double threshold(Double a, Double b) { return {a.v > b.v ? 1.0 : 0.0}; }
 // "the remainder after x is divided by y, computed according to XQuery
 // rules", a - floor(a/b)*b (the sign of the divisor). Its examples:
 // modulo(11,3)=2, modulo(-17.2,0.5)=0.3, modulo(9,-7)=-5, modulo(-4,-9)=-4.
-// legacy::B41: modulo by 0 is NaN; legacy::B21: an INF operand gives NaN.
+// Invalid (P4.4): an infinite operand, "INF and -INF ... will cause floor,
+// ceil, round, and modulo to return an invalid value" (B21); and a zero
+// divisor (B41), which has no remainder in any reading the spec names: "The
+// PMML standard follows the semantics of Python when using the % operator"
+// (Python raises ZeroDivisionError for x % 0 and x % 0.0); XQuery, for
+// integer operands, "A dynamic error is raised [err:FOAR0001] for xs:integer
+// and xs:decimal operands, if $arg2 is zero"; and the formula's a/0 is +-INF,
+// whose floor is invalid by the sentence above. (XQuery gives NaN for a
+// double divisor of 0; the PMML sentences are preferred.) A NaN operand gives
+// NaN first ("All arithmetic expressions involving NaN will evaluate to
+// NaN", D23; XQuery: "If either operand is NaN, the result is NaN").
+// `modulo_domain` is that domain; outside it the result is invalid
+// (adapter::checked_binary).
+inline bool modulo_domain(Double a, Double b) {
+  if (std::isnan(a.v) || std::isnan(b.v)) return true;
+  return b.v != 0.0 && !std::isinf(a.v) && !std::isinf(b.v);
+}
 inline Double modulo(Double a, Double b) { return {a.v - std::floor(a.v / b.v) * b.v}; }
 
 // Further mathematical functions (dataType="double").
@@ -263,10 +299,13 @@ inline Status number(const Bound& b, scalar::Double r, ::Value& out) {
   out = ::Value(b.float_result ? static_cast<double>(types::narrow_to_float(r.v)) : r.v);
   return Status::Ok;
 }
+// A kernel that may have no value: invalid, or missing (`out` stays as the
+// caller made it, i.e. missing; then defaultValue, §4.3 step 5).
 inline Status number(const Bound& b, const types::Value& r, ::Value& out) {
   if (const auto* d = std::get_if<types::Double>(&r)) return number(b, *d, out);
   if (types::is_invalid(r)) return Status::Invalid;
-  throw std::logic_error("fn::adapter::number: a numeric kernel returned neither a double nor invalid");
+  if (types::is_missing(r)) return Status::Ok;
+  throw std::logic_error("fn::adapter::number: a numeric kernel returned neither a double, invalid nor missing");
 }
 inline Status boolean(bool r, ::Value& out) {
   out = ::Value(r ? 1.0 : 0.0);
@@ -281,12 +320,30 @@ template <scalar::Double (*F)(scalar::Double, scalar::Double)>
 Status binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
   return number(b, F(operand(b, args, 0), operand(b, args, 1)), out);
 }
+// The same for a function with a domain (floor, ceil, round, modulo):
+// invalid outside it.
+template <scalar::Double (*F)(scalar::Double), bool (*Domain)(scalar::Double)>
+Status checked_unary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+  const scalar::Double x = operand(b, args, 0);
+  if (!Domain(x)) return Status::Invalid;
+  return number(b, F(x), out);
+}
+template <scalar::Double (*F)(scalar::Double, scalar::Double), bool (*Domain)(scalar::Double, scalar::Double)>
+Status checked_binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+  const scalar::Double x = operand(b, args, 0);
+  const scalar::Double y = operand(b, args, 1);
+  if (!Domain(x, y)) return Status::Invalid;
+  return number(b, F(x, y), out);
+}
 template <types::Value (*F)(scalar::Double, scalar::Double, scalar::Double)>
 Status ternary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
   return number(b, F(operand(b, args, 0), operand(b, args, 1), operand(b, args, 2)), out);
 }
 inline Status divide(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
-  return number(b, scalar::divide(operand(b, args, 0), operand(b, args, 1), b.integer_division), out);
+  const scalar::Double x = operand(b, args, 0);
+  const scalar::Double y = operand(b, args, 1);
+  if (y.v == 0.0) return number(b, scalar::divide_by_zero(x, b.integer_division), out);
+  return number(b, scalar::divide(x, y, b.integer_division), out);
 }
 inline Status pow(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
   return number(b, scalar::pow(operand(b, args, 0), operand(b, args, 1), b.integer_power), out);
@@ -416,19 +473,24 @@ Status string_edit(const Bound&, const ::Value* args, std::size_t, ::Value& out)
   Edit(out);
   return Status::Ok;
 }
-// substring(input, startPos, length): "startPos ... the first character is
-// at position 1"; the arguments are read as today (a double cast to size_t,
-// legacy::D4; legacy::B41: a startPos below 1 returns the input). A startPos
-// beyond the end has no substring: invalid (today std::string::substr threw
-// std::out_of_range, which Apply caught as an invalid value).
+// substring(input, startPos, length) (P4.4, B41): "startPos and length must
+// be positive integers. The first character of a string is located at
+// position 1 (not position 0)", so a startPos or length below 1, or one that
+// is no integer (INF, NaN: "INF and -INF can only be floating point
+// numbers"), is outside the domain: invalid. Within it the pseudo-
+// declaration's "See XQuery fn:substring" applies: "The characters returned
+// do not extend beyond $sourceString", so a startPos past the end gives the
+// empty string and a length past the end stops at it (P4.1 made a startPos
+// past the end invalid). The arguments are read as today (a double,
+// truncated, legacy::D4).
 inline Status substring(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
-  const auto start_pos = static_cast<std::size_t>(args[1].as_double());  // 1-based
-  const auto length = static_cast<std::size_t>(args[2].as_double());
+  const double start_pos = args[1].as_double();  // 1-based
+  const double length = args[2].as_double();
+  if (!(start_pos >= 1.0 && length >= 1.0) || std::isinf(start_pos) || std::isinf(length)) return Status::Invalid;
   out = args[0];
-  if (start_pos >= 1) {
-    if (start_pos - 1 > out.text().size()) return Status::Invalid;
-    out.substr(start_pos - 1, length);
-  }
+  const auto size = static_cast<double>(out.text().size());
+  const double start = std::min(start_pos - 1.0, size);
+  out.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(std::min(length, size)));
   return Status::Ok;
 }
 // concat builds a string: packed as the engine builds one (Value(text,
@@ -487,9 +549,9 @@ inline KernelFn instantiate(Op op) {
     case Op::Log10: return a::unary<s::log10>;
     case Op::Sqrt: return a::unary<s::sqrt>;
     case Op::Abs: return a::unary<s::abs>;
-    case Op::Round: return a::unary<s::round>;
-    case Op::Floor: return a::unary<s::floor>;
-    case Op::Ceil: return a::unary<s::ceil>;
+    case Op::Round: return a::checked_unary<s::round, s::to_integer_domain>;
+    case Op::Floor: return a::checked_unary<s::floor, s::to_integer_domain>;
+    case Op::Ceil: return a::checked_unary<s::ceil, s::to_integer_domain>;
     case Op::Pow: return a::pow;
     case Op::If: return a::if_then_else;  // inputs: MissingRule::LazyIf (if_taken)
     case Op::IsMissing: return a::is_missing;
@@ -513,7 +575,7 @@ inline KernelFn instantiate(Op op) {
     case Op::Median: return a::median;
     case Op::Product: return a::fold<s::product>;
     case Op::Threshold: return a::binary<s::threshold>;
-    case Op::Modulo: return a::binary<s::modulo>;
+    case Op::Modulo: return a::checked_binary<s::modulo, s::modulo_domain>;
     case Op::Not: return a::logical_not;
     case Op::Expm1: return a::unary<s::expm1>;
     case Op::Ln1p: return a::unary<s::ln1p>;

@@ -9,11 +9,12 @@
  *     rule of §4.2, pow of integers with a negative exponent, D8; normalCDF's
  *     sigma), never against cPMML's output.
  *   - The legacy switches (kernels.h `legacy`): what each keeps is pinned
- *     here by the symptom the design's bug table records for it (§1.2: B21
- *     "0/0 gives NaN ...; integer 1/0 gives INF; floor/ceil/round/modulo of
- *     INF are not invalid"; B23 "concat drops number arguments"; B2 "keep
- *     the argument's code"), so that the commit removing a switch sees these
- *     checks fail and replaces them with the spec's.
+ *     here by the symptom the design's bug table records for it (§1.2: D4
+ *     "integer carried as double"; B23 "concat drops number arguments"; B2
+ *     "keep the argument's code"), so that the commit removing a switch sees
+ *     these checks fail and replaces them with the spec's.
+ *   - Division by zero and the functions' domains (P4.4: B21, D20, B41),
+ *     kernel by kernel and through a whole document.
  *   - ArgBuffer, inline and on the heap.
  *
  * Usage: fn_table.exe   (exit 0 when every check holds)
@@ -212,22 +213,10 @@ static void kernels() {
 }
 
 static void legacy_switches(Indexer& indexer) {
-  // B21 (P4.4): 0/0 gives NaN; floor/ceil/round/modulo of INF are numbers.
-  const double inf = std::numeric_limits<double>::infinity();
-  CHECK(std::isnan(number("/", nums({0, 0}))), "legacy::B21: 0/0 is NaN");
-  CHECK(std::isnan(number("modulo", nums({inf, 2}))), "legacy::B21: modulo(INF, 2) is NaN");
-  CHECK(number("floor", nums({inf})) == inf && number("round", nums({-inf})) == -inf, "legacy::B21: floor(INF)");
-  // D20 (P4.4): integer 1/0 gives INF.
-  fn::Bound integer_division;
-  integer_division.integer_division = true;
-  CHECK(number("/", nums({1, 0}), integer_division) == inf, "legacy::D20: integer 1/0 is INF");
   // D4 (P4.5): floor of 3.5 is the double 3; integer arithmetic does not
   // overflow at int64.
   CHECK(number("floor", nums({3.5})) == 3, "floor(3.5) = 3");
   CHECK(number("*", nums({9.2233720368547758e18, 2})) == 1.8446744073709552e19, "legacy::D4: no int64 overflow");
-  // B41 (P4.2): outside the domain, scoring goes on.
-  CHECK(std::isnan(number("sqrt", nums({-1}))), "legacy::B41: sqrt(-1) is NaN");
-  CHECK(std::isnan(number("modulo", nums({1, 0}))), "legacy::B41: modulo(1, 0) is NaN");
   // B23 (P4.6): concat reads each argument's text; a number has none.
   {
     Value out;
@@ -242,19 +231,6 @@ static void legacy_switches(Indexer& indexer) {
     const std::vector<Value> args{abc};
     CHECK(call("uppercase", args, out) == fn::Status::Ok && out.text() == "ABC", "uppercase(abc) is ABC");
     CHECK(out.as_double() == abc.as_double(), "legacy::B2: uppercase keeps the argument's code");
-  }
-  // substring: startPos beyond the end is invalid; below 1 the whole input
-  // (legacy::B41).
-  {
-    Value out;
-    const Value abc("abc", DataType::DataTypeValue::STRING);
-    CHECK(call("substring", {abc, Value(2.0), Value(5.0)}, out) == fn::Status::Ok && out.text() == "bc",
-          "substring(abc, 2, 5) is bc");
-    CHECK(call("substring", {abc, Value(4.0), Value(1.0)}, out) == fn::Status::Ok && out.text().empty(),
-          "substring(abc, 4, 1) is empty");
-    CHECK(invalid("substring", {abc, Value(5.0), Value(1.0)}), "substring(abc, 5, 1): no such position");
-    CHECK(call("substring", {abc, Value(0.0), Value(1.0)}, out) == fn::Status::Ok && out.text() == "abc",
-          "legacy::B41: substring(abc, 0, 1) is abc");
   }
   // replace and matches: a pattern std::regex refuses is an invalid result.
   {
@@ -442,6 +418,155 @@ static void apply_output_table() {
         "asMissing in an OutputField's expression: defaultValue, not mapMissingTo");
 }
 
+// Division by zero and the domains of the built-ins (P4.4: B21, D20, B41),
+// kernel by kernel. BuiltinFunctions.html, each rule's sentence at its check.
+static bool missing_result(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {}) {
+  Value out;
+  return call(name, args, out, bound) == fn::Status::Ok && out.is_missing();
+}
+static bool text_result(const std::vector<Value>& args, const std::string& text) {
+  Value out;
+  return call("substring", args, out) == fn::Status::Ok && !out.is_missing() && out.text() == text;
+}
+static void domains() {
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  fn::Bound integer_division;
+  integer_division.integer_division = true;
+
+  // "/" (B21, D20): "If a positive number is divided by zero, INF will be
+  // returned. If zero is divided by zero, the result is indeterminate and a
+  // missing value will be returned. If a negative number is divided by zero,
+  // -INF will be returned."
+  CHECK(number("/", nums({1, 0})) == inf && number("/", nums({-1, 0})) == -inf,
+        "\"If a positive number is divided by zero, INF\"; a negative one, -INF");
+  CHECK(missing_result("/", nums({0, 0})), "B21: \"If zero is divided by zero ... a missing value will be returned\"");
+  CHECK(missing_result("/", nums({-0.0, 0})) && missing_result("/", nums({0, -0.0})), "0/0 of either sign is missing");
+  CHECK(number("/", nums({1, -0.0})) == inf && number("/", nums({-1, -0.0})) == -inf,
+        "a -0 divisor: INF signed by the numerator (\"a positive number ... INF\"; IEEE would give -INF)");
+  CHECK(number("/", nums({inf, 0})) == inf, "INF / 0 is INF (a positive number divided by zero)");
+  CHECK(std::isnan(number("/", nums({nan, 0}))), "NaN / 0 is NaN (D23: \"All arithmetic expressions involving NaN\")");
+  CHECK(invalid("/", nums({1, 0}), integer_division) && invalid("/", nums({-1, 0}), integer_division),
+        "D20: integer x/0 is invalid (\"INF and -INF can only be floating point numbers\")");
+  CHECK(missing_result("/", nums({0, 0}), integer_division), "§4.2: integer 0/0 is missing (the same sentence)");
+  CHECK(number("/", nums({-7, 2}), integer_division) == -3 && number("/", nums({1, 4})) == 0.25,
+        "a non-zero divisor: as before");
+
+  // floor, ceil, round (B21): "Since INF and -INF can only be floating point
+  // numbers, they will cause floor, ceil, round, and modulo to return an
+  // invalid value"; NaN is no integer either (§4.2).
+  for (const char* f : {"floor", "ceil", "round"}) {
+    CHECK(invalid(f, nums({inf})) && invalid(f, nums({-inf})), std::string(f) + " of +-INF is invalid (B21)");
+    CHECK(invalid(f, nums({nan})), std::string(f) + " of NaN is invalid (§4.2: \"return an integer\")");
+  }
+  CHECK(number("floor", nums({-2.5})) == -3 && number("ceil", nums({-2.5})) == -2 && number("round", nums({2.5})) == 3,
+        "finite: as before");
+
+  // modulo: an infinite operand (B21) and a zero divisor (B41) are invalid;
+  // NaN gives NaN (D23).
+  CHECK(invalid("modulo", nums({inf, 2})) && invalid("modulo", nums({-inf, 2})) && invalid("modulo", nums({5, inf})) &&
+            invalid("modulo", nums({5, -inf})),
+        "B21: an infinite operand of modulo is invalid");
+  CHECK(invalid("modulo", nums({5, 0})) && invalid("modulo", nums({0, 0})) && invalid("modulo", nums({-5, -0.0})),
+        "B41: modulo by 0 is invalid (Python's %: ZeroDivisionError; XQuery err:FOAR0001 for integers)");
+  CHECK(std::isnan(number("modulo", nums({nan, 0}))) && std::isnan(number("modulo", nums({2, nan}))),
+        "a NaN operand of modulo gives NaN (D23)");
+  CHECK(number("modulo", nums({11, 3})) == 2 && number("modulo", nums({9, -7})) == -5 &&
+            number("modulo", nums({-4, -9})) == -4 && near(number("modulo", nums({-17.2, 0.5})), 0.3),
+        "modulo's four examples, as before");
+
+  // ln, log10, sqrt, exp: values, not invalid (B41 settled from the spec):
+  // "The logarithm of a negative number is undefined, so NaN should be
+  // returned in such a case. The logarithm of INF is to be taken as INF. The
+  // logarithm of 0 is to be taken as -INF. The square root of a INF is to be
+  // taken as INF. The square root of a negative number is to be taken as NaN
+  // ... The exponential of INF is to be taken as INF. The exponential of -INF
+  // is to be taken as 0."
+  CHECK(std::isnan(number("ln", nums({-1}))) && std::isnan(number("log10", nums({-1}))),
+        "the logarithm of a negative number is NaN, a value");
+  CHECK(number("ln", nums({0})) == -inf && number("log10", nums({0})) == -inf && number("ln", nums({-0.0})) == -inf,
+        "the logarithm of 0 is -INF");
+  CHECK(number("ln", nums({inf})) == inf && number("log10", nums({inf})) == inf, "the logarithm of INF is INF");
+  CHECK(std::isnan(number("sqrt", nums({-1}))) && number("sqrt", nums({inf})) == inf,
+        "sqrt of a negative number is NaN, of INF is INF");
+  CHECK(number("exp", nums({inf})) == inf && number("exp", nums({-inf})) == 0, "exp(INF) = INF, exp(-INF) = 0");
+
+  // substring (B41): "startPos and length must be positive integers"; within
+  // that, XQuery fn:substring: "The characters returned do not extend beyond
+  // $sourceString".
+  const Value abc("abc", DataType::DataTypeValue::STRING);
+  CHECK(invalid("substring", {abc, Value(0.0), Value(1.0)}) && invalid("substring", {abc, Value(-1.0), Value(2.0)}),
+        "B41: a startPos below 1 is invalid");
+  CHECK(invalid("substring", {abc, Value(1.0), Value(0.0)}) && invalid("substring", {abc, Value(2.0), Value(-1.0)}),
+        "B41: a length below 1 is invalid (\"must be positive integers\")");
+  CHECK(invalid("substring", {abc, Value(inf), Value(1.0)}) && invalid("substring", {abc, Value(1.0), Value(inf)}) &&
+            invalid("substring", {abc, Value(nan), Value(1.0)}),
+        "an INF or NaN position is no integer: invalid");
+  CHECK(text_result({abc, Value(4.0), Value(1.0)}, "") && text_result({abc, Value(5.0), Value(1.0)}, "") &&
+            text_result({abc, Value(1e300), Value(1.0)}, ""),
+        "a startPos past the end gives the empty string (\"do not extend beyond\"; P4.1: invalid)");
+  CHECK(text_result({abc, Value(2.0), Value(5.0)}, "bc") && text_result({abc, Value(1.0), Value(1e300)}, "abc"),
+        "a length past the end stops at the end");
+  CHECK(text_result({abc, Value(2.0), Value(1.0)}, "b") && text_result({abc, Value(1.0), Value(3.0)}, "abc"),
+        "within the string: as before");
+}
+
+// The same through a whole document: an invalid result follows the Apply's
+// invalidValueTreatment, a missing one gives defaultValue, NaN is a value.
+static void domains_in_document() {
+  const std::string ri = R"(invalidValueTreatment="returnInvalid")";
+  auto err = [](const char* f, const char* t) {
+    return std::string("ERROR: Apply \"") + f + "\" in DerivedField \"p\": invalid result (invalidValueTreatment=\"" +
+           t + "\")";
+  };
+  auto div = [](const std::string& attrs) {
+    return R"(<Apply function="/" )" + attrs + R"(><FieldRef field="i"/><FieldRef field="e"/></Apply>)";
+  };
+  // D20: integer x/0 makes the record invalid under returnInvalid and asIs.
+  CHECK(apply_output(div(""), "1", "0") == err("/", "returnInvalid"), "D20: integer 1/0, returnInvalid");
+  CHECK(apply_output(div(R"(invalidValueTreatment="asIs")"), "-1", "0") == err("/", "asIs"), "D20: integer -1/0, asIs");
+  CHECK(apply_output(div(R"(invalidValueTreatment="asMissing" mapMissingTo="5" defaultValue="7")"), "1", "0") == "7",
+        "D20: integer 1/0 under asMissing: defaultValue");
+  // B21: 0/0 is a missing result, under every treatment.
+  CHECK(apply_output(div(ri), "0", "0") == "N/A", "B21: integer 0/0 is missing, not invalid");
+  CHECK(apply_output(div(R"(defaultValue="7")"), "0", "0") == "7", "B21: 0/0 then defaultValue");
+  CHECK(apply_output(div(R"(mapMissingTo="5")"), "0", "0") == "N/A", "B21: 0/0 is no missing input: not mapMissingTo");
+  const std::string double_div =
+      R"(<Apply function="/"><FieldRef field="i"/><Constant dataType="double">0</Constant></Apply>)";
+  CHECK(apply_output(double_div, "0", "") == "N/A" && apply_output(double_div, "2", "") == "inf",
+        "double 0/0 missing, 2/0 INF");
+  // B21: floor of INF makes the record invalid; of a missing 0/0, missing.
+  const std::string floor_div = R"(<Apply function="floor">)" + double_div + "</Apply>";
+  CHECK(apply_output(floor_div, "2", "") == err("floor", "returnInvalid"), "B21: floor(2/0.0) is invalid");
+  CHECK(apply_output(floor_div, "0", "") == "N/A", "floor(0/0.0): a missing input, missing");
+  // B41: modulo by 0.
+  const std::string mod = R"(<Apply function="modulo"><FieldRef field="i"/><FieldRef field="e"/></Apply>)";
+  CHECK(apply_output(mod, "5", "0") == err("modulo", "returnInvalid"), "B41: modulo(5, 0) is invalid");
+  CHECK(apply_output(mod, "11", "3") == "2", "modulo(11, 3) = 2");
+  // ln, sqrt: NaN and -INF are values, under returnInvalid too.
+  CHECK(apply_output(R"(<Apply function="ln"><FieldRef field="i"/></Apply>)", "-1", "") == "nan",
+        "ln(-1) is NaN, not invalid");
+  CHECK(apply_output(R"(<Apply function="log10"><FieldRef field="i"/></Apply>)", "0", "") == "-inf",
+        "log10(0) is -INF");
+  CHECK(apply_output(R"(<Apply function="sqrt" invalidValueTreatment="asMissing" defaultValue="7"><FieldRef field="i"/></Apply>)",
+                     "-1", "") == "nan",
+        "sqrt(-1) under asMissing is NaN, not defaultValue: NaN is not invalid");
+  // B41: substring, a string result.
+  auto sub = [](const std::string& attrs) {
+    return R"(<Apply function="substring" )" + attrs +
+           R"(><FieldRef field="t"/><FieldRef field="i"/><FieldRef field="e"/></Apply>)";
+  };
+  CHECK(apply_output(sub(""), "0", "1", "abc", "b", "string") == err("substring", "returnInvalid"),
+        "B41: substring(abc, 0, 1) is invalid");
+  CHECK(apply_output(sub(R"(invalidValueTreatment="asMissing" defaultValue="dv")"), "-1", "2", "abc", "b", "string") ==
+            "dv",
+        "B41: substring(abc, -1, 2) under asMissing: defaultValue");
+  CHECK(apply_output(sub(R"(invalidValueTreatment="asMissing" defaultValue="dv")"), "5", "1", "abc", "b", "string") ==
+            "N/A",
+        "substring(abc, 5, 1) is the empty string, not invalid (no defaultValue)");
+  CHECK(apply_output(sub(ri), "2", "5", "abc", "b", "string") == "bc", "substring(abc, 2, 5) is bc");
+}
+
 // `if` (P4.3: the rule of P2.8b4's ApplyNode::eval_if, now the table's
 // MissingRule::LazyIf and the kernels if_taken / if_then_else).
 // BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The ELSE part is
@@ -537,6 +662,8 @@ int main() {
   legacy_switches(indexer);
   apply_output_table();
   if_lazy();
+  domains();
+  domains_in_document();
   arg_buffer();
   std::cout << checks - failures << "/" << checks << " checks passed" << std::endl;
   return failures == 0 ? 0 : 1;
