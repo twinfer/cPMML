@@ -404,6 +404,15 @@ void rule_cases() {
   // ---- functions (§4.2)
   expect("arity", "BuiltinFunctions.html: + \"have two parameters\"",
          in_model(derived("u", "double", call("+", ref("x")))), {"E-ARITY"});
+  // P2.8b2: the counts the engine's own table got wrong, and Extension*.
+  expect("arity-concat-one", "BuiltinFunctions.html: concat of \"two or more parameters\"",
+         in_model(derived("u", "string", call("concat", ref("s")), "categorical")), {"E-ARITY"});
+  expect("arity-if-four", "BuiltinFunctions.html: if \"THEN part is required\", \"ELSE part is optional\"",
+         in_model(derived("u", "double", call("if", constant("true") + ref("x") + ref("x") + ref("x")))), {"E-ARITY"});
+  expect("arity-extension-not-counted", "pmml-4-4.xsd Apply: Extension*, then EXPRESSION* (B25)",
+         in_model(derived("u", "double", call("+", "<Extension name=\"e\" value=\"v\"/>" + ref("x")))), {"E-ARITY"});
+  expect("arity-extension-two", "pmml-4-4.xsd Apply: Extension*, then EXPRESSION* (B25)",
+         in_model(derived("u", "double", call("+", "<Extension name=\"e\" value=\"v\"/>" + ref("x") + ref("x")))), {});
   expect("unknown-function", "FieldScope.html: fields that \"apply undefined functions are not valid PMML\"",
          in_model(derived("u", "double", call("log", ref("x")))), {"E-FUNCTION-UNKNOWN"});
   expect("order-string-number", "§2.7: string x number ordering is a load error (P2.7)",

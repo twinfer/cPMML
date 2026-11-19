@@ -192,6 +192,29 @@ inline std::string quoted(std::string_view s) { return "\"" + std::string(s) + "
 
 }  // namespace detail
 
+// Arity of a built-in (§4.2), the function table's min_args/max_args: the
+// BuiltinFunctions.html pseudo-declarations' ParameterFields ("+ ... <ParameterField
+// name="a"/> <ParameterField name="b"/>", "The functions -, *, and / are
+// defined in the same way and have two parameters"), "a variable number of
+// <FieldRef/>" for the aggregates, "two or more parameters" (concat), "THEN
+// part is required ... ELSE part is optional" (if). Shared by the binder's
+// E-ARITY and the engine's load (design commit P2.8b2, core/builtinfunctions.h
+// through load_scope.h arity_message).
+inline bool arity_fits(const fn::Signature& sig, std::size_t n) {
+  return n >= sig.min_args && (sig.max_args == fn::kVariadic || n <= sig.max_args);
+}
+
+// "has 1 argument; + takes 2 (BuiltinFunctions.html)".
+inline std::string arity_mismatch(const fn::Signature& sig, std::size_t n) {
+  const std::string expected =
+      sig.max_args == fn::kVariadic
+          ? std::to_string(sig.min_args) + " or more"
+          : (sig.min_args == sig.max_args ? std::to_string(sig.min_args)
+                                          : std::to_string(sig.min_args) + " to " + std::to_string(sig.max_args));
+  return "has " + std::to_string(n) + " argument" + (n == 1 ? "" : "s") + "; " + std::string(sig.name) + " takes " +
+         expected + " (BuiltinFunctions.html)";
+}
+
 class Binder {
  public:
   // Report: every element is bound (test/bind_report.cc, §3.7). Load: the
@@ -1586,16 +1609,7 @@ class Binder {
     }
     // Arity (§4.2).
     const std::size_t n = args.size();
-    if (n < sig->min_args || (sig->max_args != fn::kVariadic && n > sig->max_args)) {
-      const std::string expected = sig->max_args == fn::kVariadic
-                                       ? std::to_string(sig->min_args) + " or more"
-                                       : (sig->min_args == sig->max_args
-                                              ? std::to_string(sig->min_args)
-                                              : std::to_string(sig->min_args) + " to " + std::to_string(sig->max_args));
-      error(code::kArity, ctx, node,
-            "has " + std::to_string(n) + " argument" + (n == 1 ? "" : "s") + "; " + std::string(sig->name) + " takes " +
-                expected + " (BuiltinFunctions.html)");
-    }
+    if (!arity_fits(*sig, n)) error(code::kArity, ctx, node, arity_mismatch(*sig, n));
     std::vector<Typed> types(n);
     bool temporal = false;
     for (std::size_t i = 0; i < n; i++) {

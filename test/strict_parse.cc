@@ -1288,6 +1288,189 @@ static void ordering() {
   CHECK(output_error(R"(<Apply function="greaterOrEqual"><Constant>10</Constant><FieldRef field="d"/></Apply>)").empty());
 }
 
+// Design commit P2.8b2 (§4.2): a built-in Apply with the wrong number of
+// arguments is a load error, E-ARITY, naming the function. The arities are
+// BuiltinFunctions.html's pseudo-declarations, written out here rather than
+// read from the function table, so that a wrong row fails: "+" has
+// <ParameterField name="a"/> and <ParameterField name="b"/>, "The functions
+// -, *, and / are defined in the same way and have two parameters"; min, max,
+// sum, avg, median and product take "a variable number of <FieldRef/>"
+// (one or more, the table's reading); log10 "<ParameterField name="x"/>", "ln
+// ..., sqrt ..., abs ..., exp ... are defined in the same way"; pow(x,y),
+// threshold(x,y), modulo(x,y); floor "<ParameterField name="x"/>", ceil and
+// round alike; isMissing and isNotMissing "<ParameterField name="input"/>";
+// lessThan "<ParameterField name="x"/> <ParameterField name="y"/>" (equal,
+// notEqual, lessOrEqual, greaterThan, greaterOrEqual "Result is dependent on
+// applying either function to two input parameters"); not "<ParameterField
+// name="x" dataType="boolean"/>"; isIn "<ParameterField name="x"/> The list
+// takes a variable number of fields"; if "<ParameterField name="x"/>
+// <ParameterField name="A"/> THEN part is required <ParameterField
+// name="B"/> ELSE part is optional"; uppercase, lowercase, stringLength,
+// trimBlanks one "input"; substring input, startPos, length; concat "two or
+// more parameters"; replace input, pattern, replacement; matches input,
+// pattern; normalCDF x, mu, sigma, "normalPDF(x, M, S)"; stdNormalCDF x,
+// "stdNormalPDF(x)", erf "defined similar to stdNormalCDF"; expm1, ln1p, rint
+// and the trigonometric functions x; hypot x, y. Each document loads on the
+// base build (dd367e7), which checked the count on every record: every
+// record failed ("evaluating apply function"), or was missing under
+// invalidValueTreatment="asMissing", and concat with one argument and if with
+// four scored. JPMML 1.7.7 refuses each at its first evaluation,
+// InvalidArgumentListException 'Function "+" expects 2 values, got 1 values',
+// except min with no argument, which it scores as missing (departure: the
+// table's one or more).
+static void arity() {
+  struct Arity {
+    const char* name;
+    int min, max;  // max -1: variadic
+  };
+  static const Arity kSpec[] = {
+      {"+", 2, 2},
+      {"-", 2, 2},
+      {"*", 2, 2},
+      {"/", 2, 2},
+      {"min", 1, -1},
+      {"max", 1, -1},
+      {"sum", 1, -1},
+      {"avg", 1, -1},
+      {"median", 1, -1},
+      {"product", 1, -1},
+      {"log10", 1, 1},
+      {"ln", 1, 1},
+      {"sqrt", 1, 1},
+      {"abs", 1, 1},
+      {"exp", 1, 1},
+      {"pow", 2, 2},
+      {"threshold", 2, 2},
+      {"floor", 1, 1},
+      {"ceil", 1, 1},
+      {"round", 1, 1},
+      {"modulo", 2, 2},
+      {"isMissing", 1, 1},
+      {"isNotMissing", 1, 1},
+      {"equal", 2, 2},
+      {"notEqual", 2, 2},
+      {"lessThan", 2, 2},
+      {"lessOrEqual", 2, 2},
+      {"greaterThan", 2, 2},
+      {"greaterOrEqual", 2, 2},
+      {"not", 1, 1},
+      {"isIn", 2, -1},
+      {"isNotIn", 2, -1},
+      {"if", 2, 3},
+      {"uppercase", 1, 1},
+      {"lowercase", 1, 1},
+      {"stringLength", 1, 1},
+      {"substring", 3, 3},
+      {"trimBlanks", 1, 1},
+      {"concat", 2, -1},
+      {"replace", 3, 3},
+      {"matches", 2, 2},
+      {"normalCDF", 3, 3},
+      {"normalPDF", 3, 3},
+      {"stdNormalCDF", 1, 1},
+      {"stdNormalPDF", 1, 1},
+      {"erf", 1, 1},
+      {"expm1", 1, 1},
+      {"hypot", 2, 2},
+      {"ln1p", 1, 1},
+      {"rint", 1, 1},
+      {"sin", 1, 1},
+      {"asin", 1, 1},
+      {"sinh", 1, 1},
+      {"cos", 1, 1},
+      {"acos", 1, 1},
+      {"cosh", 1, 1},
+      {"tan", 1, 1},
+      {"atan", 1, 1},
+      {"tanh", 1, 1},
+  };
+  const auto apply = [](const std::string& function, int n, const std::string& attrs = "") {
+    std::string e = "<Apply function=\"" + function + "\"" + attrs + ">";
+    for (int k = 0; k < n; k++) e += R"(<FieldRef field="d"/>)";
+    return e + "</Apply>";
+  };
+  const auto output_error = [](const std::string& expression) {
+    return load_error(output_doc(transformed("double", expression)));
+  };
+  const auto expected = [](const Arity& a) {
+    return a.max < 0
+               ? std::to_string(a.min) + " or more"
+               : (a.min == a.max ? std::to_string(a.min) : std::to_string(a.min) + " to " + std::to_string(a.max));
+  };
+  for (const Arity& a : kSpec) {
+    // One fewer than the least, and one more than the most (fixed arity).
+    std::vector<int> wrong = {a.min - 1};
+    if (a.max >= 0) wrong.push_back(a.max + 1);
+    for (const int n : wrong) {
+      const std::string error = output_error(apply(a.name, n));
+      const std::string want = std::string("E-ARITY: Apply \"") + a.name + "\" in ";
+      const std::string count = "has " + std::to_string(n) + " argument" + (n == 1 ? "" : "s") + "; " + a.name +
+                                " takes " + expected(a) + " (BuiltinFunctions.html)";
+      CHECK(contains(error, want) && contains(error, count));
+      if (!(contains(error, want) && contains(error, count)))
+        std::cerr << "  arity " << a.name << " with " << n << ": \"" << error << "\"\n";
+    }
+  }
+  const std::string arity = "E-ARITY";
+  // No argument at all, and three for a two-parameter function.
+  CHECK(contains(output_error(apply("+", 0)), "has 0 arguments; + takes 2"));
+  CHECK(contains(output_error(apply("+", 3)), "has 3 arguments; + takes 2"));
+  // An Extension is not an argument (pmml-4-4.xsd Apply: Extension*, then
+  // EXPRESSION*; B25): + with an Extension and one FieldRef has 1.
+  const std::string ext = R"(<Extension extender="X" name="n" value="v"/>)";
+  CHECK(contains(output_error(R"(<Apply function="+">)" + ext + R"(<FieldRef field="d"/></Apply>)"),
+                 "has 1 argument; + takes 2"));
+  CHECK(contains(output_error(R"(<Apply function="+">)" + ext + ext + R"(</Apply>)"), "has 0 arguments"));
+  // Neither mapMissingTo nor invalidValueTreatment makes it a function.
+  CHECK(contains(output_error(apply("+", 1, R"( mapMissingTo="7")")), arity));
+  CHECK(contains(output_error(apply("+", 1, R"( invalidValueTreatment="asMissing")")), arity));
+  // In a TransformationDictionary DerivedField, a LocalTransformations one,
+  // nested in a valid Apply, and as if's condition.
+  CHECK(contains(load_error(output_doc("", R"(<DerivedField name="t" optype="continuous" dataType="double">)" +
+                                               apply("+", 1) + "</DerivedField>")),
+                 "E-ARITY: Apply \"+\" in the TransformationDictionary has 1 argument"));
+  CHECK(contains(load_error(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="d"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <LocalTransformations><DerivedField name="t" optype="continuous" dataType="double">)" +
+                            apply("abs", 2) + R"(</DerivedField></LocalTransformations>
+    <RegressionTable intercept="0"><NumericPredictor name="t" coefficient="1"/></RegressionTable>
+  </RegressionModel>
+</PMML>)"),
+                 "E-ARITY: Apply \"abs\" in RegressionModel"));
+  CHECK(contains(output_error(R"(<Apply function="+"><FieldRef field="d"/>)" + apply("sqrt", 2) + "</Apply>"),
+                 "Apply \"sqrt\""));
+  CHECK(contains(output_error(R"(<Apply function="if">)" + apply("isMissing", 0) +
+                              R"(<FieldRef field="d"/><FieldRef field="d"/></Apply>)"),
+                 "Apply \"isMissing\""));
+  // The count comes before the argument types: three arguments to lessThan,
+  // one a string against numbers (E-TYPE-ORDER-MIXED at two).
+  CHECK(contains(
+      output_error(
+          R"(<Apply function="lessThan"><FieldRef field="s"/><Constant>1</Constant><Constant>2</Constant></Apply>)"),
+      "E-ARITY: Apply \"lessThan\""));
+  // Controls that load: the least and the most, with Extensions around them.
+  CHECK(output_error(apply("+", 2)).empty());
+  CHECK(
+      output_error(R"(<Apply function="+">)" + ext + R"(<FieldRef field="d"/><FieldRef field="d"/></Apply>)").empty());
+  CHECK(output_error(apply("sum", 1)).empty());
+  CHECK(output_error(apply("max", 5)).empty());
+  CHECK(output_error(apply("isIn", 2)).empty());
+  CHECK(
+      output_error(R"(<Apply function="if"><Constant dataType="boolean">true</Constant><FieldRef field="d"/></Apply>)")
+          .empty());
+  CHECK(output_error(R"(<Apply function="if"><Constant dataType="boolean">true</Constant><FieldRef field="d"/>
+        <FieldRef field="d"/></Apply>)")
+            .empty());
+  CHECK(load_error(output_doc(transformed("string", apply("concat", 2)))).empty());
+  CHECK(load_error(output_doc(transformed("string", apply("concat", 4)))).empty());
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -1321,6 +1504,7 @@ int main() {
   constants();
   no_silent_fallbacks();
   ordering();
+  arity();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";

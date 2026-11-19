@@ -41,7 +41,8 @@
  * the constructors read every such element, inline DerivedFields included.
  * So is P2.7's E-TYPE-ORDER-MIXED (string x number ordering, §2.7), by the
  * Apply constructor over expression_type's argument types
- * (order_mixed_message).
+ * (order_mixed_message), and P2.8b2's E-ARITY (a built-in Apply with the
+ * wrong number of arguments), by the same constructor (arity_message).
  * The clashes that documents
  * which load today contain are warnings (W-NAME-SHADOWS-MININGFIELD,
  * W-NAME-SHADOWS-TD, W-SCOPE-FLAT; binder.h).
@@ -574,13 +575,28 @@ inline StaticType expression_type(const XmlNode& node) { return expression_type(
 // design commit P2.7; typing.h order_mixed), raised by the Apply constructor
 // (core/builtinfunctions.h) with the argument types expression_type gives,
 // in the binder's words for E-TYPE-ORDER-MIXED (Binder::check_comparable).
-inline std::string order_mixed_message(const XmlNode& apply, const std::string& function, TypeId a, TypeId b) {
+// 'Apply "f" in <model>' (the TransformationDictionary when no model is above
+// it), how the engine's load errors of an Apply name it.
+inline std::string apply_label(const XmlNode& apply, const std::string& function) {
   const LoadScope* scope = LoadScope::current();
   const std::string model = scope ? scope->binder().scope_label(apply.xml()) : std::string();
-  return std::string(code::kTypeOrderMixed) + ": Apply \"" + function + "\" in " +
-         (model.empty() ? std::string("the TransformationDictionary") : model) + " orders " +
+  return "Apply \"" + function + "\" in " + (model.empty() ? std::string("the TransformationDictionary") : model);
+}
+
+inline std::string order_mixed_message(const XmlNode& apply, const std::string& function, TypeId a, TypeId b) {
+  return std::string(code::kTypeOrderMixed) + ": " + apply_label(apply, function) + " orders " +
          std::string(type_name(a)) + " against " + std::string(type_name(b)) +
          " (§2.7; DataDictionary.html: \"Categorical field values can only be tested for equality\")";
+}
+
+// The load error of a built-in Apply with the wrong number of arguments
+// (design commit P2.8b2; binder.h arity_fits), raised by the Apply
+// constructor (core/builtinfunctions.h), in the binder's words for E-ARITY:
+// 'E-ARITY: Apply "+" in RegressionModel ... has 1 argument; + takes 2
+// (BuiltinFunctions.html)'. `n` counts the element children after
+// Extension* (pmml-4-4.xsd Apply; B25).
+inline std::string arity_message(const XmlNode& apply, const fn::Signature& sig, std::size_t n) {
+  return std::string(code::kArity) + ": " + apply_label(apply, std::string(sig.name)) + " " + arity_mismatch(sig, n);
 }
 
 }  // namespace cpmml::bind

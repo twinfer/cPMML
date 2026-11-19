@@ -104,8 +104,6 @@ class BuiltInFunction {  // inputs are mapped by position
 
   std::string function_string;
   BuiltInFunctionType function_type = BuiltInFunctionType::IDENTITY;
-  int n_args = -1;
-  int min_nargs = 0;
   std::function<Value(const std::vector<Value>&)> function;
 
   // Typing of this application, set by the Apply constructor from the
@@ -136,15 +134,32 @@ class BuiltInFunction {  // inputs are mapped by position
   explicit BuiltInFunction(const std::string& function_string)
       : function_string(function_string),
         function_type(from_string(function_string)),
-        n_args(get_nargs(function_type)),
-        min_nargs(get_min_nargs(function_type)),
         function(get_function(function_type)) {}
 
   // The function an Apply element names, typed by its arguments' static types.
   explicit BuiltInFunction(const XmlNode& apply) : BuiltInFunction(apply.required_attribute("function")) {
     using cpmml::bind::TypeId;
+    // A supported function (from_string refused the others) is a row of the
+    // binder's table.
+    const cpmml::fn::Signature* sig = cpmml::fn::find(function_string);
+    if (!sig) throw std::logic_error("BuiltInFunction: \"" + function_string + "\" is not in the function table");
+    // Arity (design commit P2.8b2, §4.2): the wrong number of arguments is a
+    // load error, E-ARITY, by the table's min_args/max_args (binder.h
+    // arity_fits; BuiltinFunctions.html: "+ ... <ParameterField name="a"/>
+    // <ParameterField name="b"/>", "The functions -, *, and / are defined in
+    // the same way and have two parameters"). It was checked on every record
+    // instead, so that every record failed ("evaluating apply function"), or
+    // under invalidValueTreatment="asMissing" was silently missing; and the
+    // engine's own counts let concat take one argument and if four. The
+    // arguments are the element children after Extension* (pmml-4-4.xsd
+    // Apply, B25), as the binder counts them.
+    std::size_t n = 0;
+    for (pugi::xml_node argument : apply.xml().children())
+      if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0) n++;
+    if (!cpmml::bind::arity_fits(*sig, n)) throw cpmml::ParsingException(cpmml::bind::arity_message(apply, *sig, n));
     const bool comparison = compares_numbers(function_type);
     if (!is_numeric(function_type) && !comparison) return;
+    argument_types.reserve(n);
     for (pugi::xml_node argument : apply.xml().children())
       if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0)
         argument_types.push_back(cpmml::bind::expression_type(argument));
@@ -160,10 +175,6 @@ class BuiltInFunction {  // inputs are mapped by position
       typed_call = narrow_arguments;
       return;
     }
-    // A supported function (from_string refused the others) is a row of the
-    // binder's table.
-    const cpmml::fn::Signature* sig = cpmml::fn::find(function_string);
-    if (!sig) throw std::logic_error("BuiltInFunction: \"" + function_string + "\" is not in the function table");
     const cpmml::bind::StaticType result = cpmml::bind::apply_result_type(*sig, argument_types).type;
     float_result = result == TypeId::Float;
     integer_division = function_type == BuiltInFunctionType::DIV && result == TypeId::Integer;
@@ -266,89 +277,6 @@ class BuiltInFunction {  // inputs are mapped by position
                                     "functions (DefineFunction) are unsupported");
 
     return enum_value(builtinfunction, TABLE, "Apply@function");
-  }
-
-  // Exact arity, or -1 for variadic functions (see get_min_nargs for those).
-  static int get_nargs(const BuiltInFunctionType& function_type) {
-    switch (function_type) {
-      case BuiltInFunctionType::PLUS:
-      case BuiltInFunctionType::MINUS:
-      case BuiltInFunctionType::MUL:
-      case BuiltInFunctionType::DIV:
-      case BuiltInFunctionType::POW:
-      case BuiltInFunctionType::EQUAL:
-      case BuiltInFunctionType::NOT_EQUAL:
-      case BuiltInFunctionType::LESS_THAN:
-      case BuiltInFunctionType::LESS_THAN_EQUAL:
-      case BuiltInFunctionType::GREATER_THAN:
-      case BuiltInFunctionType::GREATER_THAN_EQUAL:
-      case BuiltInFunctionType::MATCHES:
-      case BuiltInFunctionType::THRESHOLD:
-      case BuiltInFunctionType::MODULO:
-      case BuiltInFunctionType::HYPOT:
-        return 2;
-      case BuiltInFunctionType::IF:
-        return -1;  // if(condition, then[, else]) — the else part is optional
-      case BuiltInFunctionType::IS_MISSING:
-      case BuiltInFunctionType::IS_NOT_MISSING:
-      case BuiltInFunctionType::EXP:
-      case BuiltInFunctionType::LN:
-      case BuiltInFunctionType::LOG10:
-      case BuiltInFunctionType::SQRT:
-      case BuiltInFunctionType::ABS:
-      case BuiltInFunctionType::ROUND:
-      case BuiltInFunctionType::FLOOR:
-      case BuiltInFunctionType::CEIL:
-      case BuiltInFunctionType::UPPERCASE:
-      case BuiltInFunctionType::LOWERCASE:
-      case BuiltInFunctionType::TRIM_BLANKS:
-      case BuiltInFunctionType::STRING_LENGTH:
-      case BuiltInFunctionType::NOT:
-      case BuiltInFunctionType::EXPM1:
-      case BuiltInFunctionType::LN1P:
-      case BuiltInFunctionType::RINT:
-      case BuiltInFunctionType::SIN:
-      case BuiltInFunctionType::ASIN:
-      case BuiltInFunctionType::SINH:
-      case BuiltInFunctionType::COS:
-      case BuiltInFunctionType::ACOS:
-      case BuiltInFunctionType::COSH:
-      case BuiltInFunctionType::TAN:
-      case BuiltInFunctionType::ATAN:
-      case BuiltInFunctionType::TANH:
-      case BuiltInFunctionType::ERF:
-      case BuiltInFunctionType::STD_NORMAL_CDF:
-      case BuiltInFunctionType::STD_NORMAL_PDF:
-        return 1;
-      case BuiltInFunctionType::REPLACE:
-      case BuiltInFunctionType::SUBSTRING:
-      case BuiltInFunctionType::NORMAL_CDF:
-      case BuiltInFunctionType::NORMAL_PDF:
-        return 3;
-      default:
-        return -1;  // variadic: max, min, sum, avg, concat, isIn, isNotIn
-    }
-  }
-
-  // Minimum arity for variadic functions (n_args == -1).
-  static int get_min_nargs(const BuiltInFunctionType& function_type) {
-    switch (function_type) {
-      case BuiltInFunctionType::IS_IN:
-      case BuiltInFunctionType::IS_NOT_IN:
-        return 2;  // isIn(candidate, member, ...)
-      case BuiltInFunctionType::MAX:
-      case BuiltInFunctionType::MIN:
-      case BuiltInFunctionType::SUM:
-      case BuiltInFunctionType::AVG:
-      case BuiltInFunctionType::CONCAT:
-      case BuiltInFunctionType::MEDIAN:
-      case BuiltInFunctionType::PRODUCT:
-        return 1;
-      case BuiltInFunctionType::IF:
-        return 2;  // if(condition, then[, else])
-      default:
-        return 0;
-    }
   }
 
   static std::function<Value(const std::vector<Value>&)> get_function(const BuiltInFunctionType& function_type) {
@@ -476,9 +404,8 @@ class BuiltInFunction {  // inputs are mapped by position
     }
   }
 
+  // The number of inputs was checked at load (E-ARITY, the constructor).
   inline Value operator()(const std::vector<Value>& input) const {
-    if (n_args != -1 && n_args != (int)input.size()) throw cpmml::InvalidValueException("Wrong number of inputs");
-    if (n_args == -1 && (int)input.size() < min_nargs) throw cpmml::InvalidValueException("Wrong number of inputs");
     if (!typed_call) return function(input);
 
     return typed(input);
