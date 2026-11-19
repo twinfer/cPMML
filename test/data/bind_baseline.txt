@@ -1,12 +1,12 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 416
+# documents: 422
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
 # E-TYPE-BOOLEAN-MIXED: 3
 # U-ELEMENT: 25
 # W-CAST-LOSSY: 113
-# W-CAST-NARROWING: 40
+# W-CAST-NARROWING: 44
 # W-FORWARD-REF: 10
 # W-NAME-SHADOWS-MININGFIELD: 7
 # W-NAME-SHADOWS-TD: 4
@@ -210,6 +210,10 @@ test/data/model/fix_mapmissing_string_slot_compare.zip:32	W-CAST-NARROWING	1	Tre
 test/data/model/fix_mapmissing_string_slot_compare.zip:34	W-CAST-NARROWING	1	TreeModel	OutputField "o_xin": declares double over its expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_miningfield_replacement_widening.zip:9	W-SLOT-WIDENED	1	RegressionModel	MiningField "x1": missingValueReplacement="2.5" is not an integer: the slot of integer field "x1" is widened to double (§3.4, N3, D22)
 test/data/model/fix_miningfield_replacement_widening.zip:9	W-SLOT-WIDENED	1	RegressionModel	MiningField "x2": an asExtremeValues bound is not an integer: the slot of integer field "x2" is widened to double (§3.4, N3, D22)
+test/data/model/fix_nested_string_in_number_slot.zip:13	W-CAST-NARROWING	1		DerivedField "u_up": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_nested_string_in_number_slot.zip:21	W-CAST-NARROWING	1		DerivedField "u_trim": declares integer over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_nested_string_in_number_slot.zip:29	W-CAST-NARROWING	1		DerivedField "u_sub0": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_nested_string_in_number_slot.zip:47	W-CAST-NARROWING	1		DerivedField "u_up_b": declares boolean over an expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_normdiscrete_field_type.zip:17	W-TEXT-WIDENED	1	RegressionModel	NormDiscrete "i" in OutputField "nd_i30": value="3.0" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_normdiscrete_field_type.zip:25	W-CAST-NARROWING	1	RegressionModel	OutputField "o_ndm": declares double over its expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_normdiscrete_integer_decimal.zip:10	W-TEXT-WIDENED	1	RegressionModel	NormDiscrete "i" in OutputField "nd35": value="3.5" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)

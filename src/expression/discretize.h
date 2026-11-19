@@ -21,11 +21,16 @@
  * continuous to discrete values using intervals.
  *
  * Its values (binValue, mapMissingTo, defaultValue) are of its own dataType,
- * else of the nearest enclosing declared type (§3.4, D21); they were read in
- * the enclosing DerivedField's type even when the element declares its own
- * (B11). They are document constants, so the enclosing declaration's cast
- * (§2.6) is applied to them at load (cpmml::bind::document_constant). The
- * Interval margins are NUMBER (xs:double), whatever the field's type.
+ * else of the nearest enclosing declared type (§3.4, D21: the type that
+ * applies to the element's position, cpmml::bind::untyped_type); they were
+ * read in the enclosing DerivedField's type even when the element declares
+ * its own (B11). They are document constants, so where the Discretize gives
+ * the field's value the enclosing declaration's cast (§2.6) is applied to
+ * them at load; as an argument of an Apply they keep the Discretize's type
+ * (cpmml::bind::element_constant, design commit P2.8b1: lessThan over an
+ * untyped Discretize in a boolean DerivedField read binValue "2" as a
+ * boolean and failed the load). The Interval margins are NUMBER
+ * (xs:double), whatever the field's type.
  */
 class Discretize : public Expression {
  public:
@@ -45,7 +50,7 @@ class Discretize : public Expression {
   Discretize(const XmlNode& node, const size_t& output_index, const DataType& output_type,
              const std::shared_ptr<Indexer>& indexer)
       : Discretize(node, output_index, output_type, indexer,
-                   cpmml::bind::declared_type_of(node).value_or(cpmml::bind::enclosing_type(node, output_type))) {}
+                   cpmml::bind::declared_type_of(node).value_or(cpmml::bind::untyped_type(node, output_type))) {}
 
   Discretize(const XmlNode& node, const size_t& output_index, const DataType& output_type,
              const std::shared_ptr<Indexer>& indexer, const cpmml::bind::TypeId type)
@@ -53,8 +58,9 @@ class Discretize : public Expression {
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         mapmissing_to(exist_missingreplacement
-                          ? cpmml::bind::document_constant(node, "mapMissingTo", node.required_attribute("mapMissingTo"),
-                                                           type, output_type)
+                          ? cpmml::bind::element_constant(node, node, "mapMissingTo",
+                                                          node.required_attribute("mapMissingTo"), type, output_type,
+                                                          cpmml::bind::slot_reads_values(node, type, output_type))
                           : Value()),
         field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name,
@@ -63,14 +69,15 @@ class Discretize : public Expression {
         // pmml-4-4.xsd: Interval@leftMargin and @rightMargin are NUMBER.
         datatype(DataType::DataTypeValue::DOUBLE),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue
-                         ? cpmml::bind::document_constant(node, "defaultValue", node.required_attribute("defaultValue"),
-                                                          type, output_type)
-                         : Value()) {
+        defaultValue(exist_defaultvalue ? cpmml::bind::element_constant(
+                                              node, node, "defaultValue", node.required_attribute("defaultValue"), type,
+                                              output_type, cpmml::bind::slot_reads_values(node, type, output_type))
+                                        : Value()) {
     inputs.insert(field_name);
+    const bool reads_slot = cpmml::bind::slot_reads_values(node, type, output_type);
     for (const auto& child : raw_node.get_childs("DiscretizeBin")) {
-      discretizebin_values.push_back(cpmml::bind::document_constant(
-          child, "binValue", child.required_attribute("binValue"), type, output_type));
+      discretizebin_values.push_back(cpmml::bind::element_constant(
+          raw_node, child, "binValue", child.required_attribute("binValue"), type, output_type, reads_slot));
       discretizebin_intervals.push_back(IntervalBuilder::build(child.get_child("Interval"), index, datatype));
     }
   }

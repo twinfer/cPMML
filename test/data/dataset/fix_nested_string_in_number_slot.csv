@@ -1,0 +1,4 @@
+s,b,d,y,p,o_up,o_trim,o_sub0,o_len,o_up_b
+a,true,1,1.0,1.0,1.0,1,1.5,1,true
+b,false,2,2.0,2.0,2.0,2,2.0,2,false
+a,false,2,2.0,2.0,1.0,1,1.5,1,true

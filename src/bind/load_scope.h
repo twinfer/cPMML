@@ -255,18 +255,25 @@ inline StaticType declared_type_of(const XmlNode& node) {
   return info->type;
 }
 
-// D21 (§3.4): "The type is the nearest enclosing declared type (the
-// DerivedField's or OutputField's dataType)". `fallback` is the engine type
+// D21 (§3.4): the type of a Discretize or MapValues without a dataType, "the
+// nearest enclosing declared type", the one that applies to the element's
+// position (typing.h untyped_value_type, design commit P2.8b1): a built-in
+// parameter's type, through the functions whose result inherits its
+// arguments' types; else the dataType of the DerivedField or OutputField the
+// element is in, except that under a function of fixed result type in a
+// boolean field its values' texts are inferred unless every one is boolean
+// text. `fallback` is the engine type
 // the expression was built with, for an OutputField whose dataType is
-// inferred.
-inline TypeId enclosing_type(const XmlNode& node, const DataType& fallback) {
+// inferred (unknown to the rule, as to the binder's ctx.enclosing).
+inline TypeId untyped_type(const XmlNode& node, const DataType& fallback) {
+  StaticType declared;
   for (pugi::xml_node n = node.xml().parent(); n && n.type() == pugi::node_element; n = n.parent()) {
     const std::string_view name = n.name();
     if (name != "DerivedField" && name != "OutputField") continue;
-    if (const StaticType t = declared_type_of(XmlNode(n))) return *t;
+    declared = declared_type_of(XmlNode(n));
     break;
   }
-  return type_id(fallback);
+  return untyped_value_type(node.xml(), declared).value_or(type_id(fallback));
 }
 
 // The engine Value of a typed value. Float text is kept as its xs:double
@@ -414,6 +421,66 @@ inline ::Value slot_constant(const XmlNode& node, const std::string& what, const
   return v;
 }
 
+// A Discretize's or MapValues' value `text` (binValue or output cell, read at
+// `node`; mapMissingTo, defaultValue), read strictly in the element's type
+// `type` (§3.4: "parsed as that type", "as the MapValues type"). Where the
+// element gives the value of a DerivedField or OutputField (slot_holder: its
+// expression, or a value argument of `if` that is), the value is cast to the
+// slot's engine type `slot` at load (§3.4 "DerivedField dataType=X ->
+// Cast<X>(expression)", document_constant). Any other element is an argument
+// of the Apply holding it, so its values stay in the element's own type
+// (§3.4: "A constant that is an argument of another function keeps its own
+// type"): casting them to the enclosing field's type read a MapValues
+// dataType="integer" under lessThan in a boolean OutputField as booleans and
+// failed the load (design commit P2.8b1). In a string slot a number's or
+// boolean's value also carries a string text for the string functions: the
+// text of its Cast<string> (§3.4, §2.6), which is what P2.2 stored there for
+// every value of such an element and what JPMML 1.7.7 gives
+// (concat(MapValues dataType="double" "1.50", "x") is "1.5x" on base, head and
+// JPMML; dataType="integer" "1" is "1x"). This differs from slot_constant,
+// which keeps a FieldRef's or Apply's document text (base kept it too): each
+// keeps base's text. An untyped element in a string field is a string
+// (untyped_value_type), so its text is the document's ("01x").
+// Conversely, a string element in a number or boolean slot every value of
+// which is in the slot type's lexical space (slot_reads_values: exactly the
+// elements P2.2 loaded, since it read or cast every value to the slot's type,
+// and a string's cast to a number or boolean is that strict reading, §2.6
+// "string -> number, boolean the strict XSD reading") also carries, for each
+// value, the number P2.2 stored there (the text read in the slot's type for
+// an untyped element, its Cast<slot> for a dataType="string" one), with the
+// text in svalue for the string functions (P2.8b1 re-run): the engine's
+// numeric and boolean readers read a string's `value`, which is its string
+// code (B2, B38, P6), so without it uppercase(MapValues "1"/"2") in a double
+// field gave 1/3 and sin(MapValues dataType="string" "2") sin(3), where base
+// and JPMML 1.7.7 give 2 and sin(2); stringLength reads the text, 1 (base 0,
+// JPMML 1). An element with a value the slot cannot read (one P2.2 refused)
+// keeps every value a string with its string code, as the decision of
+// 2026-11-18 (§9) keeps a number in a string slot one for the equality
+// readers: Value::operator== compares `value`, so equal(MapValues "true"/"x",
+// Constant "true") in a boolean field compares the strings (JPMML 1.7.7
+// true|false|true), where a number for "true" against the Constant's code was
+// always false. `reads_slot` is slot_reads_values(element, type, slot),
+// computed once per element by the caller.
+inline bool slot_reads_values(const XmlNode& element, TypeId type, const DataType& slot) {
+  return type == TypeId::String && slot != DataType::DataTypeValue::STRING && !is_slot_expression(element) &&
+         reads_every_value(element.xml(), type_id(slot));
+}
+
+inline ::Value element_constant(const XmlNode& element, const XmlNode& node, const std::string& what,
+                                const std::string& text, TypeId type, const DataType& slot, bool reads_slot) {
+  if (is_slot_expression(element)) return document_constant(node, what, text, type, slot);
+  if (reads_slot) {
+    ::Value n = element.exists_attribute("dataType") ? document_constant(node, what, text, type, slot)
+                                                     : document_constant(node, what, text, type_id(slot), slot);
+    n.svalue = text;
+    return n;
+  }
+  ::Value v = document_constant(node, what, text, type, engine_type(type));
+  if (slot == DataType::DataTypeValue::STRING && type != TypeId::String && v.svalue.empty())
+    v.svalue = document_constant(node, what, text, type, slot).svalue;
+  return v;
+}
+
 // An attribute of XSD type NUMBER (xs:double): NormContinuous LinearNorm
 // orig/norm, MiningField lowValue/highValue. Read as a double whatever the
 // enclosing type (L1, B11).
@@ -482,10 +549,15 @@ inline bool is_nan_key(const std::string& text, const DataType& field_type) {
 //                    double (§3.4);
 //   Discretize, MapValues
 //                    their dataType, else the nearest enclosing declared type
-//                    (D21: the dataType of the DerivedField or OutputField
-//                    the element is in; unknown in an OutputField without
-//                    one, as the binder's ctx.enclosing is for a
-//                    transformedValue or decision);
+//                    (D21, typing.h untyped_value_type: a built-in
+//                    parameter's type, through the functions whose result
+//                    inherits its arguments' types; else the dataType of the
+//                    DerivedField or OutputField the element is in, unknown
+//                    in an OutputField without one, as the binder's
+//                    ctx.enclosing is for a transformedValue or decision;
+//                    under a function of fixed result type in a boolean
+//                    field, its values' texts inferred as untyped
+//                    Constants' unless every one is boolean text);
 //   Apply            apply_result_type over its arguments (§4.1; `if` the
 //                    common type of THEN and ELSE, D7, P2.6); unknown for a
 //                    function that is not a built-in (the engine refuses it
@@ -505,15 +577,6 @@ inline StaticType datatype_attribute(pugi::xml_node node) {
   if (!a) return std::nullopt;
   const auto info = parse_datatype(a.value());
   return info ? StaticType(info->type) : std::nullopt;
-}
-
-// The position of `node` among the arguments of the Apply holding it (its
-// element siblings after Extension*).
-inline std::size_t argument_position(pugi::xml_node node) {
-  std::size_t i = 0;
-  for (pugi::xml_node s = node.previous_sibling(); s; s = s.previous_sibling())
-    if (s.type() == pugi::node_element && std::strcmp(s.name(), "Extension") != 0) i++;
-  return i;
 }
 
 inline StaticType expression_type(pugi::xml_node node) {
@@ -552,11 +615,15 @@ inline StaticType expression_type(pugi::xml_node node) {
   if (n == "NormContinuous" || n == "NormDiscrete" || n == "TextIndex") return TypeId::Double;
   if (n == "Discretize" || n == "MapValues") {
     if (node.attribute("dataType")) return datatype_attribute(node);
+    StaticType enclosing;
     for (pugi::xml_node p = node.parent(); p && p.type() == pugi::node_element; p = p.parent()) {
       const std::string_view pn = p.name();
-      if (pn == "DerivedField" || pn == "OutputField") return datatype_attribute(p);
+      if (pn == "DerivedField" || pn == "OutputField") {
+        enclosing = datatype_attribute(p);
+        break;
+      }
     }
-    return std::nullopt;
+    return untyped_value_type(node, enclosing);
   }
   if (n == "Apply") {
     const fn::Signature* sig = fn::find(node.attribute("function").value());

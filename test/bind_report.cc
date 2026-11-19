@@ -516,6 +516,90 @@ void rule_cases() {
                           "closure=\"openOpen\" rightMargin=\"1\"/></DiscretizeBin></Discretize>",
                           "categorical")),
          {"E-TYPE-PARAM"});
+  // D21 by position (design commit P2.8b1, typing.h untyped_value_type): an
+  // untyped Discretize or MapValues has the type that applies to its place.
+  const auto bins = [](const std::string& a, const std::string& b, const std::string& type = "") {
+    return "<Discretize field=\"x\"" + (type.empty() ? "" : " dataType=\"" + type + "\"") + "><DiscretizeBin binValue=\"" +
+           a + "\"><Interval closure=\"openOpen\" rightMargin=\"3\"/></DiscretizeBin><DiscretizeBin binValue=\"" + b +
+           "\"><Interval closure=\"closedOpen\" leftMargin=\"3\"/></DiscretizeBin></Discretize>";
+  };
+  expect("untyped-under-fixed-result",
+         "D21: under lessThan (no parameter dataType, boolean result) the values infer as Constants "
+         "(Transformations.html: \"it will be inferred by the content of the element\")",
+         in_model(derived("u", "boolean", call("lessThan", bins("1", "2") + constant("2")), "categorical") +
+                  derived("v", "boolean", call("equal", mapvalues("s", row("a", "1") + row("b", "2.5")) + constant("1")),
+                          "categorical")),
+         {});
+  expect("untyped-under-fixed-result-string",
+         "D21: inferred texts take the least restrictive type (Functions.html: \"string double float integer\"); "
+         "a string ordered against a number is E-TYPE-ORDER-MIXED (§2.7)",
+         in_model(derived("u", "boolean", call("lessThan", mapvalues("s", row("a", "1") + row("b", "x")) + constant("5")),
+                          "categorical")),
+         {"E-TYPE-ORDER-MIXED"});
+  expect("untyped-no-values",
+         "D21: in a boolean field an element with no value has no text that is not boolean text, so it keeps "
+         "P2.2's boolean reading (typing.h reads_every_value), and boolean does not order against a string (Q7)",
+         in_model(derived("u", "boolean", call("lessThan", "<Discretize field=\"x\"/>" + constant("abc")),
+                          "categorical")),
+         {"E-TYPE-BOOLEAN-MIXED"});
+  expect("untyped-boolean-text",
+         "D21: in a boolean field an element whose every value is boolean text (XSD §3.2.2.1 \"{true, false, 1, "
+         "0}\") keeps P2.2's boolean reading, so it compares with a boolean field in either order (P2.8b1 re-run: "
+         "inferred as strings, equal(MapValues, b) was always false)",
+         in_model(derived("u", "boolean",
+                          call("equal", mapvalues("s", row("a", "true") + row("b", "false")) + ref("b")),
+                          "categorical") +
+                  derived("v", "boolean",
+                          call("notEqual", ref("b") + mapvalues("s", row("a", " true ") + row("b", "0"))),
+                          "categorical") +
+                  derived("w", "boolean", call("equal", bins("true", "false") + ref("b")), "categorical")),
+         {});
+  expect("untyped-boolean-text-mixed",
+         "D21: one value that is not boolean text (\"TRUE\": XSD literals are case-sensitive) makes the element's "
+         "values inferred, strings here, and a string does not compare with a boolean (Q7)",
+         in_model(derived("u", "boolean",
+                          call("equal", mapvalues("s", row("a", "true") + row("b", "TRUE")) + ref("b")),
+                          "categorical") +
+                  derived("v", "boolean",
+                          call("equal", mapvalues("s", row("a", "TRUE") + row("b", "true")) + ref("b")),
+                          "categorical")),
+         {"E-TYPE-BOOLEAN-MIXED", "E-TYPE-BOOLEAN-MIXED"});
+  expect("untyped-in-string-field",
+         "D21: outside a boolean field an untyped parameter's element keeps the field's type (P2.8b1: base and "
+         "JPMML 1.7.7 read it as a string), so lessThan against a string field orders two strings "
+         "(W-ORDER-CATEGORICAL for the categorical s, Q6), not E-TYPE-ORDER-MIXED",
+         in_model(derived("u", "string",
+                          call("if", call("lessThan", mapvalues("s", row("a", "1") + row("b", "01")) + ref("s")) +
+                                         constant("y") + constant("n")),
+                          "categorical") +
+                  derived("v", "string", call("concat", mapvalues("s", row("a", "01")) + constant("x")),
+                          "categorical")),
+         {"W-ORDER-CATEGORICAL"});
+  expect("untyped-typed-parameter",
+         "D21: the parameter's dataType (BuiltinFunctions.html stringLength: <ParameterField dataType=\"string\"/>)",
+         in_model(derived("u", "integer", call("stringLength", mapvalues("s", row("a", "abc"))))), {});
+  expect("untyped-param-unreadable",
+         "D21: a parameter's type applies only when it reads every value (typing.h reads_every_value); else the "
+         "field's, P2.2's reading, so the document still loads and the argument is typed against the parameter "
+         "as on base: a string condition of if, a boolean where sin wants a number (Q7)",
+         in_model(derived("u", "string",
+                          call("if", mapvalues("s", row("a", "1") + row("b", "2")) + constant("y") + constant("n")),
+                          "categorical") +
+                  derived("v", "boolean", call("sin", mapvalues("s", row("a", "true") + row("b", "false"))),
+                          "categorical")),
+         {"E-TYPE-BOOLEAN-MIXED", "E-TYPE-BOOLEAN-MIXED", "W-CAST-NARROWING"});
+  expect("untyped-through-arithmetic",
+         "D21: + inherits its arguments' types (Functions.html), so the field's integer applies through it",
+         in_model(derived("u", "integer", call("/", mapvalues("s", row("a", "1.5")) + constant("2"))) +
+                  derived("v", "boolean", call("lessThan", call("+", bins("1", "2") + constant("1")) + constant("5")),
+                          "categorical")),
+         {"E-VALUE-MALFORMED"});
+  expect("own-type-under-apply", "§3.4: an element's own dataType wins; its values are not the enclosing field's",
+         in_model(derived("u", "boolean", call("lessThan", bins("1", "2", "integer") + constant("2")), "categorical") +
+                  derived("v", "boolean",
+                          call("lessThan", mapvalues("s", row("a", "1") + row("b", "20"), "integer") + constant("5")),
+                          "categorical")),
+         {});
   expect("normcontinuous-order",
          "Transformations.html: \"LinearNorm must be strictly sorted by ascending value of orig\"",
          in_model(derived("u", "double",

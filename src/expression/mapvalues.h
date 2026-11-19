@@ -27,10 +27,15 @@
  *   - a key cell is a value of its FieldColumnPair's field, read by the K1
  *     rule in that field's type;
  *   - output cells, mapMissingTo and defaultValue are of the MapValues
- *     dataType, else of the nearest enclosing declared type (D21); they were
- *     read in the enclosing DerivedField's type even when the element
- *     declares its own (B11). They are document constants, so the enclosing
- *     declaration's cast (§2.6) is applied to them at load;
+ *     dataType, else of the nearest enclosing declared type (D21: the type
+ *     that applies to the element's position, cpmml::bind::untyped_type);
+ *     they were read in the enclosing DerivedField's type even when the
+ *     element declares its own (B11). They are document constants, so where
+ *     the MapValues gives the field's value the enclosing declaration's cast
+ *     (§2.6) is applied to them at load; as an argument of an Apply they keep
+ *     the MapValues type (cpmml::bind::element_constant, design commit
+ *     P2.8b1: lessThan over a MapValues dataType="integer" in a boolean
+ *     OutputField cast its cells to boolean and failed the load);
  *   - Transformations.html: "it is an error if the table entries used for
  *     matching are not unique" (B42: two rows whose keys are equal once typed
  *     were accepted, one of them silently winning): E-KEY-DUPLICATE;
@@ -59,7 +64,7 @@ class MapValues : public Expression {
   MapValues(const XmlNode& node, const size_t& output_index, const DataType& output_type,
             const std::shared_ptr<Indexer>& indexer)
       : MapValues(node, output_index, output_type, indexer,
-                  cpmml::bind::declared_type_of(node).value_or(cpmml::bind::enclosing_type(node, output_type))) {}
+                  cpmml::bind::declared_type_of(node).value_or(cpmml::bind::untyped_type(node, output_type))) {}
 
   MapValues(const XmlNode& node, const size_t& output_index, const DataType& output_type,
             const std::shared_ptr<Indexer>& indexer, const cpmml::bind::TypeId type)
@@ -67,14 +72,15 @@ class MapValues : public Expression {
         raw_node(node),
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         mapmissing_to(exist_missingreplacement
-                          ? cpmml::bind::document_constant(node, "mapMissingTo", node.required_attribute("mapMissingTo"),
-                                                           type, output_type)
+                          ? cpmml::bind::element_constant(node, node, "mapMissingTo",
+                                                          node.required_attribute("mapMissingTo"), type, output_type,
+                                                          cpmml::bind::slot_reads_values(node, type, output_type))
                           : Value()),
         exist_defaultvalue(node.exists_attribute("defaultValue")),
-        defaultValue(exist_defaultvalue
-                         ? cpmml::bind::document_constant(node, "defaultValue", node.required_attribute("defaultValue"),
-                                                          type, output_type)
-                         : Value()),
+        defaultValue(exist_defaultvalue ? cpmml::bind::element_constant(
+                                              node, node, "defaultValue", node.required_attribute("defaultValue"), type,
+                                              output_type, cpmml::bind::slot_reads_values(node, type, output_type))
+                                        : Value()),
         out(node.required_attribute("outputColumn")) {
     std::string tmp_column;
     std::string tmp_input;
@@ -97,6 +103,7 @@ class MapValues : public Expression {
     // (a number, or a string's code), a float column's narrowed to float, as
     // its typed value is (two texts of one float are one key).
     std::set<std::vector<double>> seen;
+    const bool reads_slot = cpmml::bind::slot_reads_values(node, type, output_type);
     for (const auto& n : raw_node.get_child("InlineTable").get_childs("row")) {
       std::vector<Value> keys;
       std::vector<double> typed;
@@ -122,8 +129,8 @@ class MapValues : public Expression {
                                       ": its key equals an earlier row's once typed (Transformations.html: \"it is "
                                       "an error if the table entries used for matching are not unique\", B42)");
       }
-      tree_table.add(keys, cpmml::bind::document_constant(node, "output cell <" + out + ">", n.get_child(out).value(),
-                                                          type, output_type));
+      tree_table.add(keys, cpmml::bind::element_constant(node, node, "output cell <" + out + ">",
+                                                         n.get_child(out).value(), type, output_type, reads_slot));
     }
   }
 

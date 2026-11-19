@@ -1367,8 +1367,10 @@ class Binder {
       require_numeric(ctx, node, resolve(ctx, node, *f),
                       "Discretize maps numerical input (Transformations.html: \"Discretization of numerical input "
                       "fields\")");
-    // §3.4 / D21: its dataType, else the nearest enclosing declared type.
-    const StaticType type = attr(node, "dataType") ? declared_type(ctx, node, false) : ctx.enclosing;
+    // §3.4 / D21: its dataType, else the nearest enclosing declared type, the
+    // one that applies to its position (typing.h untyped_value_type).
+    const StaticType type =
+        attr(node, "dataType") ? declared_type(ctx, node, false) : untyped_value_type(node, ctx.enclosing);
     if (const auto mm = attr(node, "mapMissingTo")) strict_value(ctx, node, type, *mm, "mapMissingTo");
     if (const auto dv = attr(node, "defaultValue")) strict_value(ctx, node, type, *dv, "defaultValue");
     for (pugi::xml_node bin : node.children("DiscretizeBin")) {
@@ -1386,7 +1388,8 @@ class Binder {
   }
 
   Typed bind_mapvalues(Ctx& ctx, pugi::xml_node node) {
-    const StaticType type = attr(node, "dataType") ? declared_type(ctx, node, false) : ctx.enclosing;
+    const StaticType type =
+        attr(node, "dataType") ? declared_type(ctx, node, false) : untyped_value_type(node, ctx.enclosing);
     const auto output = attr(node, "outputColumn");
     if (!output) error(code::kRequired, ctx, node, "attribute outputColumn is required (pmml-4-4.xsd)");
     if (const auto mm = attr(node, "mapMissingTo")) strict_value(ctx, node, type, *mm, "mapMissingTo");

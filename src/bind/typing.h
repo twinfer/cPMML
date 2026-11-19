@@ -8,8 +8,10 @@
 
 /**
  * Design note -- the static typing rules the binder applies (§2.5, §2.6,
- * §3.4). Pure functions over TypeIds and text; the binder (binder.h) calls
- * them and turns their answers into diagnostics.
+ * §3.4). Pure functions over TypeIds and text (and, for D21's untyped
+ * Discretize and MapValues, the element's place in the document); the binder
+ * (binder.h) and the engine's load (load_scope.h) call them, and the binder
+ * turns their answers into diagnostics.
  *
  * StaticType. A static type is a TypeId of a parsed type, or unknown
  * (nullopt): the type of an element the binder does not type yet, or of an
@@ -59,6 +61,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <pugixml.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -412,6 +415,204 @@ inline ApplyType apply_result_type(const fn::Signature& sig, const std::vector<S
     }
   }
   return {};
+}
+
+// ---------------------------------------------------------------- untyped Discretize, MapValues (D21)
+// pmml-4-4.xsd gives Discretize and MapValues an optional dataType
+// (`<xs:attribute name="dataType" type="DATATYPE"/>`, no default) and the
+// text of Transformations.html none. §3.4 / D21: "its dataType, else the
+// nearest enclosing declared type", where the type that encloses the element
+// is the one that applies to its position (design commit P2.8b1; P2.2 took
+// it from the enclosing DerivedField or OutputField wherever the element
+// stood, so lessThan over an untyped Discretize in a boolean DerivedField
+// read its binValue "2" as a boolean, and failed the load):
+//   the expression of a DerivedField or OutputField
+//                 that field's dataType (`enclosing`): "DerivedField
+//                 dataType=X -> Cast<X>(expression)" (§3.4);
+//   an argument of an Apply whose built-in parameter has a type
+//                 that type: the pseudo-declaration's ParameterField dataType
+//                 (Transformations.html, Constant: "If the ParameterField
+//                 definition includes a dataType, the Constant will inherit
+//                 the dataType specified in the ParameterField"), or the
+//                 boolean of and/or ("Evaluate the results of two or more
+//                 boolean values"), as the function table types them
+//                 (argument_type), when every value of the element is in
+//                 that type's lexical space (reads_every_value); when one is
+//                 not, the enclosing field's dataType, P2.2's reading, so
+//                 that no document that loads on the base build stops
+//                 loading here (P2.8b1 re-run: if(MapValues "1"/"2", ...) in
+//                 a string field, sin(MapValues "true"/"false") in a boolean
+//                 one); the binder still types the argument against the
+//                 parameter (E-TYPE-PARAM, E-TYPE-BOOLEAN-MIXED), as on base;
+//   an argument of a function whose result inherits its arguments' types
+//                 (+, -, *, /, min, max, sum, avg, median, product, abs,
+//                 pow, threshold, modulo; the values of if)
+//                 the type that applies to the Apply's own position, by the
+//                 same rule. Functions.html: "functions are assumed to
+//                 inherit the dataType of the current input parameters", so
+//                 a type that holds the result holds the arguments: an
+//                 untyped MapValues under `/` in an integer DerivedField is
+//                 an integer (fixture fix_apply_untyped_mapvalues_integer);
+//   any other argument (an untyped parameter of a function of fixed result
+//                 type: the comparisons, isIn, isNotIn, isMissing,
+//                 isNotMissing, concat, round, floor, ceil, exp, ln, log10,
+//                 sqrt, formatNumber's number; or a function that is not a
+//                 built-in)
+//                 the enclosing field's dataType, as P2.2 typed it, except
+//                 in a boolean field. There the boolean is the predicate's
+//                 result (comparisons, isIn, isMissing: the only built-ins
+//                 of boolean result with an untyped parameter), not its
+//                 argument's type, and P2.2's reading refused every text but
+//                 "true", "false", "1", "0". In a boolean field an element
+//                 every value of which is such a text (reads_every_value,
+//                 also when it has no value) keeps that boolean reading, so
+//                 no document that loads on the base build changes here
+//                 (P2.8b1 re-run: inferring them read equal(MapValues
+//                 "true"/"false", FieldRef b) of a boolean b as a string
+//                 against a boolean, always false; base and JPMML 1.7.7
+//                 compare booleans). Any other element in a boolean field
+//                 (one that P2.2 refused) has its values inferred from their
+//                 own text by the untyped Constant rule (Transformations.html: "If the dataType is not
+//                 specified in the ParameterField definition or Constant
+//                 element, it will be inferred by the content of the
+//                 element. A Constant that consists solely of numbers will
+//                 be treated as an integer, if a decimal point is present
+//                 among the numbers the Constant will be treated as a double
+//                 ... The presence of any non-numeric characters ... will
+//                 result in the Constant being treated as a string"), each
+//                 value (output cells or binValues, mapMissingTo,
+//                 defaultValue) as a Constant's text and the element's type
+//                 the least restrictive of them (Functions.html: "When the
+//                 input parameters have multiple dataTypes, the least
+//                 restrictive dataType will be inherited by default ...
+//                 string double float integer"): lessThan(Discretize
+//                 binValue "1"/"2", 2) compares integers. In any other field the field's type is
+//                 kept (smallest choice, design commit P2.8b1): inference
+//                 there changed documents that load on the base build, e.g.
+//                 concat(MapValues "01", "x") in a string field ("01x" on
+//                 base and JPMML 1.7.7, which types an untyped MapValues
+//                 argument as a string) and equal or lessThan of such a
+//                 MapValues against a string field. Unknown (an OutputField
+//                 without a dataType) stays unknown, as in P2.2.
+// Any other element between the expression and its field (none of the
+// EXPRESSION elements but Apply holds another) is passed through.
+
+// The position of `node` among the arguments of the Apply holding it (its
+// element siblings after Extension*).
+inline std::size_t argument_position(pugi::xml_node node) {
+  std::size_t i = 0;
+  for (pugi::xml_node s = node.previous_sibling(); s; s = s.previous_sibling())
+    if (s.type() == pugi::node_element && std::string_view(s.name()) != "Extension") i++;
+  return i;
+}
+
+// The type the function table gives the parameter at `position`, when it is
+// one type (Comparable, Numeric, Any, Temporal and FieldRef are not).
+constexpr StaticType argument_type(const fn::Signature& sig, std::size_t position) {
+  switch (sig.param(position)) {
+    case fn::Param::Integer:
+      return TypeId::Integer;
+    case fn::Param::Double:
+      return TypeId::Double;
+    case fn::Param::String:
+      return TypeId::String;
+    case fn::Param::Boolean:
+      return TypeId::Boolean;
+    default:
+      return std::nullopt;
+  }
+}
+
+// Every value of a Discretize or MapValues as the document writes it:
+// mapMissingTo, defaultValue, and its binValues or output cells, the texts
+// the engine's constructors read (discretize.h, mapvalues.h).
+template <class F>
+inline void for_each_value_text(pugi::xml_node element, F&& f) {
+  if (const pugi::xml_attribute a = element.attribute("mapMissingTo")) f(std::string_view(a.value()));
+  if (const pugi::xml_attribute a = element.attribute("defaultValue")) f(std::string_view(a.value()));
+  if (std::string_view(element.name()) == "Discretize") {
+    for (pugi::xml_node bin : element.children("DiscretizeBin"))
+      if (const pugi::xml_attribute a = bin.attribute("binValue")) f(std::string_view(a.value()));
+  } else if (const pugi::xml_attribute out = element.attribute("outputColumn")) {
+    for (pugi::xml_node row : element.child("InlineTable").children("row"))
+      if (const pugi::xml_node cell = row.child(out.value())) f(std::string_view(cell.text().get()));
+  }
+}
+
+// Whether `text` is in the lexical space of `type`, by the readers the
+// engine's document_constant and the binder's strict_value use
+// (core/types/parse.h: XSD Part 2, whiteSpace collapse for every type but
+// string, case-sensitive). For boolean, §3.2.2.1: "An instance of a datatype
+// that is defined as boolean can have the following legal literals {true,
+// false, 1, 0}"; every text is a string.
+inline bool in_lexical_space(TypeId type, std::string_view text) {
+  types::ParseContext ctx;
+  switch (type) {
+    case TypeId::Integer:
+      return types::parse(std::type_identity<types::Integer>{}, text, ctx).has_value();
+    case TypeId::Float:
+      return types::parse(std::type_identity<types::Float>{}, text, ctx).has_value();
+    case TypeId::Double:
+      return types::parse(std::type_identity<types::Double>{}, text, ctx).has_value();
+    case TypeId::Boolean:
+      return types::parse(std::type_identity<types::Boolean>{}, text, ctx).has_value();
+    case TypeId::String:
+      return true;
+    case TypeId::Missing:
+    case TypeId::Invalid:
+      break;
+  }
+  return false;
+}
+
+// Whether every value of the element is in the lexical space of `type`: the
+// element can be read in it. True for an element with no value at all.
+inline bool reads_every_value(pugi::xml_node element, TypeId type) {
+  bool all = true;
+  for_each_value_text(element, [&all, type](std::string_view text) { all = all && in_lexical_space(type, text); });
+  return all;
+}
+
+// The type of an untyped Discretize's or MapValues' values read as untyped
+// Constants' texts (the last case above).
+inline TypeId inferred_values_type(pugi::xml_node element) {
+  StaticType t;
+  for_each_value_text(element, [&t](std::string_view text) {
+    TypeId k = TypeId::String;
+    switch (infer_constant(text)) {
+      case ConstantKind::Integer:
+      case ConstantKind::IntegerOverflow:  // a load error of the integer reading (D4)
+        k = TypeId::Integer;
+        break;
+      case ConstantKind::Double:
+        k = TypeId::Double;
+        break;
+      case ConstantKind::String:
+        break;
+    }
+    t = t ? least_restrictive(t, k).type : StaticType(k);  // integer, double, string: never boolean-mixed
+  });
+  return t.value_or(TypeId::String);
+}
+
+// The static type of a Discretize or MapValues without a dataType, by the
+// rule above. `enclosing` is the dataType the DerivedField or OutputField
+// whose expression holds it declares (unknown when it declares none).
+inline StaticType untyped_value_type(pugi::xml_node element, StaticType enclosing) {
+  pugi::xml_node n = element;
+  for (pugi::xml_node p = n.parent(); p && p.type() == pugi::node_element; n = p, p = p.parent()) {
+    const std::string_view name = p.name();
+    if (name == "DerivedField" || name == "OutputField") return enclosing;
+    if (name != "Apply") continue;
+    const fn::Signature* sig = fn::find(p.attribute("function").value());
+    const StaticType t = sig ? argument_type(*sig, argument_position(n)) : std::nullopt;
+    if (t) return reads_every_value(element, *t) ? t : enclosing;
+    if (!sig || sig->result == fn::Result::Fixed)
+      return enclosing == TypeId::Boolean && !reads_every_value(element, TypeId::Boolean)
+                 ? StaticType(inferred_values_type(element))
+                 : enclosing;
+  }
+  return enclosing;
 }
 
 // ---------------------------------------------------------------- Array content

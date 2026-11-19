@@ -1,0 +1,5 @@
+s,d,y,p,o_lt_mv,o_eq_di,o_eq_mv,o_lt_plus,o_lt_di,o_concat
+a,3.5,3.5,3.5,true,true,false,true,false,1x
+b,2,2.0,2.0,false,false,true,false,true,20x
+zz,2.0,2.0,2.0,N/A,false,N/A,N/A,true,N/A
+,3.5,3.5,3.5,N/A,true,N/A,N/A,false,N/A

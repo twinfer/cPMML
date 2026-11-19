@@ -1,0 +1,4 @@
+s,b,d,y,p,o_if,o_if10,o_not,o_sub,o_subplus
+a,true,1,1.0,1.0,y,y,n,he,he
+b,false,2,2.0,2.0,n,n,y,el,el
+a,false,2,2.0,2.0,y,y,n,he,he
