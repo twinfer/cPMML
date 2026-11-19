@@ -197,7 +197,10 @@ static void test_parse() {
   CHECK(is_double(parse_as<Double>("-0", run), -0.0),
         "D18 / XSD: \"Lexical representations for zero may take a positive or negative sign\"");
   CHECK(is_double(parse_as<Double>("1e400", run), kInf), "lexical.h: a decimal beyond the range rounds to INF");
-  for (const char* bad : {"", "inf", "Infinity", "+INF", "nan", "NAN", "1d", "0x1p3", ".", "e5", "1e", "1,5", "abc"})
+  CHECK(is_double(parse_as<Double>("+INF", run), kInf),
+        "D30: XSD 1.1 §3.3.5.2 \"the literals 'INF', '+INF', '-INF', and 'NaN'\"");
+  for (const char* bad :
+       {"", "inf", "Infinity", "+inf", "+NaN", "-NaN", "nan", "NAN", "1d", "0x1p3", ".", "e5", "1e", "1,5", "abc"})
     CHECK(invalid_because(parse_as<Double>(bad, run), InvalidReason::Malformed),
           "D11: inputs and attributes use the strict, case-sensitive XSD forms");
 
@@ -212,6 +215,8 @@ static void test_parse() {
   CHECK(is_float(parse_as<Float>("1e-45", run), std::numeric_limits<float>::denorm_min()), "Java: 1.4E-45");
   CHECK(is_float(parse_as<Float>("NaN", run), std::numeric_limits<float>::quiet_NaN()), "XSD §3.2.4.1 NaN");
   CHECK(invalid_because(parse_as<Float>("inf", run), InvalidReason::Malformed), "D11");
+  CHECK(is_float(parse_as<Float>("+INF", run), kInfF), "D30: XSD 1.1 §3.3.4.2 '+INF'");
+  CHECK(invalid_because(parse_as<Float>("+inf", run), InvalidReason::Malformed), "D11, D30");
 
   // boolean: XSD §3.2.2.1 "{true, false, 1, 0}"
   const char* xb = "XSD §3.2.2.1: boolean literals {true, false, 1, 0}";
@@ -244,6 +249,14 @@ static void test_parse() {
   CHECK(
       is_float(parse_constant_as<Float>("INF", run), kInfF) && is_float(parse_constant_as<Float>("-inf", run), -kInfF),
       tc);
+  const char* tp = "D30: +INF, INF's XSD 1.1 spelling, is case insensitive in Constant text too";
+  CHECK(is_double(parse_constant_as<Double>("+INF", run), kInf) &&
+            is_double(parse_constant_as<Double>("+inf", run), kInf),
+        tp);
+  CHECK(is_float(parse_constant_as<Float>("+Inf", run), kInfF), tp);
+  CHECK(invalid_because(parse_constant_as<Double>("+nan", run), InvalidReason::Malformed), "D30: no +NaN");
+  CHECK(invalid_because(parse_constant_as<Integer>("+INF", run), InvalidReason::Malformed), "D30: float/double only");
+  CHECK(is_text(parse_constant_as<String>("+INF", run), "+INF"), "D30: a string keeps its text");
   CHECK(is_double(parse_constant_as<Double>("2.5", run), 2.5), "Constant text otherwise strict");
   CHECK(invalid_because(parse_constant_as<Double>("Infinity", run), InvalidReason::Malformed),
         "Constant: only INF/-INF/NaN");

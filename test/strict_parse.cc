@@ -97,6 +97,18 @@ static void xsd_double() {
   CHECK(reads_double("INF", inf));
   CHECK(reads_double("-INF", -inf));
   CHECK(reads_double("NaN", std::numeric_limits<double>::quiet_NaN()));
+  // D30: XSD 1.1 §3.3.5.2, "the literals 'INF', '+INF', '-INF', and 'NaN'"
+  // (XSD 1.0 had no +INF; JPMML 1.7.7 refuses it: NumberFormatException).
+  // Case-sensitive like the others, and only INF takes a '+'.
+  CHECK(reads_double("+INF", inf));
+  CHECK(reads_double(" +INF\n", inf));
+  CHECK(rejects_double("+inf"));
+  CHECK(rejects_double("+Infinity"));
+  CHECK(rejects_double("+NaN"));
+  CHECK(rejects_double("-NaN"));
+  CHECK(rejects_double("++INF"));
+  CHECK(rejects_double("+-INF"));
+  CHECK(rejects_double("+ INF"));
 
   // XML whitespace around the value is insignificant; inside it is not.
   CHECK(reads_double(" 5 ", 5));
@@ -129,10 +141,9 @@ static void xsd_double() {
   CHECK(rejects_double("0x10"));
   CHECK(rejects_double("++5"));
   CHECK(rejects_double("+-5"));
-  // XSD 1.0 has no "+INF" (JPMML rejects it too); the spellings below are
-  // Java's or C's, which JPMML accepts for an input value through
-  // Double.parseDouble but not in an attribute. The XSD lexical space wins.
-  CHECK(rejects_double("+INF"));
+  // The spellings below are Java's or C's, which JPMML accepts for an input
+  // value through Double.parseDouble but not in an attribute. The XSD
+  // lexical space wins.
   CHECK(rejects_double("inf"));
   CHECK(rejects_double("Infinity"));
   CHECK(rejects_double("nan"));
@@ -325,6 +336,8 @@ static void malformed_documents() {
   CHECK(!loads(regression("", "inf")));
   CHECK(!loads(regression("", "0x2")));
   CHECK(loads(regression("", "INF")));
+  CHECK(loads(regression("", "+INF")));  // D30 (JPMML: NumberFormatException)
+  CHECK(!loads(regression("", "+inf")));
   CHECK(loads(regression("", "NaN")));
   CHECK(loads(regression("", "+2")));
   // A required attribute that is absent: NumericPredictor/@coefficient.
@@ -451,12 +464,16 @@ static void invalid_inputs() {
     CHECK(model.evaluate(row(" 5 ")).as_double() == 20);
     CHECK(model.evaluate(row("5", "+3")).as_double() == 40);
     CHECK(model.evaluate(row("INF")).as_double() == std::numeric_limits<double>::infinity());
-    // JPMML: Field "d" cannot accept invalid value "5abc" / "abc" / "+INF" /
-    // "1e" / "0x10" / NaN; Field "i" cannot accept invalid value "3.5" /
-    // "INF"; Field "b" cannot accept invalid value "yes" / "2".
-    for (const auto& input : {row("5abc"), row("abc"), row("+INF"), row("1e"), row("0x10"), row("NaN"),
-                              row("5", "3.5"), row("5", "3abc"), row("5", "INF"), row("5", "1", "yes"),
-                              row("5", "1", "2"), row("5", "1", "-1")})
+    // D30: an input reads the same XSD 1.1 double grammar as the document,
+    // so "+INF" is +INF (JPMML 1.7.7: Field "d" cannot accept invalid value
+    // "+INF"); "+inf" is not in it, and an integer field takes no INF.
+    CHECK(model.evaluate(row("+INF")).as_double() == std::numeric_limits<double>::infinity());
+    // JPMML: Field "d" cannot accept invalid value "5abc" / "abc" / "1e" /
+    // "0x10" / NaN; Field "i" cannot accept invalid value "3.5" / "INF";
+    // Field "b" cannot accept invalid value "yes" / "2".
+    for (const auto& input :
+         {row("5abc"), row("abc"), row("+inf"), row("1e"), row("0x10"), row("NaN"), row("5", "3.5"), row("5", "3abc"),
+          row("5", "INF"), row("5", "+INF"), row("5", "1", "yes"), row("5", "1", "2"), row("5", "1", "-1")})
       CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input); }));
     // Spec departures, each the XSD lexical space against JPMML's Java
     // parsing: JPMML scores these (i=3.0 as 3, i=1e2 as 100, b=TRUE as true,
@@ -475,7 +492,8 @@ static void invalid_inputs() {
   {
     cpmml::Model model = load(regression(R"( invalidValueTreatment="asIs")"));
     CHECK(std::isnan(model.evaluate(row("NaN")).as_double()));
-    for (const auto& input : {row("5abc"), row("abc"), row("+INF"), row("5", "3.5"), row("5", "1", "yes")})
+    CHECK(model.evaluate(row("+INF")).as_double() == std::numeric_limits<double>::infinity());  // D30
+    for (const auto& input : {row("5abc"), row("abc"), row("+inf"), row("5", "3.5"), row("5", "1", "yes")})
       CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input); }));
   }
 }
@@ -950,6 +968,16 @@ static void constants() {
   CHECK(error("double", R"(<Constant dataType="double">inF</Constant>)").empty());
   CHECK(error("double", R"(<Constant dataType="float">-iNf</Constant>)").empty());
   CHECK(error("double", R"(<Constant dataType="double">nan</Constant>)").empty());
+  // D30: +INF is INF's XSD 1.1 spelling (the Constant text links
+  // xmlschema11-2 #float), case-insensitive as INF is. JPMML 1.7.7 refuses
+  // each (NumberFormatException: For input string: "+INF"). +NaN is not a
+  // literal, and an integer takes no INF.
+  CHECK(error("double", R"(<Constant dataType="double">+INF</Constant>)").empty());
+  CHECK(error("double", R"(<Constant dataType="double">+inf</Constant>)").empty());
+  CHECK(error("double", R"(<Constant dataType="float">+Inf</Constant>)").empty());
+  CHECK(malformed("double", R"(<Constant dataType="double">+NaN</Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="double">+Infinity</Constant>)"));
+  CHECK(malformed("double", R"(<Constant dataType="integer">+INF</Constant>)"));
   // Empty content of a typed number is a missing value, blanks-only content
   // is not empty (xs:string, whiteSpace preserve) and collapses to "", which
   // no number reads (P1.2; JPMML: "empty String"). The engine's pugixml flags
@@ -1020,6 +1048,25 @@ static void constants() {
     document.replace(document.find("<Header/>"), 9, "<Header description=\"caf\xE9\"/>");
     return document;
   };
+  // The value of a Constant as the model's prediction (x times 1, d = 1).
+  const auto value_of = [&](const std::string& expression) {
+    return length_of(typed_doc(R"(<DerivedField name="x" optype="continuous" dataType="double">)" + expression +
+                                   "</DerivedField>",
+                               R"(<NumericPredictor name="x" coefficient="1"/>)"));
+  };
+  const double inf = std::numeric_limits<double>::infinity();
+  CHECK(value_of(R"(<Constant dataType="double">+iNF</Constant>)") == inf);
+  CHECK(value_of(R"(<Constant dataType="float">+INF</Constant>)") == inf);
+  // An untyped +INF is a string (D10, D30): "non-numeric characters ... will
+  // result in the Constant being treated as a string" (JPMML agrees).
+  CHECK(value_of(R"(<Apply function="stringLength"><Constant>+INF</Constant></Apply>)") == 4);
+  // D31: an untyped 1E400 is scientific notation, so a double ("A scientific
+  // notation expression like 3.14e+5 or like 3.14E-5 should also be treated
+  // as a double"), and beyond the double range it rounds to Infinity (XSD
+  // 1.1). JPMML 1.7.7 reads it as a string: "No PMML data type for the
+  // intersection of PMML data types double and string".
+  CHECK(value_of(R"(<Apply function="+"><FieldRef field="d"/><Constant>1E400</Constant></Apply>)") == inf);
+  CHECK(value_of(R"(<Apply function="+"><FieldRef field="d"/><Constant>-1e400</Constant></Apply>)") == -inf);
   CHECK(length_of(blanks_doc("\r\n")) == 1);
   CHECK(length_of(blanks_doc("\r")) == 1);
   CHECK(length_of(blanks_doc(" \r\n ")) == 3);

@@ -12,9 +12,9 @@
  * Every number or boolean cPMML reads from text, whether an attribute of the
  * document, the content of an Array or a cell of a table, or an input value
  * passed to score/predict, goes through the functions here. The rules are the
- * XML Schema 1.0 lexical spaces that PMML's types are defined over:
+ * XML Schema lexical spaces that PMML's types are defined over:
  *
- *   double/float  [+-]? (D+ (. D*)? | . D+) ([eE] [+-]? D+)?  |  INF | -INF | NaN
+ *   double/float  [+-]? (D+ (. D*)? | . D+) ([eE] [+-]? D+)?  |  [+-]? INF | NaN
  *   integer       [+-]? D+
  *   boolean       true | false | 1 | 0
  *
@@ -28,6 +28,13 @@
  *   not "TRUE". Java-isms ("1d", "0x1p3") are not numbers.
  * - A decimal outside the double range is still a well-formed double: it
  *   rounds to +-INF or to +-0, as XSD 1.1 specifies and Java does.
+ * - "+INF" is positive infinity (design §8.5 D30). XSD 1.0 had only INF,
+ *   -INF and NaN; XSD 1.1 Part 2 §3.3.4.2 (float) and §3.3.5.2 (double):
+ *   "the literals 'INF', '+INF', '-INF', and 'NaN'", regular expression
+ *   "(\+|-)?([0-9]+(\.[0-9]*)?|\.[0-9]+)([Ee](\+|-)?[0-9]+)? |(\+|-)?INF|NaN".
+ *   PMML points there (Transformations.html, Constant: "see
+ *   https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#float"). It is
+ *   case-sensitive like the other literals: "+inf" is not one (D11).
  *
  * - No date or time forms. cPMML carries date, time, dateTime and the
  *   dateDaysSince/dateTimeSecondsSince types as DOUBLE (datatype.h), so an
@@ -66,6 +73,7 @@ namespace detail {
 inline bool parse_double_full(std::string_view text, double& parsed) {
   text = trim(text);
   if (text == "INF") return parsed = std::numeric_limits<double>::infinity(), true;
+  if (text == "+INF") return parsed = std::numeric_limits<double>::infinity(), true;  // XSD 1.1 (D30)
   if (text == "-INF") return parsed = -std::numeric_limits<double>::infinity(), true;
   if (text == "NaN") return parsed = std::numeric_limits<double>::quiet_NaN(), true;
 

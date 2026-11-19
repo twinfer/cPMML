@@ -251,8 +251,12 @@ enum class ConstantKind : std::uint8_t { Integer, IntegerOverflow, Double, Strin
 
 // The inferred type of an untyped Constant's text. "Solely of numbers":
 // [+-]? digits; with a decimal point or an exponent it is a double if it is
-// an xs:double literal made of digits, '.', e, E, -, + only (so NaN and INF
-// are strings). The text is not trimmed: Constant is simpleContent of
+// an xs:double literal made of digits, '.', e, E, -, + only (so NaN, INF,
+// -INF and +INF are strings, D10, D30). A decimal beyond the double range is
+// still such a literal and reads as ±INF ("A scientific notation expression
+// like 3.14e+5 or like 3.14E-5 should also be treated as a double"; XSD 1.1
+// rounds it): untyped 1E400 is the double Infinity (D31; JPMML 1.7.7 reads
+// it as a string). The text is not trimmed: Constant is simpleContent of
 // base xs:string (pmml-4-4.xsd, element Constant), whose whiteSpace facet is
 // "preserve" (XML Schema Part 2, 4.3.6), and Transformations.html says "The
 // presence of any non-numeric characters ... will result in the Constant

@@ -18,13 +18,15 @@
  *            with an optional leading sign". Read into int64; a value beyond
  *            int64 is Invalid(Overflow), not Malformed (D4: "integers are
  *            int64; overflow invalid").
- *   float    §3.2.4.1 mantissa, optional e/E exponent, "INF, -INF and NaN".
+ *   float    §3.2.4.1 mantissa, optional e/E exponent, "INF, -INF and NaN",
+ *            and "+INF" (XSD 1.1 §3.3.4.2: "the literals 'INF', '+INF',
+ *            '-INF', and 'NaN'"; D30).
  *            The value is "the normalized value in the value space of float
  *            that is closest to d" (§3.2.4): rounded once, straight from the
  *            decimal to a float -- never through a double, which would round
  *            twice (1.00000005960464477550 is 1.0000001f, not 1.0f). Beyond
  *            the float range, ±INF or ±0 (lexical.h's XSD 1.1 rule).
- *   double   §3.2.5.1, the same grammar.
+ *   double   §3.2.5.1, the same grammar (+INF: XSD 1.1 §3.3.5.2).
  *   boolean  §3.2.2.1 "{true, false, 1, 0}".
  *   string   any text, kept as is: "for string the value of whiteSpace is
  *            preserve". The empty text is the empty string (B37).
@@ -37,7 +39,10 @@
  * The one exception is Constant text (parse_constant): Transformations.html,
  * Constant: NaN, INF, -INF "These three constants are case insensitive and
  * only meaningful as floating point values (datatype equal to "float" or
- * "double")". Everywhere else the forms stay strict (D11).
+ * "double")". "+INF" is INF's XSD 1.1 spelling (the Constant text links
+ * https://www.w3.org/TR/2012/REC-xmlschema11-2-20120405/#float), so it is
+ * case-insensitive there too: "+inf" (D30). Everywhere else the forms stay
+ * strict (D11).
  *
  * Inferring the type of a Constant without dataType (§3.4) is the binder's,
  * not a lexical rule; it is not here.
@@ -118,7 +123,7 @@ inline bool read_float(std::string_view text, float& out) {
   return true;
 }
 
-// Case-insensitive INF, -INF, NaN of Constant text.
+// Case-insensitive INF, +INF, -INF, NaN of Constant text (S3, D30).
 inline std::optional<double> constant_special(std::string_view text) {
   text = lexical::trim(text);
   auto same = [](std::string_view a, std::string_view b) {
@@ -130,6 +135,7 @@ inline std::optional<double> constant_special(std::string_view text) {
     return true;
   };
   if (same(text, "inf")) return std::numeric_limits<double>::infinity();
+  if (same(text, "+inf")) return std::numeric_limits<double>::infinity();
   if (same(text, "-inf")) return -std::numeric_limits<double>::infinity();
   if (same(text, "nan")) return std::numeric_limits<double>::quiet_NaN();
   return std::nullopt;
@@ -185,7 +191,7 @@ Value parse_as(std::string_view text, ParseContext& ctx) {
 }
 
 // Constant text with dataType T: as parse_as, plus case-insensitive INF,
-// -INF and NaN when T is float or double (D11).
+// +INF, -INF and NaN when T is float or double (D11, D30).
 template <PmmlParsedType T>
 Value parse_constant_as(std::string_view text, ParseContext& ctx) {
   if constexpr (std::is_same_v<T, Float> || std::is_same_v<T, Double>) {

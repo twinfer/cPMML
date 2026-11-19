@@ -1,0 +1,5 @@
+d,t,c_pinf,c_pinf_lc,c_fpinf,c_untyped,c_1e400,c_m1e400,disc,mv
+1,1.0,Infinity,Infinity,Infinity,+INFx,Infinity,-Infinity,hi,one
+-2,-2.0,Infinity,Infinity,Infinity,+INFx,Infinity,-Infinity,lo,other
+5,5.0,Infinity,Infinity,Infinity,+INFx,Infinity,-Infinity,hi,other
+0,0.0,Infinity,Infinity,Infinity,+INFx,Infinity,-Infinity,hi,other

@@ -347,6 +347,22 @@ void rule_cases() {
          in_model(derived("u", "double", call("+", constant("NaN") + ref("x")))), {"E-TYPE-PARAM"});
   expect("constant-inf-case", "\"These three constants are case insensitive\" (dataType double)",
          in_model(derived("u", "double", call("+", constant("inf", "double") + ref("x")))), {});
+  expect("constant-plus-inf", "D30: XSD 1.1 \"the literals 'INF', '+INF', '-INF', and 'NaN'\", any case in a Constant",
+         in_model(derived("u", "double", call("+", constant("+inf", "double") + ref("x")))), {});
+  expect("constant-plus-inf-untyped-string", "D10, D30: an untyped +INF is a string; §2.5 no arithmetic on string",
+         in_model(derived("u", "double", call("+", constant("+INF") + ref("x")))), {"E-TYPE-PARAM"});
+  expect("constant-1e400-double", "D31: scientific notation is a double, beyond the range it rounds to INF",
+         in_model(derived("u", "double", call("+", constant("1E400") + ref("x")))), {});
+  expect("attribute-plus-inf", "D30: an xs:double (NUMBER) attribute reads +INF (XSD 1.1), case-sensitive",
+         pmml(field("x", "double", "continuous",
+                    "<Interval closure=\"closedOpen\" leftMargin=\"0\" rightMargin=\"+INF\"/>"),
+              regression(mf("x"))),
+         {});
+  expect("attribute-plus-inf-lower", "D11: +inf is not an xs:double literal",
+         pmml(field("x", "double", "continuous",
+                    "<Interval closure=\"closedOpen\" leftMargin=\"0\" rightMargin=\"+inf\"/>"),
+              regression(mf("x"))),
+         {"E-ATTRIBUTE-MALFORMED"});
   expect("constant-typed-malformed", "a typed Constant's text is a value of its dataType",
          in_model(derived("u", "double", call("+", constant("2.5", "integer") + ref("x")))), {"E-VALUE-MALFORMED"});
   expect("constant-untyped-blank-is-string",
