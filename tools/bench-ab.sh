@@ -39,6 +39,21 @@
 # applies the gate; a model that fails is re-run once with fresh rounds and
 # fails only if it fails again. Output: OUT/raw.txt, OUT/rerun.txt and
 # OUT/report.txt. Exit status 0 when the gate passes, 1 when it fails.
+#
+# The caller's paths do not reach the measured processes (§6.4, "One process
+# image"). The initial stack holds argv, the environment and the executable's
+# path, so their total length moves everything on the stack; on arm64 macOS
+# one 16-byte position of it makes HousingRF*_PCA load 1.33x slower, which
+# failed an A/A pair whose build paths differed by 11 characters. Every run
+# therefore goes through OUT/run: a copy of each side's binary,
+# OUT/run/{base,head}.BUILD/model_benchmark.exe, and two symlinks to the data,
+# OUT/run/bm (benchmark/data) and OUT/run/td (test/data). It runs with OUT/run
+# as its working directory, relative paths only and an empty environment
+# (env -i), so base and head of a build and mode get the same argv but for
+# "base"/"head", and none of it depends on BASE, HEAD, OUT, WORK, the
+# checkout's path or the caller's environment or working directory. Modes are
+# not made equal to each other (--read-all is one more argument): the gate
+# never compares eval with read-all.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -82,9 +97,13 @@ while read -r kind name arg rest; do
   noisy=0; [[ " $rest " == *" NOISY "* ]] && noisy=1
   case $kind in
     add_model_benchmark)
-      args="$REPO/benchmark/data/model/$name.xml $REPO/benchmark/data/dataset/$arg.csv";;
+      [ -f "$REPO/benchmark/data/model/$name.xml" ] && [ -f "$REPO/benchmark/data/dataset/$arg.csv" ] \
+        || die "$name: missing benchmark/data/model/$name.xml or benchmark/data/dataset/$arg.csv"
+      args="bm/model/$name.xml bm/dataset/$arg.csv";;
     add_fixture_benchmark)
-      args="--zip --repeat $arg $REPO/test/data/model/$name.zip $REPO/test/data/dataset/$name.csv";;
+      [ -f "$REPO/test/data/model/$name.zip" ] && [ -f "$REPO/test/data/dataset/$name.csv" ] \
+        || die "$name: missing test/data/model/$name.zip or test/data/dataset/$name.csv"
+      args="--zip --repeat $arg td/model/$name.zip td/dataset/$name.csv";;
   esac
   if [ -n "$MODELS" ] && [[ ",$MODELS," != *",$name,"* ]]; then continue; fi
   echo "$name $noisy $args" >> "$SPEC"
@@ -161,6 +180,42 @@ for b in ${BUILDS//,/ }; do
   done
 done
 
+# ---- the run directory (see the header: the caller's paths stay out) -------
+RUN=$OUT/run
+rm -rf "$RUN"
+mkdir -p "$RUN"
+ln -s "$REPO/benchmark/data" "$RUN/bm"
+ln -s "$REPO/test/data" "$RUN/td"
+# Copies, not symlinks: macOS also puts the executable's inode on the stack, in
+# hex ("executable_file=0x<dev>,0x<inode>"), so all copies are made together
+# and remade until their inodes have the same number of hex digits. The copy
+# still loads its build directory's library (absolute build-tree rpath).
+copy_binaries() {
+  local b s d
+  for b in ${BUILDS//,/ }; do
+    for s in base head; do
+      if [ "$s" = base ]; then eval "d=\$BASE_$b"; else eval "d=\$HEAD_$b"; fi
+      mkdir -p "$RUN/$s.$b"
+      rm -f "$RUN/$s.$b/model_benchmark.exe"
+      cp "$d/benchmark/model_benchmark.exe" "$RUN/$s.$b/model_benchmark.exe"
+    done
+  done
+}
+inode_digits() {  # the distinct hex lengths of the copies' inodes
+  local f
+  for f in "$RUN"/*.*/model_benchmark.exe; do
+    # shellcheck disable=SC2012  # our own file names; ls -i is portable
+    printf '%x\n' "$(ls -i "$f" | awk '{print $1}')" | awk '{print length($0)}'
+  done | sort -u | wc -l | tr -d ' '
+}
+tries=0
+copy_binaries
+while [ "$(inode_digits)" != 1 ]; do
+  tries=$((tries + 1))
+  [ $tries -le 20 ] || die "cannot give the binaries in $RUN inodes of one hex length"
+  copy_binaries
+done
+
 {
   for s in BASE HEAD; do
     v=; eval "v=\$$s"
@@ -170,6 +225,7 @@ done
   done
   for b in ${BUILDS//,/ }; do eval "echo \"  $b: base \$BASE_$b, head \$HEAD_$b\""; done
   echo "modes: $MODES; rounds: $ROUNDS (NOISY: $((2 * ROUNDS + 1)))"
+  echo "run: ./{base,head}.BUILD/model_benchmark.exe in $RUN, relative data paths, env -i"
   echo "host: $(uname -srm)"
 } > "$OUT/setup.txt"
 
@@ -177,11 +233,12 @@ done
 # run_rounds LOG FIRST LAST [FILTER] : rounds FIRST..LAST (NOISY models go to
 # FIRST + 2*(LAST-FIRST+1)), restricted to FILTER lines "<build> <mode> <model>".
 run_one() {  # BUILD MODE ROUND SIDE NAME ARGS...
-  local build=$1 mode=$2 round=$3 side=$4 name=$5 dir out flag=()
+  local build=$1 mode=$2 round=$3 side=$4 name=$5 out flag=()
   shift 5
-  if [ "$side" = base ]; then eval "dir=\$BASE_$build"; else eval "dir=\$HEAD_$build"; fi
   [ "$mode" = read-all ] && flag=(--read-all)
-  out=$("$dir/benchmark/model_benchmark.exe" ${flag[@]+"${flag[@]}"} "$@" 2>&1) \
+  # Same length for base and head: ./base.B or ./head.B, relative data paths,
+  # cwd OUT/run, no environment.
+  out=$(cd "$RUN" && env -i "./$side.$build/model_benchmark.exe" ${flag[@]+"${flag[@]}"} "$@" 2>&1) \
     || die "$name ($build $mode $side) failed: $out"
   [[ $out == *"Evaluate time:"* ]] || die "$name ($build $mode $side): unexpected output: $out"
   echo "$build $mode $round $side $name $out"
