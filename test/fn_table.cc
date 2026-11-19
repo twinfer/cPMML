@@ -466,16 +466,19 @@ static void if_lazy() {
           "if_then_else: no branch taken is missing");
   }
 
-  // Through a whole document: o = if(i, e[, ELSE]) for each set of
+  // Through a whole document: o = if(i != 0, e[, ELSE]) for each set of
   // attributes; i and e are integers, the ELSE part a Constant 3 or
   // pow(i, -1), which is invalid for i = 0 (D8) and so shows whether it was
   // evaluated.
   const std::string three = R"(<Constant dataType="integer">3</Constant>)";
   const std::string invalid_else =
       R"(<Apply function="pow"><FieldRef field="i"/><Constant dataType="integer">-1</Constant></Apply>)";
-  auto if_apply = [](const std::string& attrs, const std::string& otherwise) {
-    return R"(<Apply function="if")" + attrs + R"(><FieldRef field="i"/><FieldRef field="e"/>)" + otherwise +
-           "</Apply>";
+  // The condition is notEqual(i, 0): if's condition is boolean, and an
+  // integer one is a load error (P4.3c, B53); it is missing when i is.
+  const std::string condition =
+      R"(<Apply function="notEqual"><FieldRef field="i"/><Constant dataType="integer">0</Constant></Apply>)";
+  auto if_apply = [&condition](const std::string& attrs, const std::string& otherwise) {
+    return R"(<Apply function="if")" + attrs + R"(>)" + condition + R"(<FieldRef field="e"/>)" + otherwise + "</Apply>";
   };
   const std::vector<std::string> extras = {"", R"( mapMissingTo="5")", R"( defaultValue="7")",
                                            R"( mapMissingTo="5" defaultValue="7")"};
@@ -504,11 +507,11 @@ static void if_lazy() {
           rule + "the ELSE taken is evaluated (its invalid pow makes the record invalid)");
   }
   // The branch taken keeps its Value: a string passes through as it came in.
-  CHECK(apply_output(R"(<Apply function="if" defaultValue="none"><FieldRef field="i"/><FieldRef field="t"/>)"
-                     R"(<FieldRef field="r"/></Apply>)",
+  CHECK(apply_output(R"(<Apply function="if" defaultValue="none">)" + condition +
+                         R"(<FieldRef field="t"/><FieldRef field="r"/></Apply>)",
                      "1", "", "abc", "b", "string") == "abc",
         "if over strings: THEN");
-  CHECK(apply_output(R"(<Apply function="if" defaultValue="none"><FieldRef field="i"/><FieldRef field="t"/></Apply>)",
+  CHECK(apply_output(R"(<Apply function="if" defaultValue="none">)" + condition + R"(<FieldRef field="t"/></Apply>)",
                      "0", "", "abc", "b", "string") == "none",
         "if over strings: false without ELSE gives defaultValue");
 }

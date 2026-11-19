@@ -209,7 +209,8 @@ class ApplyNode : public Expression {
 
  private:
   // The kernel of `sig`, after the load checks of the call: the arity (the
-  // table's min_args/max_args, E-ARITY), and for the numeric functions and
+  // table's min_args/max_args, E-ARITY), for `if` the condition's static type
+  // (boolean, E-TYPE-BOOLEAN-MIXED, B53), and for the numeric functions and
   // the comparisons the arguments' static types (bind::expression_type), a
   // string ordered against a number (§2.7, E-TYPE-ORDER-MIXED) and the
   // typing flags of `bound`. The arguments are the element children after
@@ -221,6 +222,19 @@ class ApplyNode : public Expression {
       if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0) n++;
     if (!cpmml::bind::arity_fits(sig, n)) throw cpmml::ParsingException(cpmml::bind::arity_message(apply, sig, n));
     const KernelFn kernel = instantiate(sig.op);
+    if (sig.op == Op::If) {
+      // B53 (P4.3c): the condition is a boolean parameter; a condition of
+      // another static type is a load error (bind::if_condition_message).
+      // Unknown (nullopt) is left to the binder's report, as for the other
+      // load checks here.
+      pugi::xml_node condition = apply.xml().first_child();
+      while (condition.type() != pugi::node_element || std::strcmp(condition.name(), "Extension") == 0)
+        condition = condition.next_sibling();
+      const cpmml::bind::StaticType type = cpmml::bind::expression_type(condition);
+      if (type && *type != TypeId::Boolean)
+        throw cpmml::ParsingException(cpmml::bind::if_condition_message(apply, *type));
+      return kernel;
+    }
     const bool comparison = compares(sig.op);
     if (!numeric(sig.op) && !comparison) return kernel;
     std::vector<cpmml::bind::StaticType> argument_types;

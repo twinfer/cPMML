@@ -1700,6 +1700,8 @@ class Binder {
                 what() + ", where a string is expected (Functions.html: boolean \"can not be mixed\", Q7)");
         return;
       case fn::Param::Boolean:
+        // For if's condition the engine's load raises the same error
+        // (load_scope.h if_condition_message, design item P4.3c, B53).
         if (!boolean)
           error(code::kTypeBooleanMixed, ctx, apply,
                 what() +

@@ -23,6 +23,8 @@
  *      text inferred or inherited from the built-in's parameter (S2).
  *   7. Surrogate predicates (typed-core P2.8b3): an error from an operand is
  *      not UNKNOWN; it ends the record as it would outside the surrogate.
+ *   8. The condition of `if` is boolean (typed-core P4.3c, B53): a number or
+ *      string condition fails the load.
  *
  * Exit status is the number of failed checks.
  *******************************************************************************/
@@ -1475,6 +1477,126 @@ static void arity() {
   CHECK(load_error(output_doc(transformed("string", apply("concat", 4)))).empty());
 }
 
+// Design item P4.3c (B53): the condition of `if` is a boolean parameter.
+// BuiltinFunctions.html: "<DefineFunction name="if"> <ParameterField name="x"
+// dataType="boolean"/> ..."; Functions.html: "boolean dataTypes can not be
+// mixed with other types", and "If the dataType for the ParameterField is
+// more restrictive than the expression dataType, the PMML document is not
+// valid" (Q7). A condition whose static type is a number or a string fails
+// the load with E-TYPE-BOOLEAN-MIXED; the base build read a number other
+// than 0 as true (integer 2, double 0.5) and a string by its code. An
+// untyped condition is typed first (S2: an untyped Constant inherits
+// boolean; D21: an untyped MapValues or Discretize is boolean when every
+// value is boolean text) and loads. JPMML 1.7.7 refuses each number or
+// string at evaluation, but accepts integer 0/1 values (dataType="integer"
+// 1, a MapValues dataType="integer" of 1/0) and the string "true": a
+// departure, the spec is followed.
+static void if_condition() {
+  const std::string td =
+      R"(<DerivedField name="c" optype="categorical" dataType="boolean"><Apply function="greaterThan">)"
+      R"(<FieldRef field="d"/><Constant>0</Constant></Apply></DerivedField>)"
+      R"(<DerivedField name="di" optype="continuous" dataType="integer"><FieldRef field="i"/></DerivedField>)";
+  const auto apply_if = [](const std::string& condition) {
+    return R"(<Apply function="if">)" + condition +
+           R"(<Constant dataType="string">T</Constant><Constant dataType="string">F</Constant></Apply>)";
+  };
+  const auto output_error = [&](const std::string& condition) {
+    return load_error(output_doc(transformed("string", apply_if(condition)), td));
+  };
+  const auto mapvalues = [](const std::string& dt, const std::string& a, const std::string& b) {
+    return R"(<MapValues outputColumn="out")" + dt +
+           R"(><FieldColumnPair field="s" column="in"/><InlineTable><row><in>a</in><out>)" + a +
+           "</out></row><row><in>b</in><out>" + b + "</out></row></InlineTable></MapValues>";
+  };
+  const auto discretize = [](const std::string& dt) {
+    return R"(<Discretize field="d")" + dt +
+           R"(><DiscretizeBin binValue="1"><Interval closure="openOpen" leftMargin="0"/></DiscretizeBin>)"
+           R"(<DiscretizeBin binValue="0"><Interval closure="openClosed" rightMargin="0"/></DiscretizeBin></Discretize>)";
+  };
+  const std::string code = "E-TYPE-BOOLEAN-MIXED: Apply \"if\" in RegressionModel: argument 1 of if is ";
+  const std::string declared = ", where the parameter is declared boolean";
+  const auto refused = [&](const std::string& condition, const std::string& type) {
+    const std::string error = output_error(condition);
+    const bool ok = contains(error, code + type + declared);
+    CHECK(ok);
+    if (!ok) std::cerr << "  if condition " << condition << ": \"" << error << "\"\n";
+  };
+  // Constants of a declared number or string type, 0 and 1 included.
+  refused(R"(<Constant dataType="integer">2</Constant>)", "integer");
+  refused(R"(<Constant dataType="integer">1</Constant>)", "integer");
+  refused(R"(<Constant dataType="integer">0</Constant>)", "integer");
+  refused(R"(<Constant dataType="double">0.5</Constant>)", "double");
+  refused(R"(<Constant dataType="float">-1</Constant>)", "float");
+  refused(R"(<Constant dataType="string">true</Constant>)", "string");
+  // Fields, a DerivedField, an Apply and the other expressions.
+  refused(R"(<FieldRef field="i"/>)", "integer");
+  refused(R"(<FieldRef field="d"/>)", "double");
+  refused(R"(<FieldRef field="s"/>)", "string");
+  refused(R"(<FieldRef field="di"/>)", "integer");
+  refused(R"(<Apply function="+"><FieldRef field="i"/><Constant>0</Constant></Apply>)", "integer");
+  refused(
+      R"(<NormContinuous field="d"><LinearNorm orig="0" norm="0"/><LinearNorm orig="1" norm="1"/></NormContinuous>)",
+      "double");
+  refused(mapvalues(R"( dataType="integer")", "1", "0"), "integer");
+  refused(discretize(R"( dataType="double")"), "double");
+  // D21: an untyped MapValues with a value that is not boolean text takes the
+  // enclosing OutputField's string.
+  refused(mapvalues("", "2", "0"), "string");
+  // An `if` of integer branches as the condition of another.
+  refused(R"(<Apply function="if"><FieldRef field="c"/><Constant>1</Constant><Constant>0</Constant></Apply>)",
+          "integer");
+  // Untyped "true" and "false" as THEN and ELSE are strings (Transformations.html:
+  // "The presence of any non-numeric characters ... will result in the Constant
+  // being treated as a string"; if's A and B declare no dataType), so the inner
+  // if is a string. The base build read its text by code: false for "true".
+  refused(R"(<Apply function="if"><FieldRef field="c"/><Constant>true</Constant><Constant>false</Constant></Apply>)",
+          "string");
+  // An Extension before the condition is not the condition (B25).
+  refused(R"(<Extension extender="X" name="n" value="v"/><Constant dataType="integer">2</Constant>)", "integer");
+  // In a TransformationDictionary DerivedField.
+  CHECK(contains(load_error(output_doc("", R"(<DerivedField name="t" optype="categorical" dataType="string">)" +
+                                               apply_if(R"(<FieldRef field="d"/>)") + "</DerivedField>")),
+                 "E-TYPE-BOOLEAN-MIXED: Apply \"if\" in the TransformationDictionary: argument 1 of if is double"));
+  // Controls: boolean conditions load and take THEN for true, ELSE for false.
+  const auto scored = [&](const std::string& condition, const std::string& s, const std::string& d) {
+    cpmml::Input input;
+    input["s"] = s;
+    input["i"] = "1";
+    input["d"] = d;
+    try {
+      const cpmml::Model model = load(output_doc(transformed("string", apply_if(condition)), td));
+      return model.evaluate(input).str_outputs()["o"];
+    } catch (const std::exception& e) {
+      return std::string("ERROR: ") + e.what();
+    }
+  };
+  CHECK(scored(R"(<FieldRef field="c"/>)", "a", "1") == "T");
+  CHECK(scored(R"(<FieldRef field="c"/>)", "a", "-1") == "F");
+  CHECK(scored(R"(<Apply function="lessThan"><FieldRef field="d"/><Constant>0</Constant></Apply>)", "a", "-1") == "T");
+  CHECK(scored(R"(<Constant dataType="boolean">0</Constant>)", "a", "1") == "F");
+  // S2: an untyped Constant inherits boolean ("1", "0", "true").
+  CHECK(scored("<Constant>1</Constant>", "a", "1") == "T");
+  CHECK(scored("<Constant>0</Constant>", "a", "1") == "F");
+  CHECK(scored("<Constant>true</Constant>", "a", "1") == "T");
+  // D21: untyped MapValues and Discretize whose values are boolean text.
+  CHECK(scored(mapvalues("", "1", "0"), "a", "1") == "T");
+  CHECK(scored(mapvalues("", "1", "0"), "b", "1") == "F");
+  CHECK(scored(mapvalues("", "true", "false"), "b", "1") == "F");
+  CHECK(scored(mapvalues(R"( dataType="boolean")", "1", "0"), "a", "1") == "T");
+  CHECK(scored(discretize(""), "a", "0.5") == "T");
+  CHECK(scored(discretize(""), "a", "-0.5") == "F");
+  CHECK(scored(R"(<Apply function="if"><FieldRef field="c"/><Constant dataType="boolean">true</Constant>)"
+               R"(<Constant dataType="boolean">false</Constant></Apply>)",
+               "a", "-1") == "F");
+  // An untyped Constant that is not boolean text was a load error already
+  // (E-VALUE-MALFORMED, S2), and a number branch is not a condition.
+  CHECK(contains(output_error("<Constant>2</Constant>"), "E-VALUE-MALFORMED"));
+  CHECK(load_error(output_doc(transformed("double", R"(<Apply function="if"><FieldRef field="c"/><FieldRef field="i"/>)"
+                                                    R"(<FieldRef field="d"/></Apply>)"),
+                              td))
+            .empty());
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -1602,6 +1724,7 @@ int main() {
   no_silent_fallbacks();
   ordering();
   arity();
+  if_condition();
   surrogate_errors();
   writer_round_trip();
 

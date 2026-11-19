@@ -664,6 +664,24 @@ inline std::string arity_message(const XmlNode& apply, const fn::Signature& sig,
   return std::string(code::kArity) + ": " + apply_label(apply, std::string(sig.name)) + " " + arity_mismatch(sig, n);
 }
 
+// The load error of an `if` whose condition has a static type other than
+// boolean (design item P4.3c, B53), raised by the Apply constructor
+// (fn/apply_node.h), in the binder's words for E-TYPE-BOOLEAN-MIXED
+// (Binder::check_param, fn::Param::Boolean). BuiltinFunctions.html declares
+// the condition `<ParameterField name="x" dataType="boolean"/>`; Functions.html:
+// "boolean dataTypes can not be mixed with other types", and "If the dataType
+// for the ParameterField is more restrictive than the expression dataType,
+// the PMML document is not valid" (boolean is outside the cast list "string
+// double float integer"; Q7). An untyped condition (a Constant, a MapValues or
+// Discretize without dataType) is typed by S2 and D21 before this check: it is
+// boolean when its text is boolean text.
+inline std::string if_condition_message(const XmlNode& apply, TypeId condition) {
+  return std::string(code::kTypeBooleanMixed) + ": " + apply_label(apply, "if") + ": argument 1 of if is " +
+         std::string(type_name(condition)) +
+         ", where the parameter is declared boolean (BuiltinFunctions.html: <ParameterField name=\"x\" "
+         "dataType=\"boolean\"/>; Functions.html: boolean \"can not be mixed with other types\", Q7)";
+}
+
 }  // namespace cpmml::bind
 
 #endif  // CPMML_BIND_LOAD_SCOPE_H

@@ -580,8 +580,9 @@ void rule_cases() {
          in_model(derived("u", "integer", call("stringLength", mapvalues("s", row("a", "abc"))))), {});
   expect("untyped-param-unreadable",
          "D21: a parameter's type applies only when it reads every value (typing.h reads_every_value); else the "
-         "field's, P2.2's reading, so the document still loads and the argument is typed against the parameter "
-         "as on base: a string condition of if, a boolean where sin wants a number (Q7)",
+         "field's, P2.2's reading, so the values are not malformed and the argument is typed against the parameter "
+         "as on base: a string condition of if (a load error since P4.3c, B53), a boolean where sin wants a number "
+         "(Q7)",
          in_model(derived("u", "string",
                           call("if", mapvalues("s", row("a", "1") + row("b", "2")) + constant("y") + constant("n")),
                           "categorical") +
