@@ -259,9 +259,8 @@ class ApplyNode : public Expression {
     }
     const cpmml::bind::StaticType result = cpmml::bind::apply_result_type(sig, argument_types).type;
     bound.float_result = result == TypeId::Float;
-    bound.integer_division = sig.op == Op::Divide && result == TypeId::Integer;
-    bound.integer_power = sig.op == Op::Pow && result == TypeId::Integer;
-    return kernel;
+    // P4.5 (D4): an integer result has its int64 kernel.
+    return instantiate(sig.op, result == TypeId::Integer);
   }
 
   // The field whose expression holds the Apply, for the record error of an

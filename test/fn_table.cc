@@ -9,12 +9,14 @@
  *     rule of §4.2, pow of integers with a negative exponent, D8; normalCDF's
  *     sigma), never against cPMML's output.
  *   - The legacy switches (kernels.h `legacy`): what each keeps is pinned
- *     here by the symptom the design's bug table records for it (§1.2: D4
- *     "integer carried as double"; B23 "concat drops number arguments"; B2
+ *     here by the symptom the design's bug table records for it (§1.2: B17
+ *     "an integer slot keeps the fraction"; B23 "concat drops number arguments"; B2
  *     "keep the argument's code"), so that the commit removing a switch sees
  *     these checks fail and replaces them with the spec's.
  *   - Division by zero and the functions' domains (P4.4: B21, D20, B41),
  *     kernel by kernel and through a whole document.
+ *   - The int64 kernels of integer calls (P4.5, D4), exactness and
+ *     overflow, kernel by kernel and through a whole document.
  *   - ArgBuffer, inline and on the heap.
  *
  * Usage: fn_table.exe   (exit 0 when every check holds)
@@ -68,21 +70,26 @@ static std::string message_of(F&& f) {
 
 static bool near(double a, double b) { return std::abs(a - b) <= 1e-12 * std::max(1.0, std::abs(b)); }
 
-// Calls the kernel of `name` over `args` with `bound`.
-static fn::Status call(const char* name, const std::vector<Value>& args, Value& out, const fn::Bound& bound = {}) {
+// Calls the kernel of `name` over `args` with `bound`; `integer`: the call's
+// result type is integer (its int64 kernel, P4.5).
+static constexpr bool kInteger = true;
+static fn::Status call(const char* name, const std::vector<Value>& args, Value& out, const fn::Bound& bound = {},
+                       bool integer = false) {
   const fn::Signature* sig = fn::find(name);
   if (!sig) throw std::logic_error(std::string("no row ") + name);
-  return fn::instantiate(sig->op)(bound, args.data(), args.size(), out);
+  return fn::instantiate(sig->op, integer)(bound, args.data(), args.size(), out);
 }
-static double number(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {}) {
+static double number(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {},
+                     bool integer = false) {
   Value out;
-  if (call(name, args, out, bound) != fn::Status::Ok || out.is_missing())
+  if (call(name, args, out, bound, integer) != fn::Status::Ok || out.is_missing())
     throw std::logic_error(std::string(name) + ": no number");
   return out.as_double();
 }
-static bool invalid(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {}) {
+static bool invalid(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {},
+                    bool integer = false) {
   Value out;
-  return call(name, args, out, bound) == fn::Status::Invalid;
+  return call(name, args, out, bound, integer) == fn::Status::Invalid;
 }
 static std::vector<Value> nums(std::initializer_list<double> xs) {
   std::vector<Value> v;
@@ -149,16 +156,12 @@ static void kernels() {
   // threshold: "Returns one if x>y and zero otherwise".
   CHECK(number("threshold", nums({3, 2})) == 1 && number("threshold", nums({2, 2})) == 0, "threshold");
   // Integer "/": truncation toward zero (§4.2, Java and XQuery idiv).
-  fn::Bound integer_division;
-  integer_division.integer_division = true;
-  CHECK(number("/", nums({7, 2}), integer_division) == 3, "7/2 of integers is 3");
-  CHECK(number("/", nums({-7, 2}), integer_division) == -3, "-7/2 of integers is -3 (toward zero)");
+  CHECK(number("/", nums({7, 2}), {}, kInteger) == 3, "7/2 of integers is 3");
+  CHECK(number("/", nums({-7, 2}), {}, kInteger) == -3, "-7/2 of integers is -3 (toward zero)");
   CHECK(number("/", nums({7, 2})) == 3.5, "7/2 of doubles is 3.5");
   // pow of integers with a negative exponent has no integer value (D8).
-  fn::Bound integer_power;
-  integer_power.integer_power = true;
-  CHECK(invalid("pow", nums({7, -2}), integer_power), "pow(7,-2) of integers is invalid (D8)");
-  CHECK(number("pow", nums({7, 2}), integer_power) == 49, "pow(7,2) of integers is 49");
+  CHECK(invalid("pow", nums({7, -2}), {}, kInteger), "pow(7,-2) of integers is invalid (D8)");
+  CHECK(number("pow", nums({7, 2}), {}, kInteger) == 49, "pow(7,2) of integers is 49");
   CHECK(number("pow", nums({4, -0.5})) == 0.5, "pow(4,-0.5) of doubles is 0.5");
   // normalCDF(x, mu, sigma): sigma must be positive.
   CHECK(invalid("normalCDF", nums({0, 0, 0})), "normalCDF with sigma 0 is invalid");
@@ -213,10 +216,12 @@ static void kernels() {
 }
 
 static void legacy_switches(Indexer& indexer) {
-  // D4 (P4.5): floor of 3.5 is the double 3; integer arithmetic does not
-  // overflow at int64.
-  CHECK(number("floor", nums({3.5})) == 3, "floor(3.5) = 3");
-  CHECK(number("*", nums({9.2233720368547758e18, 2})) == 1.8446744073709552e19, "legacy::D4: no int64 overflow");
+  // B17 (P4.7): an integer call over an operand that holds no integer (an
+  // integer slot keeping a fraction) is computed in double, as before P4.5.
+  CHECK(number("+", nums({3.5, 1}), {}, kInteger) == 4.5, "legacy::B17: integer 3.5 + 1 is 4.5");
+  CHECK(number("sum", nums({3.5, 1, 1}), {}, kInteger) == 5.5, "legacy::B17: integer sum(3.5, 1, 1) is 5.5");
+  CHECK(number("/", nums({7.5, 2}), {}, kInteger) == 3, "legacy::B17: integer 7.5/2 truncated, 3");
+  CHECK(number("modulo", nums({7.5, 2}), {}, kInteger) == 1.5, "legacy::B17: integer modulo(7.5, 2) is 1.5");
   // B23 (P4.6): concat reads each argument's text; a number has none.
   {
     Value out;
@@ -420,19 +425,156 @@ static void apply_output_table() {
 
 // Division by zero and the domains of the built-ins (P4.4: B21, D20, B41),
 // kernel by kernel. BuiltinFunctions.html, each rule's sentence at its check.
-static bool missing_result(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {}) {
+static bool missing_result(const char* name, const std::vector<Value>& args, const fn::Bound& bound = {},
+                           bool integer = false) {
   Value out;
-  return call(name, args, out, bound) == fn::Status::Ok && out.is_missing();
+  return call(name, args, out, bound, integer) == fn::Status::Ok && out.is_missing();
 }
 static bool text_result(const std::vector<Value>& args, const std::string& text) {
   Value out;
   return call("substring", args, out) == fn::Status::Ok && !out.is_missing() && out.text() == text;
 }
+// P4.5 (D4, Q10): a call whose result type is integer computes in int64,
+// exactly; a result outside int64 is invalid. Functions.html: "functions are
+// assumed to inherit the dataType of the current input parameters"; XML
+// Schema Part 2 §3.3.13: "The value space of integer is the infinite set
+// {...,-2,-1,0,1,2,...}"; D4: "integers are int64; overflow invalid". The
+// result is stored as the double nearest to it (the old Value, until P5).
+static void integer_kernels() {
+  const double p53 = 9007199254740992.0;          // 2^53
+  const double p62 = 4611686018427387904.0;       // 2^62
+  const double p63 = 9223372036854775808.0;       // 2^63, outside int64
+  const double min64 = -9223372036854775808.0;    // INT64_MIN
+  const double p32 = 4294967296.0;
+  const double p60 = 1152921504606846976.0;
+  // + - *: exact, invalid outside int64.
+  CHECK(invalid("+", nums({p62, p62}), {}, kInteger), "D4: 2^62 + 2^62 = 2^63 is outside int64: invalid");
+  CHECK(number("+", nums({p62, p62})) == p63, "the double call is unchanged: 2^63");
+  CHECK(number("+", nums({-p62, -p62}), {}, kInteger) == min64, "-2^62 + -2^62 = INT64_MIN is within int64");
+  CHECK(invalid("-", nums({min64, 1}), {}, kInteger), "D4: INT64_MIN - 1 is invalid");
+  CHECK(number("-", nums({min64, -1}), {}, kInteger) == -9223372036854775807.0, "INT64_MIN - -1, stored rounded");
+  CHECK(invalid("*", nums({p32, p32}), {}, kInteger), "D4: 2^32 * 2^32 = 2^64 is invalid");
+  CHECK(number("*", nums({-p62, 2}), {}, kInteger) == min64, "-2^62 * 2 = INT64_MIN is within int64");
+  CHECK(number("*", nums({p53 + 2, 3}), {}, kInteger) == static_cast<double>((9007199254740994LL) * 3),
+        "(2^53 + 2) * 3, exact then rounded once");
+  // "/": truncation toward zero, exact; INT64_MIN / -1 overflows (§4.2).
+  CHECK(invalid("/", nums({min64, -1}), {}, kInteger), "§4.2: integer INT64_MIN / -1 is invalid");
+  CHECK(number("/", nums({4154830492154097664.0, 485}), {}, kInteger) == 8566660808565149.0,
+        "4154830492154097664 / 485 is the exact quotient 8566660808565149");
+  CHECK(number("/", nums({4154830492154097664.0, 485})) != 8566660808565149.0 &&
+            std::trunc(4154830492154097664.0 / 485) == 8566660808565150.0,
+        "... where trunc of the double quotient is 8566660808565150");
+  CHECK(number("/", nums({-7, 2}), {}, kInteger) == -3 && number("/", nums({7, -2}), {}, kInteger) == -3,
+        "toward zero");
+  CHECK(number("/", nums({-0.0, 5}), {}, kInteger) == 0 && !std::signbit(number("/", nums({-0.0, 5}), {}, kInteger)),
+        "XSD integer has one zero: -0 / 5 is 0");
+  // modulo: Python's %, exact.
+  CHECK(number("modulo", nums({p60, 7}), {}, kInteger) == 1, "modulo(2^60, 7) is 1 (double formula: 64)");
+  CHECK(number("modulo", nums({p60, 7})) == 64, "the double call is unchanged");
+  CHECK(number("modulo", nums({11, 3}), {}, kInteger) == 2 && number("modulo", nums({9, -7}), {}, kInteger) == -5 &&
+            number("modulo", nums({-4, -9}), {}, kInteger) == -4 && number("modulo", nums({-7, 2}), {}, kInteger) == 1,
+        "modulo's integer examples, and modulo(-7, 2) = 1");
+  CHECK(number("modulo", nums({min64, -1}), {}, kInteger) == 0, "modulo(INT64_MIN, -1) is 0 (no C++ overflow)");
+  CHECK(invalid("modulo", nums({5, 0}), {}, kInteger), "B41: modulo by 0 is invalid for integers too");
+  // abs.
+  CHECK(invalid("abs", nums({min64}), {}, kInteger), "§4.2: abs(INT64_MIN) is invalid");
+  CHECK(number("abs", nums({-p62}), {}, kInteger) == p62 && number("abs", nums({-3}), {}, kInteger) == 3, "abs");
+  // pow: exact, invalid outside int64; D8 for a negative exponent.
+  CHECK(invalid("pow", nums({2, 63}), {}, kInteger), "D4: pow(2, 63) is invalid");
+  CHECK(number("pow", nums({-2, 63}), {}, kInteger) == min64, "pow(-2, 63) = INT64_MIN is within int64");
+  CHECK(invalid("pow", nums({3, 40}), {}, kInteger), "D4: pow(3, 40) > 2^63 is invalid");
+  CHECK(invalid("pow", nums({65536, 4}), {}, kInteger) && invalid("pow", nums({4294967296.0, 2}), {}, kInteger),
+        "D4: pow(2^16, 4) = pow(2^32, 2) = 2^64 is invalid (the square overflows)");
+  CHECK(number("pow", nums({3, 39}), {}, kInteger) == static_cast<double>(4052555153018976267LL),
+        "pow(3, 39) = 4052555153018976267, exact then rounded");
+  CHECK(number("pow", nums({0, 0}), {}, kInteger) == 1, "\"if x and y are both zero then pow will return one\"");
+  CHECK(number("pow", nums({-1, 1e18}), {}, kInteger) == 1 && number("pow", nums({0, 5}), {}, kInteger) == 0 &&
+            number("pow", nums({1, p62}), {}, kInteger) == 1,
+        "pow with a huge exponent and a base of -1, 0, 1");
+  CHECK(invalid("pow", nums({7, -2}), {}, kInteger), "D8: a negative exponent is invalid");
+  // The aggregates: the exact aggregate, invalid only when it is outside int64.
+  CHECK(number("sum", nums({p53, 1, 1}), {}, kInteger) == p53 + 2, "sum(2^53, 1, 1) is 2^53 + 2 (double: 2^53)");
+  CHECK(number("sum", nums({p53, 1, 1})) == p53, "the double call is unchanged");
+  CHECK(invalid("sum", nums({p62, p62}), {}, kInteger), "D4: sum(2^62, 2^62) is invalid");
+  CHECK(number("sum", nums({p62, p62, -p62}), {}, kInteger) == p62,
+        "sum(2^62, 2^62, -2^62) is 2^62: an intermediate outside int64 is not the result");
+  CHECK(invalid("product", nums({p32, p32, 1}), {}, kInteger), "D4: product(2^32, 2^32, 1) is invalid");
+  CHECK(number("product", nums({p32, p32, 0}), {}, kInteger) == 0, "product(2^32, 2^32, 0) is 0");
+  CHECK(number("product", nums({p32, -p32 / 2, 1}), {}, kInteger) == min64, "product = INT64_MIN is within int64");
+  CHECK(number("product", nums({min64, -1, -1}), {}, kInteger) == min64,
+        "product(INT64_MIN, -1, -1) is INT64_MIN: the partial 2^63 is not the result");
+  CHECK(invalid("product", nums({min64, -1}), {}, kInteger), "product(INT64_MIN, -1) = 2^63 is invalid");
+  {
+    std::vector<Value> some = nums({p53, 1});
+    some.emplace_back();
+    some.push_back(Value(1.0));
+    CHECK(number("sum", some, {}, kInteger) == p53 + 2, "integer sum skips the missing value");
+    Value out;
+    const std::vector<Value> none(3);
+    CHECK(call("sum", none, out, {}, kInteger) == fn::Status::Ok && out.is_missing(), "all missing: missing");
+  }
+  CHECK(number("max", nums({-3, 2, -0.0}), {}, kInteger) == 2 && number("min", nums({-3, 2}), {}, kInteger) == -3,
+        "max, min");
+  // An operand outside int64 (the double 2^63, which is where an int64 near
+  // 2^63 is stored) makes an integer call invalid.
+  CHECK(invalid("+", nums({p63, -1}), {}, kInteger) && invalid("sum", nums({p63, -1}), {}, kInteger) &&
+            invalid("abs", nums({p63}), {}, kInteger) && invalid("max", nums({p63, 1}), {}, kInteger),
+        "an operand outside int64 is invalid");
+  // floor, ceil, round: the integer, invalid outside int64 (§4.2: "out of
+  // int64 range").
+  for (const char* f : {"floor", "ceil", "round"}) {
+    CHECK(invalid(f, nums({1e19})) && invalid(f, nums({-1e19})) && invalid(f, nums({p63})),
+          std::string(f) + " outside int64 is invalid (D4)");
+    CHECK(number(f, nums({min64})) == min64 && number(f, nums({9.2e18})) == 9.2e18,
+          std::string(f) + " within int64: the integer");
+    CHECK(!std::signbit(number(f, nums({-0.0}))), std::string(f) + "(-0) is the integer 0");
+  }
+  CHECK(number("floor", nums({-0.5})) == -1 && !std::signbit(number("ceil", nums({-0.5}))) &&
+            !std::signbit(number("round", nums({-0.4}))),
+        "ceil(-0.5) and round(-0.4) are the integer 0, not -0.0");
+  // The rows that have no int64 kernel are the double ones.
+  CHECK(number("threshold", nums({3, 2}), {}, kInteger) == 1, "threshold: 0 or 1 either way");
+  CHECK(fn::instantiate(fn::Op::Avg, true) == fn::instantiate(fn::Op::Avg, false) &&
+            fn::instantiate(fn::Op::Floor, true) == fn::instantiate(fn::Op::Floor, false),
+        "avg and floor have one kernel");
+  for (fn::Op op : {fn::Op::Plus, fn::Op::Minus, fn::Op::Times, fn::Op::Divide, fn::Op::Pow, fn::Op::Modulo,
+                    fn::Op::Abs, fn::Op::Max, fn::Op::Min, fn::Op::Sum, fn::Op::Product})
+    CHECK(fn::instantiate(op, true) != fn::instantiate(op, false), "an int64 kernel for each LR arithmetic row");
+}
+
+// The same through a whole document: the binder's result type picks the
+// kernel; an overflow is an invalid result under the Apply's treatment.
+static void integer_in_document() {
+  auto app = [](const char* f, const std::string& attrs) {
+    return std::string(R"(<Apply function=")") + f + "\" " + attrs +
+           R"(><FieldRef field="i"/><FieldRef field="e"/></Apply>)";
+  };
+  const std::string big = "4611686018427387904";  // 2^62
+  CHECK(apply_output(app("+", ""), big, big) ==
+            R"(ERROR: Apply "+" in DerivedField "p": invalid result (invalidValueTreatment="returnInvalid"))",
+        "D4: integer 2^62 + 2^62 makes the record invalid");
+  CHECK(apply_output(app("*", R"(invalidValueTreatment="asMissing" defaultValue="7")"), "4294967296", "4294967296") ==
+            "7",
+        "D4: integer 2^32 * 2^32 under asMissing: defaultValue");
+  CHECK(apply_output(app("sum", R"(invalidValueTreatment="asMissing")"), big, big) == "N/A",
+        "D4: integer sum(2^62, 2^62) under asMissing: missing");
+  CHECK(apply_output(app("modulo", ""), "1152921504606846976", "7") == "1", "modulo(2^60, 7) = 1 exactly");
+  CHECK(apply_output(app("+", ""), "2", "3") == "5", "2 + 3 = 5");
+  const std::string mixed =
+      R"(<Apply function="+"><FieldRef field="i"/><Constant dataType="double">1</Constant></Apply>)";
+  CHECK(apply_output(mixed, big, "") == "4.61169e+18", "integer + double is a double: 2^62 + 1.0 not checked");
+  const std::string twice = R"(<Apply function="+"><FieldRef field="i"/><FieldRef field="i"/></Apply>)";
+  CHECK(apply_output(twice, big, "", "abc", "b", "double", true) ==
+            R"(ERROR: Apply "+" in OutputField "o": invalid result (invalidValueTreatment="returnInvalid"))",
+        "D4: in an OutputField too");
+  CHECK(apply_output(R"(<Apply function="floor" invalidValueTreatment="asMissing" defaultValue="-1"><Apply function="*"><FieldRef field="i"/><Constant dataType="double">10</Constant></Apply></Apply>)",
+                     "1000000000000000000", "") == "-1",
+        "D4: floor(1e19) is invalid: asMissing gives defaultValue");
+}
+
 static void domains() {
   const double inf = std::numeric_limits<double>::infinity();
   const double nan = std::numeric_limits<double>::quiet_NaN();
-  fn::Bound integer_division;
-  integer_division.integer_division = true;
 
   // "/" (B21, D20): "If a positive number is divided by zero, INF will be
   // returned. If zero is divided by zero, the result is indeterminate and a
@@ -446,10 +588,10 @@ static void domains() {
         "a -0 divisor: INF signed by the numerator (\"a positive number ... INF\"; IEEE would give -INF)");
   CHECK(number("/", nums({inf, 0})) == inf, "INF / 0 is INF (a positive number divided by zero)");
   CHECK(std::isnan(number("/", nums({nan, 0}))), "NaN / 0 is NaN (D23: \"All arithmetic expressions involving NaN\")");
-  CHECK(invalid("/", nums({1, 0}), integer_division) && invalid("/", nums({-1, 0}), integer_division),
+  CHECK(invalid("/", nums({1, 0}), {}, kInteger) && invalid("/", nums({-1, 0}), {}, kInteger),
         "D20: integer x/0 is invalid (\"INF and -INF can only be floating point numbers\")");
-  CHECK(missing_result("/", nums({0, 0}), integer_division), "§4.2: integer 0/0 is missing (the same sentence)");
-  CHECK(number("/", nums({-7, 2}), integer_division) == -3 && number("/", nums({1, 4})) == 0.25,
+  CHECK(missing_result("/", nums({0, 0}), {}, kInteger), "§4.2: integer 0/0 is missing (the same sentence)");
+  CHECK(number("/", nums({-7, 2}), {}, kInteger) == -3 && number("/", nums({1, 4})) == 0.25,
         "a non-zero divisor: as before");
 
   // floor, ceil, round (B21): "Since INF and -INF can only be floating point
@@ -664,6 +806,8 @@ int main() {
   if_lazy();
   domains();
   domains_in_document();
+  integer_kernels();
+  integer_in_document();
   arg_buffer();
   std::cout << checks - failures << "/" << checks << " checks passed" << std::endl;
   return failures == 0 ? 0 : 1;

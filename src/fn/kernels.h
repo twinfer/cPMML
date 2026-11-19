@@ -35,14 +35,18 @@
  * false: the static_asserts below stop that, because the spec rule that
  * replaces the legacy one is that commit's to write and to test.
  *
- * Operands. Today's engine carries every number as a double, an integer
- * included (D4), so a numeric operand is read as a `types::Double` of the
- * double the Value holds, whatever its static type, and narrowed to a float
- * first when its static type is float (the binder's static type, fixed at
- * load; what core/builtinfunctions.h did since P2.4). It is not
- * `unpack<types::Integer>`: that makes 3.5 in an integer slot invalid (B17,
- * P4.7), which today it is not. Comparisons delegate to `LegacyCompare`,
- * today's Value operators (the double: a number, a boolean's 1 or 0, a
+ * Operands. Today's engine stores every number as a double, an integer
+ * included, until P5. A numeric operand of a call whose result is a double
+ * or a float is read as a `types::Double` of the double the Value holds,
+ * whatever its static type, and narrowed to a float first when its static
+ * type is float (the binder's static type, fixed at load; what
+ * core/builtinfunctions.h did since P2.4). A call whose result is an
+ * integer (P4.5, D4) has its own kernel, chosen at load (`instantiate`):
+ * it reads each operand as the int64 the stored double holds and computes
+ * in int64, an overflow being invalid; see "Integer kernels" below. It is
+ * not `unpack<types::Integer>`: that makes 3.5 in an integer slot invalid
+ * (B17, P4.7), which today it is not (legacy::B17). Comparisons delegate
+ * to `LegacyCompare`, today's Value operators (the double: a number, a boolean's 1 or 0, a
  * string's Indexer code), until P6. The string edits (uppercase, lowercase,
  * substring, trimBlanks) delegate to `LegacyStringEdit`, the Value's own
  * in-place edit, which keeps the argument's string code (B2, P6) and its
@@ -60,6 +64,7 @@
 #include <string>
 #include <vector>
 
+#include "core/types/arithmetic.h"
 #include "core/types/value.h"
 #include "core/value.h"
 #include "fn/table.h"
@@ -72,10 +77,11 @@ namespace cpmml::fn {
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
 namespace legacy {
-// D4 (P4.5): integer arithmetic is computed in double and carried as one:
-// no int64 kernel, no overflow check (D4: "integers are int64; overflow
-// invalid"), floor/ceil/round give a double.
-inline constexpr bool D4 = true;
+// B17 (P4.7): an integer slot can hold a number that is no integer (an
+// integer DerivedField over a double keeps its fraction, `dint` = 3.5; or
+// ±INF, NaN). An integer kernel that meets such an operand computes the
+// whole call as before P4.5, in double (adapter::integer_operand).
+inline constexpr bool B17 = true;
 // B23 (P4.6): concat reads each argument's text, which a number does not
 // have, so `concat(d, "|")` is "|" (spec: the arguments are cast to string,
 // Q1/D17).
@@ -88,7 +94,8 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(D4 && B23, "P4.5-P4.6 remove these switches together with the code they keep");
+static_assert(B23, "P4.6 removes this switch together with the code it keeps");
+static_assert(B17, "P4.7 removes this switch together with the code it keeps");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
 
@@ -103,9 +110,9 @@ struct Bound {
   // engine carries it as a double).
   bool narrow_arguments = false;
   std::vector<std::uint8_t> float_argument;  // per argument; read only when narrow_arguments
-  bool float_result = false;      // the result is a float: narrowed after
-  bool integer_division = false;  // "/" of two integers: truncated toward zero
-  bool integer_power = false;     // pow of two integers: a negative exponent has no integer result
+  bool float_result = false;  // the result is a float: narrowed after
+  // An integer result is not a flag here: it is a kernel of its own,
+  // instantiate(op, true) (P4.5).
 };
 
 enum class Status : std::uint8_t { Ok, Invalid };
@@ -169,16 +176,29 @@ inline Double ln(Double x) { return {std::log(x.v)}; }
 inline Double sqrt(Double x) { return {std::sqrt(x.v)}; }
 inline Double abs(Double x) { return {std::abs(x.v)}; }
 inline Double exp(Double x) { return {std::exp(x.v)}; }
-// "Functions floor, ceil, and round return an integer"; legacy::D4: the
-// integer is carried as a double. "Since INF and -INF can only be floating
-// point numbers, they will cause floor, ceil, round, and modulo to return an
-// invalid value" (P4.4, B21); NaN is no integer either, so it is invalid too
-// (§4.2's row: "±INF, NaN"). `to_integer_domain` is that domain; outside
-// it the result is invalid (adapter::checked_unary).
-inline bool to_integer_domain(Double x) { return std::isfinite(x.v); }
-inline Double round(Double x) { return {std::round(x.v)}; }
-inline Double floor(Double x) { return {std::floor(x.v)}; }
-inline Double ceil(Double x) { return {std::ceil(x.v)}; }
+// "Functions floor, ceil, and round return an integer obtained by rounding
+// the numeric argument down, up, and to the closest integer respectively".
+// "Since INF and -INF can only be floating point numbers, they will cause
+// floor, ceil, round, and modulo to return an invalid value" (P4.4, B21); NaN
+// is no integer either, so it is invalid too (§4.2's row: "±INF, NaN"). The
+// integer is an int64 (P4.5, D4: "integers are int64; overflow invalid"), so
+// a rounded value outside [-2^63, 2^63) is invalid too (§4.2's row: "out of
+// int64 range"; core/types/arithmetic.h detail::to_integer, the same test).
+// `to_integer` is the integer x rounds to by R, false when there is none
+// (the comparison is false for NaN and ±INF as well); outside it the result
+// is invalid (adapter::to_integer_unary). The integer is stored as the
+// double it is (exact: a rounded double within the range is an integer
+// double), but +0 for a -0.0 (XSD's integer has one zero).
+inline double round_half_away(double x) { return std::round(x); }
+inline double round_down(double x) { return std::floor(x); }
+inline double round_up(double x) { return std::ceil(x); }
+template <double (*R)(double)>
+bool to_integer(Double x, types::Integer& out) {
+  const double r = R(x.v);
+  if (!(r >= -9223372036854775808.0 && r < 9223372036854775808.0)) return false;
+  out = {static_cast<std::int64_t>(r)};
+  return true;
+}
 // pow of two integers with a negative exponent has no integer value (D8):
 // invalid, so that invalidValueTreatment decides.
 inline types::Value pow(Double a, Double b, bool integer) {
@@ -223,6 +243,87 @@ inline Double cosh(Double x) { return {std::cosh(x.v)}; }
 inline Double tan(Double x) { return {std::tan(x.v)}; }
 inline Double atan(Double x) { return {std::atan(x.v)}; }
 inline Double tanh(Double x) { return {std::tanh(x.v)}; }
+
+// ---- Integer kernels (P4.5, D4). A call whose result type is integer
+// (Functions.html: "functions are assumed to inherit the dataType of the
+// current input parameters unless otherwise specified. When the input
+// parameters have multiple dataTypes, the least restrictive dataType will be
+// inherited by default"; §2.5's table: integer with integer only) computes
+// in int64, exactly (XML Schema Part 2 §3.3.13: "This results in the
+// standard mathematical concept of the integer numbers. The value space of
+// integer is the infinite set {...,-2,-1,0,1,2,...}"; int64 is the
+// representable subset, Q10). A result outside int64 is invalid (D4,
+// InvalidReason::Overflow; XQuery F&O 3.1 §4.2, which the spec's modulo
+// cites: "For xs:integer operations, implementations that support
+// limited-precision integer operations must select from the following
+// options: They may choose to always raise an error [err:FOAR0002] ...").
+// + - * / are core/types/arithmetic.h's Plus, Minus, Times, Divide over
+// Integer (overflow; / truncates toward zero, §4.2; 0/0 missing; x/0
+// invalid, D20; INT64_MIN / -1 overflows, §4.2's row).
+inline types::Value plus(types::Integer a, types::Integer b) { return types::Plus::apply(a, b); }
+inline types::Value minus(types::Integer a, types::Integer b) { return types::Minus::apply(a, b); }
+inline types::Value times(types::Integer a, types::Integer b) { return types::Times::apply(a, b); }
+inline types::Value divide(types::Integer a, types::Integer b) { return types::Divide::apply(a, b); }
+// abs: "Semantics are as usual"; |INT64_MIN| is 2^63, beyond int64 (§4.2's
+// row: "abs(INT64_MIN)").
+inline types::Value abs(types::Integer x) {
+  if (x.v == std::numeric_limits<std::int64_t>::min()) return types::Invalid{types::InvalidReason::Overflow};
+  return types::Integer{x.v < 0 ? -x.v : x.v};
+}
+// pow: "returns the number x raised to the power y; if x and y are both zero
+// then pow will return one". A negative exponent has no integer value (D8,
+// invalid); otherwise exact, by squaring, invalid on overflow (§4.2's row:
+// "overflow"). The base is squared only while bits of the exponent remain,
+// and those bits multiply the result by at least that square, so an
+// overflowing square is an overflowing result (|result| >= 1 unless x = 0,
+// whose square does not overflow).
+inline types::Value pow(types::Integer a, types::Integer b) {
+  if (b.v < 0) return types::Invalid{types::InvalidReason::Domain};
+  std::int64_t result = 1, base = a.v;
+  for (std::int64_t e = b.v; e > 0;) {
+    if ((e & 1) && __builtin_mul_overflow(result, base, &result))
+      return types::Invalid{types::InvalidReason::Overflow};
+    e >>= 1;
+    if (e > 0 && __builtin_mul_overflow(base, base, &base)) return types::Invalid{types::InvalidReason::Overflow};
+  }
+  return types::Integer{result};
+}
+// modulo, over integers: "returns the remainder after x is divided by y,
+// computed according to XQuery rules ... The PMML standard follows the
+// semantics of Python when using the % operator", i.e. a - floor(a/b)*b
+// computed exactly: the truncated remainder, moved by b when its sign is not
+// the divisor's (Python: "The modulo operator always yields a result with the
+// same sign as its second operand (or zero)"). A divisor of 0 is invalid
+// (P4.4, B41: "A dynamic error is raised [err:FOAR0001] for xs:integer ...
+// operands, if $arg2 is zero"). The remainder by -1 is 0 (INT64_MIN % -1 is
+// undefined in C++, so it is not computed).
+inline types::Value modulo(types::Integer a, types::Integer b) {
+  if (b.v == 0) return types::Invalid{types::InvalidReason::DivisionByZero};
+  if (b.v == -1) return types::Integer{0};
+  std::int64_t r = a.v % b.v;
+  if (r != 0 && ((r < 0) != (b.v < 0))) r += b.v;
+  return types::Integer{r};
+}
+// legacy::B17: an integer call with an operand that holds no integer (an
+// integer slot keeping a fraction, ±INF or NaN) is computed as before P4.5,
+// in double: these are the double kernels as an integer call ran them.
+template <Double (*F)(Double, Double)>
+types::Value b17(Double a, Double b) {
+  return F(a, b);
+}
+template <Double (*F)(Double)>
+types::Value b17(Double x) {
+  return F(x);
+}
+inline types::Value b17_divide(Double a, Double b) {
+  if (b.v == 0.0) return divide_by_zero(a, true);
+  return divide(a, b, true);
+}
+inline types::Value b17_pow(Double a, Double b) { return pow(a, b, true); }
+inline types::Value b17_modulo(Double a, Double b) {
+  if (!modulo_domain(a, b)) return types::Invalid{types::InvalidReason::DivisionByZero};
+  return modulo(a, b);
+}
 
 // Distribution functions. Phi(x) = 1/2 erfc(-x/sqrt 2): erfc rather than
 // 1 - 1/2 erfc(x/sqrt 2), which loses every digit in the left tail.
@@ -322,11 +423,14 @@ Status binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
 }
 // The same for a function with a domain (floor, ceil, round, modulo):
 // invalid outside it.
-template <scalar::Double (*F)(scalar::Double), bool (*Domain)(scalar::Double)>
-Status checked_unary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
-  const scalar::Double x = operand(b, args, 0);
-  if (!Domain(x)) return Status::Invalid;
-  return number(b, F(x), out);
+// floor, ceil, round: the integer the argument rounds to, invalid when there
+// is none (scalar::to_integer).
+template <double (*R)(double)>
+Status to_integer_unary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+  types::Integer r{};
+  if (!scalar::to_integer<R>(operand(b, args, 0), r)) return Status::Invalid;
+  out = ::Value(static_cast<double>(r.v));
+  return Status::Ok;
 }
 template <scalar::Double (*F)(scalar::Double, scalar::Double), bool (*Domain)(scalar::Double, scalar::Double)>
 Status checked_binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
@@ -342,11 +446,11 @@ Status ternary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
 inline Status divide(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
   const scalar::Double x = operand(b, args, 0);
   const scalar::Double y = operand(b, args, 1);
-  if (y.v == 0.0) return number(b, scalar::divide_by_zero(x, b.integer_division), out);
-  return number(b, scalar::divide(x, y, b.integer_division), out);
+  if (y.v == 0.0) return number(b, scalar::divide_by_zero(x, false), out);
+  return number(b, scalar::divide(x, y, false), out);
 }
 inline Status pow(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
-  return number(b, scalar::pow(operand(b, args, 0), operand(b, args, 1), b.integer_power), out);
+  return number(b, scalar::pow(operand(b, args, 0), operand(b, args, 1), false), out);
 }
 
 // The aggregates: "Missing values in the input to an aggregate function are
@@ -385,6 +489,126 @@ inline Status median(const Bound& b, const ::Value* args, std::size_t n, ::Value
     if (!args[i].is_missing()) values.push_back(operand(b, args, i).v);
   if (values.empty()) return Status::Ok;
   return number(b, scalar::median(values), out);
+}
+
+// ---- Integer kernels (P4.5, D4): the kernel of a call whose result type is
+// integer (instantiate(op, true)). Each operand is the int64 its stored
+// double holds; the result is computed in int64 (scalar's integer kernels)
+// and stored as a double, the only number the old Value has until P5. That
+// store rounds a result beyond 2^53 to the nearest double (ties to even), so
+// it is exact in the computation and rounded once, when stored: sum(2^53, 1,
+// 1) is 2^53 + 2 where double arithmetic gives 2^53, modulo(2^60, 7) is 1
+// where a - floor(a/b)*b in double gives 64. An int64 result within 512 of
+// 2^63 is stored as the double 2^63, which an integer kernel reading it back
+// finds outside int64 (`integer_operand`: Overflow), so a later integer
+// call over it is invalid, as the cast of that double to an integer is
+// (§2.6); no input or kernel can hold the int64 it was.
+enum class IntegerOperand : std::uint8_t { Integer, Overflow, NotInteger };
+// The int64 the Value holds: NotInteger when it holds no integer (a
+// fraction, ±INF, NaN: legacy::B17, which P4.7's casts make impossible in an
+// integer slot), Overflow for an integer double outside [-2^63, 2^63) (the
+// double 2^63 above, or an integer slot over a double, B17), else Integer
+// (a -0.0 is the integer 0).
+inline IntegerOperand integer_operand(const ::Value& v, types::Integer& out) {
+  const double d = v.as_double();
+  if (!std::isfinite(d) || std::trunc(d) != d) return IntegerOperand::NotInteger;
+  if (!(d >= -9223372036854775808.0 && d < 9223372036854775808.0)) return IntegerOperand::Overflow;
+  out = {static_cast<std::int64_t>(d)};
+  return IntegerOperand::Integer;
+}
+// An integer kernel's result in the engine's storage: an Integer as its
+// double, invalid, or missing (`out` stays missing).
+inline Status integer(const types::Value& r, ::Value& out) {
+  if (const auto* i = std::get_if<types::Integer>(&r)) {
+    out = ::Value(static_cast<double>(i->v));
+    return Status::Ok;
+  }
+  if (types::is_invalid(r)) return Status::Invalid;
+  if (types::is_missing(r)) return Status::Ok;
+  throw std::logic_error("fn::adapter::integer: an integer kernel returned neither an integer, invalid nor missing");
+}
+// A call with an operand that holds no integer is computed whole by
+// `Legacy`, the double kernel it ran before P4.5 (legacy::B17); otherwise an
+// operand outside int64 makes the result invalid, and the int64 kernel `I`
+// computes it.
+template <types::Value (*I)(types::Integer), types::Value (*Legacy)(scalar::Double)>
+Status integer_unary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+  types::Integer x{};
+  switch (integer_operand(args[0], x)) {
+    case IntegerOperand::NotInteger: return number(b, Legacy(operand(b, args, 0)), out);  // legacy::B17
+    case IntegerOperand::Overflow: return Status::Invalid;
+    case IntegerOperand::Integer: break;
+  }
+  return integer(I(x), out);
+}
+template <types::Value (*I)(types::Integer, types::Integer), types::Value (*Legacy)(scalar::Double, scalar::Double)>
+Status integer_binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+  types::Integer x{}, y{};
+  const IntegerOperand rx = integer_operand(args[0], x);
+  const IntegerOperand ry = integer_operand(args[1], y);
+  if (rx == IntegerOperand::NotInteger || ry == IntegerOperand::NotInteger)  // legacy::B17
+    return number(b, Legacy(operand(b, args, 0), operand(b, args, 1)), out);
+  if (rx == IntegerOperand::Overflow || ry == IntegerOperand::Overflow) return Status::Invalid;
+  return integer(I(x, y), out);
+}
+// The aggregates over integers (sum, product, max, min): the present
+// operands, missing ones skipped, all missing missing (as `fold`). The
+// result is the exact aggregate, invalid when it is outside int64 (the value
+// space is the integers, int64 its representable subset, D4), so an
+// intermediate value outside int64 does not by itself make it invalid: the
+// sum is accumulated in 128 bits (exact for any number of arguments a call
+// can have); so is the product while its magnitude is at most 2^63 (the
+// product of two such values fits in 128 bits), and a product of nonzero
+// integers never shrinks in magnitude, so once beyond 2^63 it stays outside
+// int64, unless a later factor is 0, which makes it 0. (product(INT64_MIN,
+// -1, -1) is INT64_MIN although INT64_MIN * -1 is not an int64.) An operand
+// outside int64 makes the result invalid; one that holds no integer makes
+// the whole call the double fold it was (legacy::B17).
+enum class Aggregate : std::uint8_t { Sum, Product, Max, Min };
+template <Aggregate A, scalar::Double (*Legacy)(scalar::Double, scalar::Double)>
+Status integer_fold(const Bound& b, const ::Value* args, std::size_t n, ::Value& out) {
+  bool any = false, operand_overflow = false, overflow = false, zero = false;
+  constexpr __int128 kTwo63 = static_cast<__int128>(1) << 63;
+  __int128 wide = A == Aggregate::Product ? 1 : 0;
+  std::int64_t acc = 0;
+  for (std::size_t i = 0; i < n; i++) {
+    if (args[i].is_missing()) continue;
+    types::Integer x{};
+    switch (integer_operand(args[i], x)) {
+      case IntegerOperand::NotInteger: return fold<Legacy>(b, args, n, out);  // legacy::B17
+      case IntegerOperand::Overflow: operand_overflow = true; continue;
+      case IntegerOperand::Integer: break;
+    }
+    if constexpr (A == Aggregate::Sum) {
+      wide += x.v;
+    } else if constexpr (A == Aggregate::Product) {
+      if (x.v == 0) {
+        zero = true;
+      } else if (!overflow) {
+        wide *= x.v;
+        if (wide > kTwo63 || wide < -kTwo63) overflow = true;
+      }
+    } else if constexpr (A == Aggregate::Max) {
+      acc = (!any || x.v > acc) ? x.v : acc;
+    } else {
+      acc = (!any || x.v < acc) ? x.v : acc;
+    }
+    any = true;
+  }
+  if (operand_overflow) return Status::Invalid;
+  if (!any) return Status::Ok;
+  if constexpr (A == Aggregate::Sum || A == Aggregate::Product) {
+    if (A == Aggregate::Product && zero) {
+      acc = 0;
+    } else {
+      if (overflow || wide < std::numeric_limits<std::int64_t>::min() ||
+          wide > std::numeric_limits<std::int64_t>::max())
+        return Status::Invalid;
+      acc = static_cast<std::int64_t>(wide);
+    }
+  }
+  out = ::Value(static_cast<double>(acc));
+  return Status::Ok;
 }
 
 // isMissing, isNotMissing: they receive their argument missing or not.
@@ -481,8 +705,9 @@ Status string_edit(const Bound&, const ::Value* args, std::size_t, ::Value& out)
 // declaration's "See XQuery fn:substring" applies: "The characters returned
 // do not extend beyond $sourceString", so a startPos past the end gives the
 // empty string and a length past the end stops at it (P4.1 made a startPos
-// past the end invalid). The arguments are read as today (a double,
-// truncated, legacy::D4).
+// past the end invalid). The arguments are read as today: the double each
+// holds, truncated (a non-integral startPos or length, which P4.4 left open,
+// is not P4.5's: these are no integer-typed arithmetic).
 inline Status substring(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   const double start_pos = args[1].as_double();  // 1-based
   const double length = args[2].as_double();
@@ -502,7 +727,7 @@ inline Status concat(const Bound&, const ::Value* args, std::size_t n, ::Value& 
   return Status::Ok;
 }
 inline Status string_length(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
-  // legacy::D4: the integer is carried as a double.
+  // The integer stored as a double (the old Value's only number, until P5).
   out = ::Value(static_cast<double>(scalar::string_length(args[0].text()).v));
   return Status::Ok;
 }
@@ -532,9 +757,34 @@ inline Status matches(const Bound&, const ::Value* args, std::size_t, ::Value& o
 // The kernel of a row (§4.1 `instantiate`), at load. The switch has no
 // default, so a new Op that is not given a kernel is a compiler warning
 // (-Wswitch), and the logic_error below catches it at load.
-inline KernelFn instantiate(Op op) {
+//
+// `integer_result`: the call's result type is integer (bind::
+// apply_result_type, the table's result rule over the arguments' static
+// types; ApplyNode passes it). The arithmetic and the aggregates whose
+// result is the least restrictive type of their arguments then get their
+// int64 kernel (P4.5, D4). The other rows are unchanged: floor, ceil and
+// round always return an integer and have one kernel; threshold gives 0 or
+// 1, the same in int64 and in double; avg, median and the functions
+// declared double never have an integer result.
+inline KernelFn instantiate(Op op, bool integer_result = false) {
   namespace a = adapter;
   namespace s = scalar;
+  if (integer_result) {
+    switch (op) {
+      case Op::Plus: return a::integer_binary<s::plus, s::b17<s::plus>>;
+      case Op::Minus: return a::integer_binary<s::minus, s::b17<s::minus>>;
+      case Op::Times: return a::integer_binary<s::times, s::b17<s::times>>;
+      case Op::Divide: return a::integer_binary<s::divide, s::b17_divide>;
+      case Op::Pow: return a::integer_binary<s::pow, s::b17_pow>;
+      case Op::Modulo: return a::integer_binary<s::modulo, s::b17_modulo>;
+      case Op::Abs: return a::integer_unary<s::abs, s::b17<s::abs>>;
+      case Op::Max: return a::integer_fold<a::Aggregate::Max, s::max>;
+      case Op::Min: return a::integer_fold<a::Aggregate::Min, s::min>;
+      case Op::Sum: return a::integer_fold<a::Aggregate::Sum, s::sum>;
+      case Op::Product: return a::integer_fold<a::Aggregate::Product, s::product>;
+      default: break;
+    }
+  }
   switch (op) {
     case Op::Plus: return a::binary<s::plus>;
     case Op::Minus: return a::binary<s::minus>;
@@ -549,9 +799,9 @@ inline KernelFn instantiate(Op op) {
     case Op::Log10: return a::unary<s::log10>;
     case Op::Sqrt: return a::unary<s::sqrt>;
     case Op::Abs: return a::unary<s::abs>;
-    case Op::Round: return a::checked_unary<s::round, s::to_integer_domain>;
-    case Op::Floor: return a::checked_unary<s::floor, s::to_integer_domain>;
-    case Op::Ceil: return a::checked_unary<s::ceil, s::to_integer_domain>;
+    case Op::Round: return a::to_integer_unary<s::round_half_away>;
+    case Op::Floor: return a::to_integer_unary<s::round_down>;
+    case Op::Ceil: return a::to_integer_unary<s::round_up>;
     case Op::Pow: return a::pow;
     case Op::If: return a::if_then_else;  // inputs: MissingRule::LazyIf (if_taken)
     case Op::IsMissing: return a::is_missing;
