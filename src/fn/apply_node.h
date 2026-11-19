@@ -213,8 +213,10 @@ class ApplyNode : public Expression {
   // (boolean, E-TYPE-BOOLEAN-MIXED, B53), and for the numeric functions and
   // the comparisons the arguments' static types (bind::expression_type), a
   // string ordered against a number (§2.7, E-TYPE-ORDER-MIXED) and the
-  // typing flags of `bound`. The arguments are the element children after
-  // Extension* (pmml-4-4.xsd Apply, B25), as the binder counts them.
+  // typing flags of `bound`; for concat the static type each argument is
+  // cast to string from (Bound::argument_type, P4.6). The arguments are the
+  // element children after Extension* (pmml-4-4.xsd Apply, B25), as the
+  // binder counts them.
   static KernelFn instantiate_checked(const XmlNode& apply, const Signature& sig, Bound& bound) {
     using cpmml::bind::TypeId;
     std::size_t n = 0;
@@ -233,6 +235,13 @@ class ApplyNode : public Expression {
       const cpmml::bind::StaticType type = cpmml::bind::expression_type(condition);
       if (type && *type != TypeId::Boolean)
         throw cpmml::ParsingException(cpmml::bind::if_condition_message(apply, *type));
+      return kernel;
+    }
+    if (sig.op == Op::Concat) {
+      // P4.6 (B23): each argument is cast to string from its static type.
+      for (pugi::xml_node argument : apply.xml().children())
+        if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0)
+          bound.argument_type.push_back(adapter::text_type(cpmml::bind::expression_type(argument)));
       return kernel;
     }
     const bool comparison = compares(sig.op);

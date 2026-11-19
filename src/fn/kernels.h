@@ -60,11 +60,14 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "core/types/arithmetic.h"
+#include "core/types/java_text.h"
 #include "core/types/value.h"
 #include "core/value.h"
 #include "fn/table.h"
@@ -82,10 +85,6 @@ namespace legacy {
 // ±INF, NaN). An integer kernel that meets such an operand computes the
 // whole call as before P4.5, in double (adapter::integer_operand).
 inline constexpr bool B17 = true;
-// B23 (P4.6): concat reads each argument's text, which a number does not
-// have, so `concat(d, "|")` is "|" (spec: the arguments are cast to string,
-// Q1/D17).
-inline constexpr bool B23 = true;
 // B2 (P6): uppercase, lowercase, substring and trimBlanks edit a copy of
 // their argument's Value, which keeps the argument's string code
 // (LegacyStringEdit).
@@ -94,7 +93,6 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B23, "P4.6 removes this switch together with the code it keeps");
 static_assert(B17, "P4.7 removes this switch together with the code it keeps");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
@@ -103,8 +101,9 @@ static_assert(B2 && LegacyCompare, "P6 removes these switches together with the 
 // What a kernel needs to know about its call, fixed at load from the
 // arguments' static types (bind::expression_type, the binder's answer) and
 // the result type (bind::apply_result_type, the table's result rule). Set by
-// ApplyNode for the numeric functions and the comparisons; all false for the
-// others (core/builtinfunctions.h's `typed()` flags, unchanged).
+// ApplyNode for the numeric functions, the comparisons and concat; all false
+// (empty) for the others (core/builtinfunctions.h's `typed()` flags,
+// unchanged).
 struct Bound {
   // A float argument is an xs:float, so it is narrowed before use (the
   // engine carries it as a double).
@@ -113,6 +112,9 @@ struct Bound {
   bool float_result = false;  // the result is a float: narrowed after
   // An integer result is not a flag here: it is a kernel of its own,
   // instantiate(op, true) (P4.5).
+  // concat (P4.6, B23): the static type each argument is cast to string
+  // from, one per argument (adapter::text_type). Empty for every other call.
+  std::vector<types::TypeId> argument_type;
 };
 
 enum class Status : std::uint8_t { Ok, Invalid };
@@ -358,9 +360,19 @@ inline Double median(std::vector<double>& values) {
   return {(values.size() % 2 == 0) ? (values[mid - 1] + values[mid]) / 2.0 : values[mid]};
 }
 
-// Strings, over the text of a String (xs:string). concat: "Concatenates
-// two or more input values" (legacy::B23: a number has no text here).
+// Strings, over the text of a String (xs:string). concat: "Returns a string
+// as a result of the concatenation of two or more parameters", "See XQuery
+// fn:concat", whose arguments are each cast to xs:string (P4.6, B23). The
+// text of that cast is Java's (Q1 = (a), D17; §2.6 "number -> string | Java
+// text"; core/types/java_text.h): Long.toString of an integer ("2000"),
+// Float.toString of a float ("0.1", "1.0E8"), Double.toString of a double
+// ("2.0", "1.0E-4", "1.0E7"), "true"/"false" of a boolean (XSD canonical);
+// XQuery would write the whole double 2.0 as "2" (the departure, D17).
 inline void append(std::string& out, std::string_view text) { out.append(text); }
+inline void append(std::string& out, types::Integer x) { types::java_text(x, out); }
+inline void append(std::string& out, types::Float x) { types::java_text(x, out); }
+inline void append(std::string& out, types::Double x) { types::java_text(x, out); }
+inline void append(std::string& out, types::Boolean x) { types::java_text(x, out); }
 // stringLength: "Returns the length of a string".
 inline types::Integer string_length(std::string_view text) { return {static_cast<std::int64_t>(text.size())}; }
 }  // namespace scalar
@@ -718,13 +730,64 @@ inline Status substring(const Bound&, const ::Value* args, std::size_t, ::Value&
   out.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(std::min(length, size)));
   return Status::Ok;
 }
-// concat builds a string: packed as the engine builds one (Value(text,
-// STRING): the active Indexer's code of the text).
-inline Status concat(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
+// concat (P4.6, B23): each argument cast to string (scalar::append), then
+// joined. The cast is read from the argument's static type, fixed at load
+// (Bound::argument_type), since the old Value carries no type:
+//   - a string is its text, as it came in (no unpack/pack, decided
+//     2026-11-19 after P3), a numeric_text value included (§9, decided
+//     2026-11-18 after P2.1: "string readers get the text");
+//   - a number or boolean that carries a text has the text the load gave it
+//     (bind::slot_constant, element_constant, number_constant: a document
+//     constant in a string slot "keeps its text", so concat(FieldRef d
+//     mapMissingTo="5", "z") stays "5z", as base and JPMML 1.7.7 give);
+//   - any other number or boolean is written as Java writes its type:
+//     integer the int64 the double holds (an integer slot that keeps a
+//     fraction, ±INF or NaN, legacy::B17, is written as the double it holds,
+//     as java::text writes such an integer; P4.7 makes it unreachable), float
+//     the double narrowed to float, double the double, boolean 1 -> true,
+//     else false (a boolean slot holds 1 or 0).
+// A missing argument never reaches the kernel (MissingRule::Propagate:
+// "any missing inputs to a built-in function will result in a missing value
+// being returned"). The result is a string the kernel built: packed as the
+// engine builds one (Value(text, STRING): the active Indexer's code).
+inline void append_text(std::string& out, const ::Value& v, types::TypeId type) {
+  if (type == types::TypeId::String || !v.text().empty()) return scalar::append(out, v.text());
+  const double d = v.as_double();
+  switch (type) {
+    case types::TypeId::Integer:
+      if (java::is_long(d)) return scalar::append(out, types::Integer{static_cast<std::int64_t>(d)});
+      return scalar::append(out, types::Double{d});  // legacy::B17
+    case types::TypeId::Float:
+      return scalar::append(out, types::Float{static_cast<float>(d)});
+    case types::TypeId::Double:
+      return scalar::append(out, types::Double{d});
+    case types::TypeId::Boolean:
+      return scalar::append(out, types::Boolean{d != 0});
+    case types::TypeId::String:
+    case types::TypeId::Missing:
+    case types::TypeId::Invalid:
+      break;
+  }
+  throw std::logic_error("concat: a sentinel is not a static type");
+}
+inline Status concat(const Bound& bound, const ::Value* args, std::size_t n, ::Value& out) {
+  if (bound.argument_type.size() != n) throw std::logic_error("concat: the call was not bound to its argument types");
   std::string result;
-  for (std::size_t i = 0; i < n; i++) scalar::append(result, args[i].text());  // legacy::B23
+  for (std::size_t i = 0; i < n; i++) append_text(result, args[i], bound.argument_type[i]);
   out = ::Value(result, DataType::DataTypeValue::STRING);
   return Status::Ok;
+}
+// The static type concat casts an argument from: the binder's
+// (bind::expression_type), or Double where it does not know one (arithmetic
+// over a boolean or string operand, Q7, reported by the binder; a FieldRef
+// to an OutputField whose dataType neither the document nor its feature
+// gives): the engine computed a double there, and a string OutputField over
+// the same expression writes it as one (TransformedValue::kind_of, P2.4).
+inline types::TypeId text_type(const std::optional<types::TypeId>& type) {
+  if (!type) return types::TypeId::Double;
+  if (*type == types::TypeId::Missing || *type == types::TypeId::Invalid)
+    throw std::logic_error("concat: a sentinel is not a static type");
+  return *type;
 }
 inline Status string_length(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   // The integer stored as a double (the old Value's only number, until P5).

@@ -10,9 +10,11 @@
  *     sigma), never against cPMML's output.
  *   - The legacy switches (kernels.h `legacy`): what each keeps is pinned
  *     here by the symptom the design's bug table records for it (§1.2: B17
- *     "an integer slot keeps the fraction"; B23 "concat drops number arguments"; B2
- *     "keep the argument's code"), so that the commit removing a switch sees
- *     these checks fail and replaces them with the spec's.
+ *     "an integer slot keeps the fraction"; B2 "keep the argument's
+ *     code"), so that the commit removing a switch sees these checks fail
+ *     and replaces them with the spec's.
+ *   - concat's casts of its arguments to string (P4.6, B23; Java text, Q1,
+ *     D17), kernel by kernel and through a whole document.
  *   - Division by zero and the functions' domains (P4.4: B21, D20, B41),
  *     kernel by kernel and through a whole document.
  *   - The int64 kernels of integer calls (P4.5, D4), exactness and
@@ -222,13 +224,6 @@ static void legacy_switches(Indexer& indexer) {
   CHECK(number("sum", nums({3.5, 1, 1}), {}, kInteger) == 5.5, "legacy::B17: integer sum(3.5, 1, 1) is 5.5");
   CHECK(number("/", nums({7.5, 2}), {}, kInteger) == 3, "legacy::B17: integer 7.5/2 truncated, 3");
   CHECK(number("modulo", nums({7.5, 2}), {}, kInteger) == 1.5, "legacy::B17: integer modulo(7.5, 2) is 1.5");
-  // B23 (P4.6): concat reads each argument's text; a number has none.
-  {
-    Value out;
-    const std::vector<Value> args{Value(3.0), Value("|", DataType::DataTypeValue::STRING)};
-    CHECK(call("concat", args, out) == fn::Status::Ok && out.text() == "|", "legacy::B23: concat(3, \"|\") is \"|\"");
-    CHECK(out.as_double() == indexer.get_string_value("|"), "concat packs its text with the Indexer's code");
-  }
   // B2 (P6): uppercase keeps its argument's string code.
   {
     Value out;
@@ -339,6 +334,104 @@ static std::string apply_output(const std::string& apply, const std::string& i, 
   } catch (const cpmml::InvalidValueException& error) {
     return std::string("ERROR: ") + error.what();
   }
+}
+
+// concat (P4.6, B23): BuiltinFunctions.html, concat: "Returns a string as a
+// result of the concatenation of two or more parameters", "See XQuery
+// fn:concat", whose arguments are each cast to xs:string; the text of a
+// number is Java's (Q1 = (a), D17: Long.toString, Float.toString,
+// Double.toString; true/false). The expected texts are Java's, written out
+// here (java.lang.Double.toString(2000.0) is "2000.0", Float.toString(0.1f)
+// "0.1", Float.toString(16777217f) "1.6777216E7", Double.toString(-0.0)
+// "-0.0"), not cPMML's.
+static std::string concat_text(std::vector<cpmml::types::TypeId> types, const std::vector<Value>& args) {
+  fn::Bound bound;
+  bound.argument_type = std::move(types);
+  Value out;
+  if (call("concat", args, out, bound) != fn::Status::Ok || out.is_missing())
+    throw std::logic_error("concat: no value");
+  return out.text();
+}
+static std::string concat_one(cpmml::types::TypeId type, const Value& v) {
+  return concat_text({type, cpmml::types::TypeId::String}, {v, Value("|", DataType::DataTypeValue::STRING)});
+}
+static void concat_casts(Indexer& indexer) {
+  using cpmml::types::TypeId;
+  const double inf = std::numeric_limits<double>::infinity();
+  struct Case {
+    TypeId type;
+    double v;
+    const char* text;
+  };
+  for (const Case& c : {
+           // Double.toString: "2.0", not XQuery's "2" (D17).
+           Case{TypeId::Double, 3, "3.0|"}, Case{TypeId::Double, 2000, "2000.0|"}, Case{TypeId::Double, 0.5, "0.5|"},
+           Case{TypeId::Double, 1e7, "1.0E7|"}, Case{TypeId::Double, 1234567, "1234567.0|"},
+           Case{TypeId::Double, 1e-4, "1.0E-4|"}, Case{TypeId::Double, 0.001, "0.001|"},
+           Case{TypeId::Double, -0.0, "-0.0|"}, Case{TypeId::Double, inf, "Infinity|"},
+           Case{TypeId::Double, -inf, "-Infinity|"}, Case{TypeId::Double, std::nan(""), "NaN|"},
+           // Long.toString; XSD's integer has one zero.
+           Case{TypeId::Integer, 2000, "2000|"}, Case{TypeId::Integer, -3, "-3|"}, Case{TypeId::Integer, -0.0, "0|"},
+           Case{TypeId::Integer, 4611686018427387904.0, "4611686018427387904|"},
+           // legacy::B17 (P4.7): an integer slot that keeps a fraction or an
+           // infinity is written as the double it holds.
+           Case{TypeId::Integer, 3.5, "3.5|"}, Case{TypeId::Integer, inf, "Infinity|"},
+           // Float.toString of the double narrowed to float.
+           Case{TypeId::Float, 0.1, "0.1|"}, Case{TypeId::Float, 1e8, "1.0E8|"}, Case{TypeId::Float, 3, "3.0|"},
+           Case{TypeId::Float, 16777217, "1.6777216E7|"}, Case{TypeId::Float, 1e300, "Infinity|"},
+           Case{TypeId::Float, 1.1, "1.1|"},
+           // XSD's canonical boolean.
+           Case{TypeId::Boolean, 1, "true|"}, Case{TypeId::Boolean, 0, "false|"}})
+    CHECK(concat_one(c.type, Value(c.v)) == c.text,
+          std::string("concat of ") + std::string(cpmml::bind::type_name(c.type)) + " " + std::to_string(c.v) +
+              " is " + c.text + " (got " + concat_one(c.type, Value(c.v)) + ")");
+  // A string is its text, as it came in: an empty one, one that spells a
+  // number, and a numeric_text one (§9, decided 2026-11-18: string readers
+  // get the text).
+  CHECK(concat_one(TypeId::String, Value("ab", DataType::DataTypeValue::STRING)) == "ab|", "concat of a string");
+  CHECK(concat_one(TypeId::String, Value("", DataType::DataTypeValue::STRING)) == "|", "concat of the empty string");
+  CHECK(concat_one(TypeId::String, Value("2.50", DataType::DataTypeValue::STRING)) == "2.50|",
+        "a string that spells a number keeps its text");
+  {
+    Value five("5", DataType::DataTypeValue::STRING);
+    five.mark_numeric_text();
+    CHECK(concat_one(TypeId::String, five) == "5|", "a numeric_text string keeps its text");
+  }
+  // A number that carries a text from the load (bind::slot_constant: a
+  // document constant in a string slot keeps its text) keeps it: "5", not
+  // "5.0".
+  {
+    Value five(5.0);
+    five.set_text("5");
+    CHECK(concat_one(TypeId::Double, five) == "5|", "a number's load text is kept");
+  }
+  // Every argument, in order, each by its own type.
+  CHECK(concat_text({TypeId::Integer, TypeId::String, TypeId::Double, TypeId::String, TypeId::Float, TypeId::String,
+                     TypeId::Boolean},
+                    {Value(2000.0), Value("|", DataType::DataTypeValue::STRING), Value(2.0),
+                     Value("|", DataType::DataTypeValue::STRING), Value(0.1),
+                     Value("|", DataType::DataTypeValue::STRING), Value(1.0)}) == "2000|2.0|0.1|true",
+        "concat(integer 2000, double 2.0, float 0.1, boolean true)");
+  {
+    // The result is a string the kernel built, packed with the Indexer's code.
+    fn::Bound bound;
+    bound.argument_type = {TypeId::Integer, TypeId::String};
+    Value out;
+    CHECK(call("concat", {Value(7.0), Value("|", DataType::DataTypeValue::STRING)}, out, bound) == fn::Status::Ok &&
+              out.text() == "7|" && out.as_double() == indexer.get_string_value("7|"),
+          "concat packs its text with the Indexer's code");
+  }
+  // A call not bound to its arguments' types is a programming error.
+  CHECK(message_of<std::logic_error>([] { concat_text({}, {Value(1.0), Value(2.0)}); }) ==
+            "concat: the call was not bound to its argument types",
+        "an unbound concat throws");
+  // The type concat casts from: the binder's; Double where it knows none
+  // (TransformedValue::kind_of's rule); a sentinel is no static type.
+  CHECK(fn::adapter::text_type(std::nullopt) == TypeId::Double, "an unknown static type is cast as a double");
+  CHECK(fn::adapter::text_type(TypeId::Float) == TypeId::Float, "a known static type is kept");
+  CHECK(message_of<std::logic_error>([] { fn::adapter::text_type(TypeId::Missing); }) ==
+            "concat: a sentinel is not a static type",
+        "a sentinel static type throws");
 }
 
 static void apply_output_table() {
@@ -709,6 +802,34 @@ static void domains_in_document() {
   CHECK(apply_output(sub(ri), "2", "5", "abc", "b", "string") == "bc", "substring(abc, 2, 5) is bc");
 }
 
+// concat through a whole document (P4.6, B23): the Apply binds each argument
+// to its static type (bind::expression_type) at load, after Extension*
+// (pmml-4-4.xsd Apply, B25). i and e are integer fields, t a string field.
+static void concat_in_document() {
+  auto cat = [](const std::string& args) { return R"(<Apply function="concat">)" + args + "</Apply>"; };
+  const std::string i = R"(<FieldRef field="i"/>)", e = R"(<FieldRef field="e"/>)", t = R"(<FieldRef field="t"/>)";
+  const std::string bar = R"(<Constant dataType="string">|</Constant>)";
+  auto out = [](const std::string& apply, const std::string& iv, const std::string& ev) {
+    return apply_output(apply, iv, ev, "abc", "b", "string");
+  };
+  CHECK(out(cat(i + bar + t), "7", "2") == "7|abc", "concat(integer 7, |, abc) is 7|abc (B23: base gave |abc)");
+  CHECK(out(cat("<Extension/>" + i + bar + t), "-3", "2") == "-3|abc", "an Extension is no argument");
+  CHECK(out(cat(R"(<Apply function="/">)" + i + e + "</Apply>" + bar), "7", "2") == "3|",
+        "integer 7/2 is the integer 3");
+  CHECK(out(cat(R"(<Apply function="avg">)" + i + e + "</Apply>" + bar), "7", "2") == "4.5|", "avg is a double");
+  CHECK(out(cat(R"(<Apply function="*">)" + i + R"(<Constant dataType="double">1</Constant></Apply>)" + bar), "7",
+            "2") == "7.0|",
+        "integer * double is a double: 7.0, not 7 (D17: XQuery writes 7)");
+  CHECK(out(cat(R"(<Apply function="greaterThan">)" + i + e + "</Apply>" + bar), "7", "2") == "true|",
+        "a comparison is a boolean");
+  CHECK(out(cat(R"(<Constant>2.50</Constant><Constant>1e3</Constant><Constant>5</Constant>)"), "7", "2") ==
+            "2.51000.05",
+        "untyped Constants by their content: double 2.50, double 1e3, integer 5");
+  CHECK(out(cat(R"(<FieldRef field="i" mapMissingTo="5"/>)" + bar), "", "2") == "5|",
+        "a mapMissingTo inside concat keeps its document text (decided 2026-11-18)");
+  CHECK(out(cat(i + bar), "", "2") == "N/A", "a missing argument: a missing result");
+}
+
 // `if` (P4.3: the rule of P2.8b4's ApplyNode::eval_if, now the table's
 // MissingRule::LazyIf and the kernels if_taken / if_then_else).
 // BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The ELSE part is
@@ -802,10 +923,12 @@ int main() {
   table();
   kernels();
   legacy_switches(indexer);
+  concat_casts(indexer);
   apply_output_table();
   if_lazy();
   domains();
   domains_in_document();
+  concat_in_document();
   integer_kernels();
   integer_in_document();
   arg_buffer();

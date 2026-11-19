@@ -93,7 +93,7 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_mapmissing_string_slot_equal | P4.7 | no (note 8) | FAIL `output 'o': predicted: false  expected: true` (row 2) | both rows agree |
 | fix_mapmissing_string_slot_numeric | P4.7, else P6.8 (note 9) | no (note 9) | FAIL `predicted: 200.0  expected: 255.0` (row 1) | both rows agree |
 | fix_builtin_text_if | **registered by P2.8b4** (planned P4.3; moved to `test/data/`, as are its files) | no | FAIL `output 'if_full': predicted: E  expected: no value` (also the sentinel on P2.8b4's base a6eeee4) | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
-| fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23) | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
+| fix_builtin_text_concat | **registered by P4.6** (moved to `test/data/`, as are its files) | **done: every double and float cell re-derived** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23); with the re-derived cells, on P4.6's base 73cf6ea: the same line (row 1) | rows 1-5, 7-9 agree on every cell (the re-derived Java text); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`), spec-derived |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`) | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
 | fix_segment_outer_localtrans_derived | P7b.3 | no (note 10) | FAIL `predicted:   expected: 1553.0` (base 9123c4f, row 1) | all 3 rows agree |
 | fix_scorecard_complex_score_missing | a fix item before P5, P8.9 at the latest (note 11) | no | FAIL `predicted: 29.0  expected: no prediction` (base 28fbb83, row 2) | row 1 agrees; rows 2-3 refused (UndefinedResultException `Undefined result`), N/A here |
@@ -197,6 +197,14 @@ JPMML gives up on the whole file at the first row it refuses.
    the predictedValue OutputField `pv`, which has no value, and JPMML
    throws MissingFieldException (`Field "pv" is not defined`). Only row 6
    is spec-derived.
+   **Done in P4.6:** every double and float cell (`y`, `pred`, `pv`, `tv1`
+   and the concat columns over them, `c_f`, `c_k`, `c_ap`) re-derived by an
+   independent Java program applying Double.toString, Float.toString,
+   Long.toString and Boolean.toString to each argument; it agrees with JPMML
+   1.7.7 on every cell of rows 1-5 and 7-9. Row 6's `c_k` is
+   `2000|2.0|0.1|true`. The header states D17 and quotes the spec. The
+   fixture moved to `test/data/`; `fix_concat_number_text` (P4.6) adds the
+   types the fixture does not reach.
 8. **fix_mapmissing_string_slot_equal** (added by design commit P2.2, not
    from the three attempts; its base is P2.2's parent, 529130a). A string
    DerivedField `x` holds `FieldRef b` with `mapMissingTo="true"`, and an
