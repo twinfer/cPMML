@@ -128,13 +128,16 @@ inline PredicateResult _xor(const Sample& other, const std::vector<PredicateFunc
 }
 
 // Surrogate: the first predicate whose result is not UNKNOWN wins.
+// TreeModel.html: "The cascaded predicates are applied when the primary
+// predicate evaluates to UNKNOWN" and "surrogate(a,b) is equivalent to if not
+// unknown(a) then a else b". An error is not UNKNOWN: an exception from an
+// operand ends the record, as it does outside a surrogate (Predicate::SURROGATE
+// agrees). The operands compiled here report a missing input as UNKNOWN and
+// throw nothing per record (load errors cover the rest).
 inline PredicateResult surrogate(const Sample& other, const std::vector<PredicateFunction>& predicates) {
   for (const auto& predicate : predicates) {
-    try {
-      const PredicateResult result = predicate(other);
-      if (result != PredicateResult::UNKNOWN) return result;
-    } catch (const cpmml::Exception& e) {
-    }
+    const PredicateResult result = predicate(other);
+    if (result != PredicateResult::UNKNOWN) return result;
   }
 
   return PredicateResult::UNKNOWN;

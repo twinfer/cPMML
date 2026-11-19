@@ -21,6 +21,8 @@
  *      input names its field (B45).
  *   6. Constant typing (typed-core P2.3): typed text read strictly, untyped
  *      text inferred or inherited from the built-in's parameter (S2).
+ *   7. Surrogate predicates (typed-core P2.8b3): an error from an operand is
+ *      not UNKNOWN; it ends the record as it would outside the surrogate.
  *
  * Exit status is the number of failed checks.
  *******************************************************************************/
@@ -40,6 +42,8 @@
 #include <vector>
 
 #include "cPMML.h"
+#include "core/datadictionary.h"  // first: predicate.h does not compile as the first of its cycle
+#include "core/fastpredicate.h"
 #include "core/xmlnode.h"
 #include "utils/lexical.h"
 #include "utils/utils.h"
@@ -1490,6 +1494,99 @@ static void writer_round_trip() {
   CHECK(throws<cpmml::ParsingException>([] { ::to_double("Infinity"); }));
 }
 
+// Design item P2.8b3: the compiled surrogate (core/fastpredicate.h) caught
+// every cpmml::Exception an operand threw and went on to the next operand, so
+// an error behaved as UNKNOWN. TreeModel.html: "The cascaded predicates are
+// applied when the primary predicate evaluates to UNKNOWN", "An expression
+// surrogate(a,b) is equivalent to if not unknown(a) then a else b", and "A
+// SimplePredicate <Field> <Operator> <Value> evaluates to UNKNOWN if the value
+// of Field is missing"; an error is none of these. JPMML 1.7.7, probed with a
+// TreeModel whose Node predicate is surrogate(d < 5, y < 5), d = ln(x), y = 1:
+// x = -1 throws 'Function "ln" returned invalid value' and a missing x
+// 'Function "ln" cannot accept missing value', inside the surrogate exactly as
+// with the plain predicate d < 5, never taking y < 5. No operand cPMML
+// compiles throws per record today (a missing input is UNKNOWN, everything
+// else is a load error), so the operands that throw here are written for the
+// test.
+static void surrogate_errors() {
+  using Fn = PredicateFunction;
+  using R = PredicateResult;
+  const Sample sample(1);
+  int evaluated = 0;
+  const Fn unknown = [&](const Sample&) {
+    ++evaluated;
+    return R::UNKNOWN;
+  };
+  const Fn yes = [&](const Sample&) {
+    ++evaluated;
+    return R::TRUE_;
+  };
+  const Fn no = [&](const Sample&) {
+    ++evaluated;
+    return R::FALSE_;
+  };
+  const Fn missing_error = [&](const Sample&) -> R {
+    ++evaluated;
+    throw cpmml::MissingValueException("operand error");
+  };
+  const Fn invalid_error = [&](const Sample&) -> R {
+    ++evaluated;
+    throw cpmml::InvalidValueException("operand invalid");
+  };
+  const auto message = [&](const std::vector<Fn>& operands) -> std::string {
+    try {
+      surrogate(sample, operands);
+    } catch (const cpmml::Exception& e) {
+      return e.what();
+    }
+    return "";
+  };
+
+  // An error from the primary ends the evaluation, with the operand's own
+  // exception and message, and no surrogate is tried.
+  evaluated = 0;
+  CHECK(throws<cpmml::MissingValueException>([&] { surrogate(sample, {missing_error, yes}); }));
+  CHECK(evaluated == 1);
+  CHECK(message({missing_error, yes}) == "operand error");
+  CHECK(throws<cpmml::InvalidValueException>([&] { surrogate(sample, {invalid_error, no}); }));
+  CHECK(message({invalid_error, no}) == "operand invalid");
+  // The same error as the operand gives alone.
+  CHECK(throws<cpmml::MissingValueException>([&] { missing_error(sample); }));
+  // An error from a surrogate reached after an UNKNOWN primary, and from the
+  // last one.
+  evaluated = 0;
+  CHECK(throws<cpmml::InvalidValueException>([&] { surrogate(sample, {unknown, invalid_error, yes}); }));
+  CHECK(evaluated == 2);
+  CHECK(throws<cpmml::MissingValueException>([&] { surrogate(sample, {unknown, unknown, missing_error}); }));
+  // Through the enclosing compound predicates.
+  const Fn inner = [&](const Sample& s) { return surrogate(s, {missing_error, yes}); };
+  CHECK(throws<cpmml::MissingValueException>([&] { _and(sample, {yes, inner}); }));
+  CHECK(throws<cpmml::MissingValueException>([&] { _or(sample, {no, inner}); }));
+  CHECK(throws<cpmml::MissingValueException>([&] { surrogate(sample, {unknown, inner, yes}); }));
+
+  // Controls: a result that is not UNKNOWN wins and the operands after it are
+  // not evaluated, an error among them included.
+  evaluated = 0;
+  CHECK(surrogate(sample, {yes, missing_error}) == R::TRUE_);
+  CHECK(surrogate(sample, {no, missing_error}) == R::FALSE_);
+  CHECK(evaluated == 2);
+  CHECK(surrogate(sample, {unknown, yes, missing_error}) == R::TRUE_);
+  CHECK(surrogate(sample, {unknown, no}) == R::FALSE_);
+  CHECK(surrogate(sample, {unknown, unknown}) == R::UNKNOWN);
+  // Compiled from Predicate: a missing input is UNKNOWN, not an error.
+  Sample two(2);
+  two.change_value(1, Value(3.0));
+  const Predicate lt0(0, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
+  const Predicate lt1(1, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
+  const Predicate gt1(1, PredicateOpType::PredicateOpTypeValue::GREATER_THAN, Value(5.0));
+  const Fn fast = to_function(Predicate({lt0, gt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
+  CHECK(fast(two) == R::FALSE_);
+  CHECK(to_function(Predicate({lt0, lt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE))(two) == R::TRUE_);
+  CHECK(to_function(Predicate({lt0, lt0}, PredicateOpType::PredicateOpTypeValue::SURROGATE))(two) == R::UNKNOWN);
+  two.change_value(0, Value(1.0));
+  CHECK(fast(two) == R::TRUE_);
+}
+
 int main() {
   xsd_double();
   xsd_integer();
@@ -1505,6 +1602,7 @@ int main() {
   no_silent_fallbacks();
   ordering();
   arity();
+  surrogate_errors();
   writer_round_trip();
 
   if (failures) std::cerr << failures << " check(s) failed\n";
