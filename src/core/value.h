@@ -39,7 +39,10 @@
  * std::string_view (C++20 heterogeneous lookup) to avoid temporary allocations.
  */
 class Value {
- public:
+  // The storage is private (design typed-core.md §7, P3.3): every reader
+  // and writer outside this class goes through the accessors below, so the
+  // compiler proves that nothing else depends on it and P5 can change it.
+ private:
   double value = double_min();
   bool missing = true;
   // A number or boolean document constant that is the value of a string slot
@@ -54,6 +57,7 @@ class Value {
   bool numeric_text = false;
   std::string svalue;
 
+ public:
   // Thread-local pointer to the active model's Indexer for per-model string mapping.
   // Set via ScopedIndexer RAII at model parse/score entry points.
   inline static thread_local class Indexer* active_indexer = nullptr;
@@ -266,7 +270,7 @@ class Value {
 // A Value as text, as JPMML writes it (utils/java_format.h): nothing for a
 // missing value, the text of a string, Double.toString of a number. Value
 // carries no type, so an integer, float or boolean value is written as a
-// double here; a caller that knows the type writes java::Number{v.value, kind}
+// double here; a caller that knows the type writes java::Number{v.as_double(), kind}
 // instead (OutputField does, from the expression's type).
 inline std::string java_text(const Value& value) {
   if (value.is_missing()) return std::string();

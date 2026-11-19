@@ -247,8 +247,8 @@ class NeuralNetworkModel : public InternalModel {
     for (size_t i = 0; i < neural_inputs.size(); i++) {
       neural_inputs[i].derived_field.prepare(local);
       const Value& v = local[neural_inputs[i].derived_field.index].value;
-      if (v.missing) return false;
-      x[static_cast<Eigen::Index>(i)] = v.value;
+      if (v.is_missing()) return false;
+      x[static_cast<Eigen::Index>(i)] = v.as_double();
     }
     return true;
   }

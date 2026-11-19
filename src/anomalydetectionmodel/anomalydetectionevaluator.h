@@ -183,7 +183,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
 
       const auto found = flat.find(field.name);
       const auto put = [&](const Value& value) {
-        if (value.missing) {
+        if (value.is_missing()) {
           if (found != flat.end()) found->second.clear();
         } else {
           flat[field.name] = input_text(field, value);
@@ -221,11 +221,11 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
 
   // A value of `field` as input text that reads back as the same value.
   static std::string input_text(const MiningField& field, const Value& value) {
-    if (field.datatype.value == DataType::DataTypeValue::STRING) return value.svalue;
+    if (field.datatype.value == DataType::DataTypeValue::STRING) return value.text();
     // A float is carried as a double (MiningField::parse_input), so it is
     // written as one: Float.toString would round it.
     const java::Kind kind = java_kind(field.datatype);
-    return java::text({value.value, kind == java::Kind::FLOAT ? java::Kind::DOUBLE : kind});
+    return java::text({value.as_double(), kind == java::Kind::FLOAT ? java::Kind::DOUBLE : kind});
   }
 
   // The enumeration is iforest | ocsvm | clusterMeanDist | other. Everything

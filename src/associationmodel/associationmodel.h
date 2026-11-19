@@ -242,7 +242,7 @@ class AssociationModel : public InternalModel {
         if (!indexer->contains(item.field)) continue;
         const size_t   idx = indexer->get_index(item.field);
         const DataType dt  = indexer->get_type(item.field);
-        if (sample[idx].value.missing) continue;
+        if (sample[idx].value.is_missing()) continue;
         const std::string& match = !item.category.empty() ? item.category : item.value;
         if (sample[idx].value == Value(match, dt))
           active.insert(id);
@@ -250,7 +250,7 @@ class AssociationModel : public InternalModel {
         // Binary encoding: field name == item value, item present when field != 0
         if (!indexer->contains(item.value)) continue;
         const size_t idx = indexer->get_index(item.value);
-        if (!sample[idx].value.missing && sample[idx].value.value != 0.0)
+        if (!sample[idx].value.is_missing() && sample[idx].value.as_double() != 0.0)
           active.insert(id);
       }
     }

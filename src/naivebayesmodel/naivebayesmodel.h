@@ -115,7 +115,7 @@ class NaiveBayesModel : public InternalModel {
         for (const auto& pvc : bi.get_childs("PairCounts")) {
           const Value input_val(pvc.required_attribute("value"), data_dictionary.at(field).datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
-            di.counts[input_val.value][tvc.required_attribute("value")] = tvc.required_double_attribute("count");
+            di.counts[input_val.as_double()][tvc.required_attribute("value")] = tvc.required_double_attribute("count");
         }
         di.class_totals.assign(classes.size(), 0.0);
         for (const auto& [v, cls_map] : di.counts)
@@ -153,8 +153,8 @@ class NaiveBayesModel : public InternalModel {
     // not a pseudo-count added to the totals.
     for (const auto& di : discrete_inputs) {
       const Value& xv = sample[di.field_index].value;
-      if (xv.missing) continue;  // missing input: skip the feature entirely
-      const double x = xv.value;
+      if (xv.is_missing()) continue;  // missing input: skip the feature entirely
+      const double x = xv.as_double();
       const auto it = di.counts.find(x);
       for (size_t i = 0; i < classes.size(); i++) {
         double cnt = 0.0;
@@ -170,8 +170,8 @@ class NaiveBayesModel : public InternalModel {
 
     // Gaussian likelihoods
     for (const auto& gi : gaussian_inputs) {
-      if (sample[gi.field_index].value.missing) continue;
-      const double x = sample[gi.field_index].value.value;
+      if (sample[gi.field_index].value.is_missing()) continue;
+      const double x = sample[gi.field_index].value.as_double();
       for (size_t i = 0; i < classes.size(); i++) {
         const auto it = gi.params.find(classes[i]);
         if (it == gi.params.end()) continue;

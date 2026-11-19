@@ -115,7 +115,7 @@ class ClusteringModel : public InternalModel {
     size_t present = 0;
     double present_weight = 0.0;
     for (size_t i = 0; i < fields.size(); i++) {
-      if (sample[fields[i].field_index].value.missing) continue;
+      if (sample[fields[i].field_index].value.is_missing()) continue;
       present++;
       present_weight += missing_value_weight(i);
     }
@@ -275,7 +275,7 @@ class ClusteringModel : public InternalModel {
         }
         const std::string center =
             string_array ? vals[i] : java::double_text(::to_double(vals[i]) + 0.0);  // + 0.0: -0 is 0, as in JPMML
-        c.centroid[at] = Value(center, DataType::DataTypeValue::STRING).value;
+        c.centroid[at] = Value(center, DataType::DataTypeValue::STRING).as_double();
       }
 
       clusters.push_back(std::move(c));

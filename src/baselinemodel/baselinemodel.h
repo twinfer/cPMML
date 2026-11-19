@@ -153,7 +153,7 @@ class BaselineModel : public InternalModel {
   }
 
   double compute(const Sample& sample) const {
-    const double x = sample[test_field_idx].value.value;
+    const double x = sample[test_field_idx].value.as_double();
     return (x - baseline.mean) / std::sqrt(baseline.variance);
   }
 };

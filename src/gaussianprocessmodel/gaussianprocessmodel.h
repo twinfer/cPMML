@@ -153,7 +153,7 @@ class GaussianProcessModel : public InternalModel {
 
   bool has_missing_input(const Sample& sample) const {
     for (const size_t index : feat_indices)
-      if (sample[index].value.missing) return true;
+      if (sample[index].value.is_missing()) return true;
     return false;
   }
 
@@ -163,8 +163,8 @@ class GaussianProcessModel : public InternalModel {
     Eigen::VectorXd x(static_cast<Eigen::Index>(n_feat));
     for (size_t i = 0; i < n_feat; ++i) {
       const Value& v = sample[feat_indices[i]].value;
-      if (v.missing) throw cpmml::MissingValueException("missing value for GaussianProcess input");
-      x[static_cast<Eigen::Index>(i)] = v.value;
+      if (v.is_missing()) throw cpmml::MissingValueException("missing value for GaussianProcess input");
+      x[static_cast<Eigen::Index>(i)] = v.as_double();
     }
     return x;
   }

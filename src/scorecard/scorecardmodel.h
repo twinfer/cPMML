@@ -172,7 +172,7 @@ class ScorecardModel : public InternalModel {
       for (const auto& attr : ch.attributes) {
         if (attr.predicate.is_empty || attr.predicate(sample)) {
           matched = true;
-          const double ps = attr.complex_score ? attr.complex_score->eval(sample).value : attr.partial_score;
+          const double ps = attr.complex_score ? attr.complex_score->eval(sample).as_double() : attr.partial_score;
           result.total += ps;
 
           if (use_reason_codes) {

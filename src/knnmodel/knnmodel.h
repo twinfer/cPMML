@@ -148,7 +148,7 @@ class NearestNeighborModel : public InternalModel {
   inline bool has_missing_input(const Sample& sample) const {
     size_t present = 0;
     for (const auto& input : knn_inputs)
-      if (!sample[input.field_index].value.missing) present++;
+      if (!sample[input.field_index].value.is_missing()) present++;
     if (present == 0) return true;
     return present < knn_inputs.size() && is_binary_metric();
   }
@@ -317,7 +317,7 @@ class NearestNeighborModel : public InternalModel {
         // Extract KNNInput values from the transformed sample
         Eigen::VectorXd fv(static_cast<Eigen::Index>(knn_inputs.size()));
         for (size_t i = 0; i < knn_inputs.size(); i++)
-          fv[static_cast<Eigen::Index>(i)] = train_sample[knn_inputs[i].field_index].value.value;
+          fv[static_cast<Eigen::Index>(i)] = train_sample[knn_inputs[i].field_index].value.as_double();
         rows.push_back(fv);
       } else {
         // Direct KNNInputs: read feature columns directly from InlineTable,
@@ -328,7 +328,7 @@ class NearestNeighborModel : public InternalModel {
         // compared equal. JPMML 1.7.7 parses the cell with the field's type.
         Eigen::VectorXd fv(static_cast<Eigen::Index>(feat_cols.size()));
         for (size_t i = 0; i < feat_cols.size(); i++)
-          fv[static_cast<Eigen::Index>(i)] = Value(xml_row.get_child(feat_cols[i]).value(), knn_input_types[i]).value;
+          fv[static_cast<Eigen::Index>(i)] = Value(xml_row.get_child(feat_cols[i]).value(), knn_input_types[i]).as_double();
         rows.push_back(fv);
       }
 

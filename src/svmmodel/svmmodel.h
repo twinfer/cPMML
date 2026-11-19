@@ -151,7 +151,7 @@ class SupportVectorMachineModel : public InternalModel {
         for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
           if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
             for (const auto& v : pred.values) {
-              std::string lbl = v.svalue;
+              std::string lbl = v.text();
               if (!lbl.empty() && lbl != machines[0].target_category) {
                 machines[0].alternate_category = lbl;
                 break;
@@ -214,7 +214,7 @@ class SupportVectorMachineModel : public InternalModel {
   // in MiningSchema.
   inline bool has_missing_input(const Sample& sample) const {
     for (const auto& f : vector_fields)
-      if (!f.is_indicator && sample[f.index].value.missing) return true;
+      if (!f.is_indicator && sample[f.index].value.is_missing()) return true;
     return false;
   }
 
@@ -302,11 +302,11 @@ class SupportVectorMachineModel : public InternalModel {
       const VectorField& f = vector_fields[i];
       const Value& v = sample[f.index].value;
       if (f.is_indicator) {
-        x[static_cast<Eigen::Index>(i)] = !v.missing && v == f.category ? 1.0 : 0.0;
+        x[static_cast<Eigen::Index>(i)] = !v.is_missing() && v == f.category ? 1.0 : 0.0;
         continue;
       }
-      if (v.missing) throw cpmml::MissingValueException("missing value for SVM vector field");
-      x[static_cast<Eigen::Index>(i)] = v.value;
+      if (v.is_missing()) throw cpmml::MissingValueException("missing value for SVM vector field");
+      x[static_cast<Eigen::Index>(i)] = v.as_double();
     }
     return x;
   }

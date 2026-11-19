@@ -123,8 +123,8 @@ int main() {
   check("format missing Value", std::format("{}", Value()), "");
   check("format numeric Value", std::format("{}", Value(2.0)), "2.0");
   Value text;
-  text.missing = false;
-  text.svalue = "abc";
+  text.set_missing(false);
+  text.set_text("abc");
   check("format string Value", std::format("{}", text), "abc");
 #else
   std::cout << "no <format> in this standard library: std::formatter checks skipped" << std::endl;
