@@ -1,0 +1,8 @@
+i,e,t,r,y,pred,am,am_mm,am_dv,am_both,s_both,s_mm
+2,2,abc,b,5.0,5.0,4.0,4.0,4.0,4.0,axc,axc
+2,-2,abc,(,8.0,8.0,N/A,N/A,7,7,seven,N/A
+,2,,b,6.0,6.0,N/A,5.0,7,5.0,five,five
+3,-1,hello,[,8.0,8.0,N/A,N/A,7,7,seven,N/A
+-2,3,hello,l,-7.0,-7.0,-8.0,-8.0,-8.0,-8.0,hexxo,hexxo
+2,,abc,,6.0,6.0,N/A,5.0,7,5.0,five,five
+0,-1,a(b,(,8.0,8.0,N/A,N/A,7,7,seven,N/A

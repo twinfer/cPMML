@@ -71,14 +71,6 @@ namespace cpmml::fn {
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
 namespace legacy {
-// B22 (P4.2): the Apply output table. An invalid result under
-// invalidValueTreatment="asIs" becomes missing (spec: "in the context of an
-// Apply, the value asIs is equivalent to returnInvalid"); under asMissing,
-// mapMissingTo comes before defaultValue (spec: "the invalidValueTreatment
-// value asMissing replaces the invalid value with a missing value", then
-// defaultValue); returnInvalid raises InvalidValueException("evaluating
-// apply function"), naming neither the function nor the field.
-inline constexpr bool B22 = true;
 // B41 (P4.2): built-ins outside their domain keep scoring: sqrt of a
 // negative and ln/log10 of a non-positive give NaN/-INF, modulo by 0 gives
 // NaN, substring with startPos < 1 returns its whole argument (spec:
@@ -111,7 +103,7 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B22 && B41 && D3, "P4.2 and P4.3 remove these switches together with the code they keep");
+static_assert(B41 && D3, "B41's fix and P4.3 remove these switches together with the code they keep");
 static_assert(B21 && D20 && D4 && B23, "P4.4-P4.6 remove these switches together with the code they keep");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy

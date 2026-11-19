@@ -24,8 +24,10 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/internal_evaluator.h"  // first: the expression headers do not compile as the first of their cycle
@@ -272,68 +274,176 @@ static void legacy_switches(Indexer& indexer) {
   }
 }
 
-// The Apply output table through a whole document, on the rows where the spec
-// and today's engine agree (legacy::B22 keeps the others until P4.2).
-// pow of two integers with a negative exponent is invalid (D8); Functions.html,
-// Apply: "This attribute's default value returnInvalid causes the model to
-// return a value indicating an invalid result"; "the invalidValueTreatment
-// value asMissing replaces the invalid value with a missing value. Note that,
-// in this case, if a defaultValue is also specified then the default value is
-// returned instead of a missing value"; "the optional value defaultValue
-// defines an output value when the function returns a missing value".
-static std::string pow_document(const std::string& apply_attrs) {
+// Functions.html's "Output table for Apply" through a whole document (P4.2,
+// B22), every row of it. The invalid result is pow of two integers with a
+// negative exponent (D8) and replace with a pattern that is no regular
+// expression; Functions.html, Apply:
+//   "The optional attribute mapMissingTo defines the output value for the
+//   cases when any of the function inputs are missing. This means that if it
+//   is specified and any of the input values of the function are missing then
+//   the function is not applied at all and the mapMissingTo value is returned
+//   instead. ... the optional value defaultValue defines an output value when
+//   the function returns a missing value. In other words, when a defaultValue
+//   value is provided, the function is applied first and if it produces a
+//   missing value the defaultValue is returned instead."
+//   "This attribute's default value returnInvalid causes the model to return
+//   a value indicating an invalid result. On the other hand, the
+//   invalidValueTreatment value asMissing replaces the invalid value with a
+//   missing value. Note that, in this case, if a defaultValue is also
+//   specified then the default value is returned instead of a missing value.
+//   Finally, in the context of an Apply, the value asIs is equivalent to
+//   returnInvalid as an invalid value cannot be propagated further."
+// The expected values are the spec's (JPMML 1.7.7 refuses pow and replace
+// here under every treatment, D8 and D34; where it reaches the table, for
+// integer division by zero, it gives the same cells but for asIs, D33).
+// `apply` is the expression of the DerivedField p, which the OutputField o
+// reads; with `in_output` it is o's own expression instead (p is then 0).
+static std::string apply_document(const std::string& apply, const std::string& type, bool in_output) {
+  const std::string optype = type == "string" ? "categorical" : "continuous";
   return R"(<?xml version="1.0" encoding="UTF-8"?>
 <PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
   <DataDictionary>
     <DataField name="i" optype="continuous" dataType="integer"/>
+    <DataField name="e" optype="continuous" dataType="integer"/>
+    <DataField name="t" optype="categorical" dataType="string"/>
+    <DataField name="r" optype="categorical" dataType="string"/>
     <DataField name="y" optype="continuous" dataType="double"/>
   </DataDictionary>
   <RegressionModel functionName="regression">
-    <MiningSchema><MiningField name="i"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <MiningSchema><MiningField name="i"/><MiningField name="e"/><MiningField name="t"/><MiningField name="r"/>
+      <MiningField name="y" usageType="target"/></MiningSchema>
     <LocalTransformations>
-      <DerivedField name="p" optype="continuous" dataType="double">
-        <Apply function="pow")" +
-         apply_attrs + R"(><FieldRef field="i"/><Constant dataType="integer">-2</Constant></Apply>
-      </DerivedField>
+      <DerivedField name="p" optype=")" +
+         optype + R"(" dataType=")" + type + R"(">)" + (in_output ? std::string("<Constant>0</Constant>") : apply) +
+         R"(</DerivedField>
     </LocalTransformations>
-    <RegressionTable intercept="1"><NumericPredictor name="p" coefficient="1"/></RegressionTable>
+    <Output><OutputField name="o" optype=")" +
+         optype + R"(" dataType=")" + type + R"(" feature="transformedValue">)" +
+         (in_output ? apply : std::string(R"(<FieldRef field="p"/>)")) + R"(</OutputField></Output>
+    <RegressionTable intercept="1"/>
   </RegressionModel>
 </PMML>
 )";
 }
 
-static double score(const std::string& apply_attrs, const std::string& i) {
-  const std::string path = "fn_table_pow.pmml";
+static std::string pow_apply(const std::string& attrs) {
+  return R"(<Apply function="pow")" + attrs + R"(><FieldRef field="i"/><FieldRef field="e"/></Apply>)";
+}
+
+// The OutputField "o" (the DerivedField "p", of type `type`) for inputs i,
+// e, t and r (empty: missing), as text: "N/A" for no value, "ERROR: <message>" for an invalid
+// record.
+static std::string apply_output(const std::string& apply, const std::string& i, const std::string& e,
+                                const std::string& t = "abc", const std::string& r = "b",
+                                const std::string& type = "double", bool in_output = false) {
+  const std::string path = "fn_table_apply.pmml";
   {
     std::ofstream out(path);
-    out << pow_document(apply_attrs);
+    out << apply_document(apply, type, in_output);
   }
   cpmml::Model model(path, false);
   std::remove(path.c_str());
   cpmml::Input input;
-  input["i"] = i;
-  return model.evaluate(input).as_double();
+  if (!i.empty()) input["i"] = i;
+  if (!e.empty()) input["e"] = e;
+  if (!t.empty()) input["t"] = t;
+  if (!r.empty()) input["r"] = r;
+  try {
+    const cpmml::Result result = model.evaluate(input);
+    const auto num = result.num_outputs();
+    if (const auto it = num.find("o"); it != num.end()) {
+      std::ostringstream text;
+      text << it->second;
+      return text.str();
+    }
+    const auto str = result.str_outputs();
+    if (const auto it = str.find("o"); it != str.end() && !it->second.empty()) return it->second;
+    return "N/A";
+  } catch (const cpmml::InvalidValueException& error) {
+    return std::string("ERROR: ") + error.what();
+  }
 }
 
 static void apply_output_table() {
-  for (const std::string& attrs : {std::string(""), std::string(R"( invalidValueTreatment="returnInvalid")")})
-    CHECK(message_of<cpmml::InvalidValueException>([&] { score(attrs, "2"); }) != "<no exception>" &&
-              message_of<cpmml::InvalidValueException>([&] { score(attrs, "2"); }) != "<another exception>",
-          "returnInvalid (the default): pow(2, -2) of integers makes the record invalid");
-  CHECK(score(R"( invalidValueTreatment="asMissing" defaultValue="7")", "2") == 8,
-        "asMissing: the invalid result is missing, then defaultValue 7 (7 + intercept 1)");
-  CHECK(score(R"( invalidValueTreatment="asMissing" defaultValue="7")", "") == 8,
-        "a missing input: missing, then defaultValue");
-  // legacy::B22 (P4.2), pinned by its §1.2 symptom: "Apply
-  // invalidValueTreatment="asIs" returns missing after an error (spec: same
-  // as returnInvalid); asMissing prefers mapMissingTo to defaultValue". P4.2
-  // turns the first into the returnInvalid check above and the second into 8.
-  CHECK(score(R"( invalidValueTreatment="asIs" defaultValue="7")", "2") == 8,
-        "legacy::B22: asIs gives missing after the invalid result, then defaultValue");
-  CHECK(score(R"( invalidValueTreatment="asIs" mapMissingTo="5")", "2") != 6,
-        "legacy::B22: asIs does not give mapMissingTo (no input is missing)");
-  CHECK(score(R"( invalidValueTreatment="asMissing" mapMissingTo="5" defaultValue="7")", "2") == 6,
-        "legacy::B22: asMissing prefers mapMissingTo 5 to defaultValue 7");
+  const std::string invalid_return =
+      R"(ERROR: Apply "pow" in DerivedField "p": invalid result (invalidValueTreatment="returnInvalid"))";
+  const std::string invalid_as_is =
+      R"(ERROR: Apply "pow" in DerivedField "p": invalid result (invalidValueTreatment="asIs"))";
+  const std::vector<std::pair<std::string, std::string>> treatments = {
+      {"", invalid_return},
+      {R"( invalidValueTreatment="returnInvalid")", invalid_return},
+      {R"( invalidValueTreatment="asIs")", invalid_as_is},
+      {R"( invalidValueTreatment="asMissing")", "asMissing"},
+  };
+  const std::vector<std::string> extras = {"", R"( mapMissingTo="5")", R"( defaultValue="7")",
+                                           R"( mapMissingTo="5" defaultValue="7")"};
+  for (const auto& [treatment, invalid] : treatments)
+    for (const std::string& extra : extras) {
+      const std::string apply = pow_apply(treatment + extra);
+      const std::string rule = "Apply" + treatment + extra + ": ";
+      const bool mm = extra.find("mapMissingTo") != std::string::npos;
+      const bool dv = extra.find("defaultValue") != std::string::npos;
+      // Row 1: "at least one missing", mapMissingTo given: "not computed",
+      // map_missing_val, whatever defaultValue and invalidValueTreatment are.
+      // Row 3 (no mapMissingTo): the function's missing result, then
+      // default_val.
+      CHECK(apply_output(apply, "", "2") == (mm   ? "5"
+                                             : dv ? "7"
+                                                  : "N/A"),
+            rule + "a missing input gives mapMissingTo, else missing, then defaultValue");
+      CHECK(apply_output(apply, "2", "") == (mm   ? "5"
+                                             : dv ? "7"
+                                                  : "N/A"),
+            rule + "a missing second input gives mapMissingTo, else missing, then defaultValue");
+      // Row 2: no input missing, a value: out_val.
+      CHECK(apply_output(apply, "2", "2") == "4", rule + "pow(2, 2) is 4 whatever the attributes");
+      // Rows 4-6: an invalid result.
+      const std::string expected = invalid != "asMissing" ? invalid : dv ? "7" : "N/A";
+      CHECK(apply_output(apply, "2", "-2") == expected,
+            rule + (invalid != "asMissing"
+                        ? "returnInvalid, and asIs (\"equivalent to returnInvalid\"), make the record invalid"
+                        : "asMissing gives missing, then defaultValue; never mapMissingTo (no input is missing)"));
+    }
+
+  // A string result: replace with the pattern "(" (std::regex refuses it).
+  const std::string replace_apply_head = R"(<Apply function="replace")";
+  const std::string replace_apply_tail =
+      R"(><FieldRef field="t"/><FieldRef field="r"/><Constant dataType="string">x</Constant></Apply>)";
+  auto replace_apply = [&](const std::string& attrs) { return replace_apply_head + attrs + replace_apply_tail; };
+  CHECK(apply_output(replace_apply(R"( invalidValueTreatment="asMissing" mapMissingTo="five" defaultValue="seven")"),
+                     "", "", "abc", "(", "string") == "seven",
+        "replace with an invalid pattern under asMissing: defaultValue, not mapMissingTo");
+  CHECK(apply_output(replace_apply(R"( invalidValueTreatment="asMissing" mapMissingTo="five")"), "", "", "abc", "(",
+                     "string") == "N/A",
+        "replace with an invalid pattern under asMissing, mapMissingTo only: missing");
+  CHECK(apply_output(replace_apply(R"( invalidValueTreatment="asIs" mapMissingTo="five" defaultValue="seven")"), "", "",
+                     "abc", "(", "string") ==
+            R"(ERROR: Apply "replace" in DerivedField "p": invalid result (invalidValueTreatment="asIs"))",
+        "replace with an invalid pattern under asIs: the record is invalid");
+  CHECK(apply_output(replace_apply(R"( invalidValueTreatment="asMissing" mapMissingTo="five" defaultValue="seven")"),
+                     "", "", "", "(", "string") == "five",
+        "replace of a missing input under asMissing: mapMissingTo (the function is not applied)");
+  CHECK(apply_output(replace_apply(R"( invalidValueTreatment="asIs" defaultValue="seven")"), "", "", "abc", "b",
+                     "string") == "axc",
+        "replace(abc, b, x) is axc under asIs");
+
+  // The error names the function that failed and the field, through an
+  // enclosing Apply; the enclosing Apply's own treatment does not catch it
+  // (the invalid result is the inner Apply's, which raised it).
+  CHECK(apply_output(R"(<Apply function="+" invalidValueTreatment="asMissing" defaultValue="9">)" + pow_apply("") +
+                         R"(<Constant dataType="integer">1</Constant></Apply>)",
+                     "2", "-2") == invalid_return,
+        "a nested invalid pow names pow and the DerivedField; the outer asMissing does not apply to it");
+  CHECK(apply_output(R"(<Apply function="+">)" + pow_apply(R"( invalidValueTreatment="asMissing" defaultValue="7")") +
+                         R"(<Constant dataType="integer">1</Constant></Apply>)",
+                     "2", "-2") == "8",
+        "a nested asMissing pow gives defaultValue 7 to the outer +");
+  CHECK(apply_output(pow_apply(R"( invalidValueTreatment="asIs")"), "2", "-2", "abc", "b", "double", true) ==
+            R"(ERROR: Apply "pow" in OutputField "o": invalid result (invalidValueTreatment="asIs"))",
+        "an Apply that is an OutputField's expression names the OutputField");
+  CHECK(apply_output(pow_apply(R"( invalidValueTreatment="asMissing" mapMissingTo="5" defaultValue="7")"), "2", "-2",
+                     "abc", "b", "double", true) == "7",
+        "asMissing in an OutputField's expression: defaultValue, not mapMissingTo");
 }
 
 static void arg_buffer() {

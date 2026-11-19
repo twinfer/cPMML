@@ -24,12 +24,26 @@
  * missing inputs to a built-in function will result in a missing value
  * being returned".
  *
- * P4.1 (design commit): today's semantics exactly, including where they
- * depart from that output table (legacy::B22, legacy::D3; kernels.h). It
- * replaces core/builtinfunctions.h's BuiltInFunction, a std::function per
- * Apply called with a std::vector<Value> allocated per record: the arguments
- * are now built in place in an ArgBuffer (inline storage for up to four,
- * §4.3), and the kernel is a function pointer chosen at load.
+ * An invalid result (P4.2, B22), Functions.html, Apply: "This attribute's
+ * default value returnInvalid causes the model to return a value indicating
+ * an invalid result. On the other hand, the invalidValueTreatment value
+ * asMissing replaces the invalid value with a missing value. Note that, in
+ * this case, if a defaultValue is also specified then the default value is
+ * returned instead of a missing value. Finally, in the context of an Apply,
+ * the value asIs is equivalent to returnInvalid as an invalid value cannot
+ * be propagated further." So returnInvalid and asIs make the record invalid
+ * (cpmml::InvalidValueException naming the function and the field, §4.3),
+ * and asMissing gives a missing result, then defaultValue; mapMissingTo is
+ * only for a missing input ("the output value for the cases when any of the
+ * function inputs are missing"), never for an invalid result.
+ *
+ * P4.1 (design commit) kept today's semantics exactly, including where they
+ * departed from that output table (legacy::B22, removed by P4.2;
+ * legacy::D3, kernels.h). It replaces core/builtinfunctions.h's
+ * BuiltInFunction, a std::function per Apply called with a
+ * std::vector<Value> allocated per record: the arguments are now built in
+ * place in an ArgBuffer (inline storage for up to four, §4.3), and the
+ * kernel is a function pointer chosen at load.
  *
  * The load errors are the engine's, word for word as BuiltInFunction gave
  * them and in the same order (they are LOAD-ERROR cells of the fixture
@@ -38,6 +52,7 @@
  * defaultValue and invalidValueTreatment.
  */
 
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -136,6 +151,7 @@ class ApplyNode : public Expression {
     // replacement to give, so the token is refused rather than read as asIs.
     if (treatment_.value == InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_VALUE)
       throw cpmml::ParsingException("Apply: invalidValueTreatment=\"asValue\" is only defined for a MiningField");
+    locate(node);
   }
 
   const Signature& signature() const { return *sig_; }
@@ -162,20 +178,14 @@ class ApplyNode : public Expression {
     // 3. The function.
     Value result;
     if (kernel_(bound_, args.data(), n, result) == Status::Invalid) {
-      // 4. An invalid result.
-      if constexpr (legacy::B22) {
-        switch (treatment_.value) {
-          case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:
-            throw cpmml::InvalidValueException("evaluating apply function");
-          case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_MISSING:
-            if (has_map_missing_to_) return map_missing_to_;
-            return has_default_ ? default_value_ : Value();
-          case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_IS:
-          case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_VALUE:  // refused at load
-            result = Value();
-            break;
-        }
-      }
+      // 4. An invalid result: asMissing "replaces the invalid value with a
+      // missing value" (then step 5's defaultValue, not mapMissingTo: no
+      // input is missing); returnInvalid, and asIs, which "in the context of
+      // an Apply ... is equivalent to returnInvalid", make the record
+      // invalid. (asValue is refused at load.)
+      if (treatment_.value != InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_MISSING)
+        raise_invalid();
+      result = Value();
     }
 
     // 5. A missing result: defaultValue.
@@ -227,6 +237,47 @@ class ApplyNode : public Expression {
     bound.integer_division = sig.op == Op::Divide && result == TypeId::Integer;
     bound.integer_power = sig.op == Op::Pow && result == TypeId::Integer;
     return kernel;
+  }
+
+  // The field whose expression holds the Apply, for the record error of an
+  // invalid result (raise_invalid): the nearest enclosing DerivedField or
+  // OutputField; an Apply outside both (a ComplexPartialScore, a
+  // DefineFunction) names its nearest non-Apply ancestor element instead.
+  // Only the name is kept at load (it fits the short-string buffer of most
+  // field names); the message is built when it is raised.
+  void locate(const XmlNode& node) {
+    pugi::xml_node fallback;
+    for (pugi::xml_node n = node.xml().parent(); n && n.type() == pugi::node_element; n = n.parent()) {
+      if (std::strcmp(n.name(), "DerivedField") == 0 || std::strcmp(n.name(), "OutputField") == 0) {
+        where_kind_ = n.name()[0] == 'D' ? Where::DerivedField : Where::OutputField;
+        where_name_ = n.attribute("name").value();
+        return;
+      }
+      if (!fallback && std::strcmp(n.name(), "Apply") != 0) fallback = n;
+    }
+    where_kind_ = Where::Element;
+    where_name_ = fallback ? fallback.name() : "the document";
+  }
+
+  // §4.3 raise_invalid: an invalid result under returnInvalid or asIs makes
+  // the record invalid, naming the function and the field, e.g. 'Apply
+  // "pow" in DerivedField "p": invalid result
+  // (invalidValueTreatment="returnInvalid")'.
+  [[noreturn]] [[gnu::noinline]] [[gnu::cold]] void raise_invalid() const {
+    std::string where;
+    switch (where_kind_) {
+      case Where::DerivedField:
+        where = "DerivedField \"" + where_name_ + "\"";
+        break;
+      case Where::OutputField:
+        where = "OutputField \"" + where_name_ + "\"";
+        break;
+      case Where::Element:
+        where = where_name_;
+        break;
+    }
+    throw cpmml::InvalidValueException("Apply \"" + std::string(sig_->name) + "\" in " + where +
+                                       ": invalid result (invalidValueTreatment=\"" + treatment_.to_string() + "\")");
   }
 
   // §3.4: Apply "mapMissingTo, defaultValue (xs:string) parsed as the
@@ -286,6 +337,9 @@ class ApplyNode : public Expression {
   bool has_default_ = false;
   Value default_value_;
   InvalidValueTreatmentMethod treatment_;
+  enum class Where : std::uint8_t { DerivedField, OutputField, Element };
+  Where where_kind_ = Where::Element;
+  std::string where_name_;
   std::vector<std::shared_ptr<Expression>> arguments_;
 };
 
