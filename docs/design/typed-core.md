@@ -105,7 +105,7 @@ commit.
 | B17 | an integer DerivedField over a double keeps the fraction (`dint` = 3.5) | 59513a2, probe `dint` | 2 | P4 |
 | B18 | mixed-type comparison compares codes or depends on argument order: `equal(s,"3" vs integer 3)` false | probe `eq_s_i`, `eq_i_s` | 1/2 | P6 |
 | B19 | `if(c, integer, double)` takes the type of the branch taken | 59513a2 | 2 | P2 |
-| B20 | `if` with a missing condition returns the ELSE branch | b4efd7d, probe `if_miss` | 3 | P4 |
+| B20 | `if` with a missing condition returns the ELSE branch | b4efd7d, probe `if_miss` | 3 | P2 (P2.8b4, closed early; was P4.3) |
 | B21 | `0/0` gives NaN (spec: missing); integer `1/0` gives INF; `floor/ceil/round/modulo` of INF are not invalid | 59513a2, probes `div_0_0`, `idiv_1_0`, `floor_inf` | 3 | P4 |
 | B22 | Apply `invalidValueTreatment="asIs"` returns missing after an error (spec: same as returnInvalid); `asMissing` prefers mapMissingTo to defaultValue | 59513a2 | 3 | P4 |
 | B23 | `concat` drops number arguments: `concat(d,"|")` is `|` | d23902a, probe `concat_num` | 1/3 | P4 |
@@ -1524,7 +1524,7 @@ comparison semantics do not change here (they change in P6).
 |---|---|---|---|
 | P4.1 table, kernels, `ApplyNode` with today's semantics | new `src/fn/{table.h,kernels.h,apply_node.h}`; `expression/apply.h`, `expression/expressionbuilder.h`; delete `BuiltInFunction` (`core/builtinfunctions.h`) | — | kernels reproduce today's results including today's missing/invalid handling (behind per-rule switches the following commits remove); dump diff empty; gate on Housing (151 Applies) |
 | P4.2 Apply output table | `fn/apply_node.h` | B22 | one rule |
-| P4.3 `if` with a missing condition | `fn/kernels.h` | B20 | one rule |
+| P4.3 `if` with a missing condition | `fn/kernels.h` | — (B20 closed in P2.8b4; only the move of `Apply::eval_if`'s rule into the kernel remains) | the move reproduces P2.8b4's results; dump diff empty |
 | P4.4 division by zero, INF to integer | `fn/kernels.h` | B21, D20 | one rule |
 | P4.5 int64 kernels, overflow invalid | `fn/kernels.h` | D4 | one rule |
 | P4.6 `concat` casts | `fn/kernels.h` | B23 | one function |
