@@ -129,7 +129,7 @@ class Apply : public Expression {
     bool missing_input = false;
     for (const auto& expression : expressions) {
       input.push_back(expression->eval(sample));
-      if (input.back().missing) missing_input = true;
+      if (input.back().is_missing()) missing_input = true;
     }
 
     // isMissing/isNotMissing must receive their missing arguments; for any
@@ -164,7 +164,7 @@ class Apply : public Expression {
       }
     }
 
-    if (result.missing && exist_defaultvalue) return defaultValue;
+    if (result.is_missing() && exist_defaultvalue) return defaultValue;
     return result;
   }
 
@@ -192,14 +192,14 @@ class Apply : public Expression {
   // refuses (MissingArgumentException; D3).
   inline Value eval_if(const Sample& sample) const {
     const Value condition = expressions[0]->eval(sample);
-    if (condition.missing) {
+    if (condition.is_missing()) {
       if (exist_missingreplacement) return mapmissing_to;
       return exist_defaultvalue ? defaultValue : Value();
     }
-    const size_t taken = condition.value != 0.0 ? 1 : 2;
+    const size_t taken = condition.as_double() != 0.0 ? 1 : 2;
     if (taken >= expressions.size()) return exist_defaultvalue ? defaultValue : Value();
     const Value result = expressions[taken]->eval(sample);
-    if (!result.missing) return result;
+    if (!result.is_missing()) return result;
     if (exist_missingreplacement) return mapmissing_to;
     return exist_defaultvalue ? defaultValue : result;
   }

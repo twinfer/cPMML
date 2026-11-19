@@ -58,6 +58,18 @@ target_include_directories(typed_value.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
 add_dependencies(unit_tests typed_value.exe)
 add_test(typed_value typed_value.exe)
 
+# The P3 accessors of the engine's Value and the adapters between it and the
+# typed value (src/core/value.h, docs/design/typed-core.md §7 P3): pack(unpack)
+# round trips over every P1 scalar type and missing. Links the library for the
+# exceptions and the Indexer's string codes.
+add_executable(value_adapters.exe value_adapters.cc)
+target_include_directories(value_adapters.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(value_adapters.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(value_adapters.exe PRIVATE ${PROJECT_SOURCE_DIR}/third_party)
+target_link_libraries(value_adapters.exe ${PROJECT_NAME} pugixml::pugixml miniz Eigen3::Eigen ${ADDITIONAL_LINK_LIBRARIES})
+add_dependencies(unit_tests value_adapters.exe)
+add_test(value_adapters value_adapters.exe)
+
 # Must-not-compile cases of the type library (§2.2, §6.4): each is compiled
 # at test time with this build's compiler, once with its control (must
 # compile) and once as written (must fail with the intended diagnostic, the

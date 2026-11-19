@@ -278,14 +278,12 @@ inline TypeId untyped_type(const XmlNode& node, const DataType& fallback) {
 
 // The engine Value of a typed value. Float text is kept as its xs:double
 // reading by the callers (B4, P6), so a Float here is only a cast's result.
+// It is cpmml::pack (core/value.h) but for the sentinels, which no document
+// constant can be.
 inline ::Value engine_value(const types::Value& v) {
-  if (const auto* i = std::get_if<types::Integer>(&v)) return ::Value(static_cast<double>(i->v));
-  if (const auto* f = std::get_if<types::Float>(&v)) return ::Value(static_cast<double>(f->v));
-  if (const auto* d = std::get_if<types::Double>(&v)) return ::Value(d->v);
-  if (const auto* b = std::get_if<types::Boolean>(&v)) return ::Value(b->v ? 1.0 : 0.0);
-  if (const auto* s = std::get_if<types::String>(&v))
-    return ::Value(std::string(s->text()), DataType::DataTypeValue::STRING);
-  throw std::logic_error("engine_value: a sentinel has no engine value");
+  if (types::is_missing(v) || types::is_invalid(v))
+    throw std::logic_error("engine_value: a sentinel has no engine value");
+  return cpmml::pack(v);
 }
 
 // Document text read strictly as `type` (§3.4: Discretize binValue,
@@ -321,7 +319,7 @@ inline ::Value document_constant(const XmlNode& node, const std::string& what, c
   ::Value out = engine_value(cast);
   // A number or boolean cast to a string slot keeps its number for numeric
   // readers (decided 2026-11-18, §9; Value::numeric_text).
-  if (to == TypeId::String) out.numeric_text = true;
+  if (to == TypeId::String) out.mark_numeric_text();
   return out;
 }
 
@@ -394,7 +392,7 @@ inline DataType constant_store(const XmlNode& node, TypeId own) {
 // they do for every string value until P4.7 casts the reader.
 inline ::Value string_slot_constant(const std::string& text, double number) {
   ::Value v(text, DataType::DataTypeValue::STRING);
-  v.numeric_text = true;
+  v.mark_numeric_text();
   const double back = v.text_number();
   if (!(back == number || (std::isnan(back) && std::isnan(number))))
     throw std::logic_error("string_slot_constant: \"" + text + "\" does not read back as " + std::to_string(number));
@@ -416,8 +414,8 @@ inline ::Value slot_constant(const XmlNode& node, const std::string& what, const
                              const DataType& slot) {
   ::Value v = document_constant(node, what, text, own, constant_store(node, own));
   if (slot != DataType::DataTypeValue::STRING || own == TypeId::String) return v;
-  if (is_slot_expression(node)) return string_slot_constant(text, v.value);
-  if (v.svalue.empty()) v.svalue = text;
+  if (is_slot_expression(node)) return string_slot_constant(text, v.as_double());
+  if (v.text().empty()) v.set_text(text);
   return v;
 }
 
@@ -472,12 +470,12 @@ inline ::Value element_constant(const XmlNode& element, const XmlNode& node, con
   if (reads_slot) {
     ::Value n = element.exists_attribute("dataType") ? document_constant(node, what, text, type, slot)
                                                      : document_constant(node, what, text, type_id(slot), slot);
-    n.svalue = text;
+    n.set_text(text);
     return n;
   }
   ::Value v = document_constant(node, what, text, type, engine_type(type));
-  if (slot == DataType::DataTypeValue::STRING && type != TypeId::String && v.svalue.empty())
-    v.svalue = document_constant(node, what, text, type, slot).svalue;
+  if (slot == DataType::DataTypeValue::STRING && type != TypeId::String && v.text().empty())
+    v.set_text(document_constant(node, what, text, type, slot).text());
   return v;
 }
 
@@ -498,9 +496,9 @@ inline ::Value number_attribute(const XmlNode& node, const std::string& name) {
 inline ::Value number_constant(const XmlNode& node, const std::string& name, const DataType& slot) {
   ::Value v = number_attribute(node, name);
   if (slot != DataType::DataTypeValue::STRING) return v;
-  const std::string text = java::double_text(v.value);
-  if (is_slot_expression(node)) return string_slot_constant(text, v.value);
-  v.svalue = text;
+  const std::string text = java::double_text(v.as_double());
+  if (is_slot_expression(node)) return string_slot_constant(text, v.as_double());
+  v.set_text(text);
   return v;
 }
 

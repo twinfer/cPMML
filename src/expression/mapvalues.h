@@ -119,8 +119,8 @@ class MapValues : public Expression {
                                         ">NaN</" + column +
                                         ">: a NaN key matches no input (§2.7, D26: a NaN key is a load error)");
         keys.push_back(Value(text, type));
-        typed.push_back(type == DataType::DataTypeValue::FLOAT ? static_cast<double>(static_cast<float>(keys.back().value))
-                                                               : keys.back().value);
+        const double key = keys.back().as_double();
+        typed.push_back(type == DataType::DataTypeValue::FLOAT ? static_cast<double>(static_cast<float>(key)) : key);
       }
       if (!seen.insert(typed).second) {
         std::string key;
@@ -141,7 +141,7 @@ class MapValues : public Expression {
 
     for (const auto& column : raw_columns) {
       tmp = sample[column].value;
-      if (tmp.missing) missing_input = true;
+      if (tmp.is_missing()) missing_input = true;
 
       keys.push_back(tmp);
     }

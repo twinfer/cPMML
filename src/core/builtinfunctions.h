@@ -417,22 +417,22 @@ class BuiltInFunction {  // inputs are mapped by position
     if (narrow_arguments) {
       narrowed = input;
       for (size_t i = 0; i < narrowed.size() && i < argument_types.size(); ++i)
-        if (argument_types[i] == cpmml::bind::TypeId::Float && !narrowed[i].missing)
-          narrowed[i].value = static_cast<double>(static_cast<float>(narrowed[i].value));
+        if (argument_types[i] == cpmml::bind::TypeId::Float && !narrowed[i].is_missing())
+          narrowed[i].set_double(static_cast<double>(static_cast<float>(narrowed[i].as_double())));
     }
     const std::vector<Value>& arguments = narrow_arguments ? narrowed : input;
     // XSD integer has no value for 7^-2. Invalid, so that the Apply's
     // invalidValueTreatment decides (JPMML refuses it, whatever that says).
-    if (integer_power && arguments[1].value < 0)
+    if (integer_power && arguments[1].as_double() < 0)
       throw cpmml::InvalidValueException("pow: an integer raised to a negative integer is not an integer");
 
     Value result = function(arguments);
-    if (result.missing) return result;
+    if (result.is_missing()) return result;
     // Truncated toward zero, as Java and XQuery's idiv do; the specification
     // gives the type but not the rounding. Division by zero is left as it was
     // (INF, -INF or NaN): there is no integer to give.
-    if (integer_division && arguments[1].value != 0.0) result.value = std::trunc(result.value);
-    if (float_result) result.value = static_cast<double>(static_cast<float>(result.value));
+    if (integer_division && arguments[1].as_double() != 0.0) result.set_double(std::trunc(result.as_double()));
+    if (float_result) result.set_double(static_cast<double>(static_cast<float>(result.as_double())));
 
     return result;
   }
@@ -470,15 +470,15 @@ class BuiltInFunction {  // inputs are mapped by position
     bool any = false;
     double result = 0.0;
     for (const auto& v : input) {
-      if (v.missing) continue;
-      result = any ? combine(result, v.value) : v.value;
+      if (v.is_missing()) continue;
+      result = any ? combine(result, v.as_double()) : v.as_double();
       any = true;
     }
     return any ? Value(result) : Value();
   }
   inline static size_t count_present(const std::vector<Value>& input) {
     size_t n = 0;
-    for (const auto& v : input) n += v.missing ? 0 : 1;
+    for (const auto& v : input) n += v.is_missing() ? 0 : 1;
     return n;
   }
   inline static Value max(const std::vector<Value>& input) {
@@ -492,14 +492,14 @@ class BuiltInFunction {  // inputs are mapped by position
   }
   inline static Value avg(const std::vector<Value>& input) {
     Value result = sum(input);
-    if (!result.missing) result.value /= static_cast<double>(count_present(input));
+    if (!result.is_missing()) result.set_double(result.as_double() / static_cast<double>(count_present(input)));
     return result;
   }
   inline static Value is_missing(const std::vector<Value>& input) {
-    return Value(input[0].missing, DataType::DataTypeValue::BOOLEAN);
+    return Value(input[0].is_missing(), DataType::DataTypeValue::BOOLEAN);
   }
   inline static Value is_notmissing(const std::vector<Value>& input) {
-    return Value(!input[0].missing, DataType::DataTypeValue::BOOLEAN);
+    return Value(!input[0].is_missing(), DataType::DataTypeValue::BOOLEAN);
   }
   inline static Value equal(const std::vector<Value>& input) {
     return Value(input[0] == input[1], DataType::DataTypeValue::BOOLEAN);
@@ -520,31 +520,31 @@ class BuiltInFunction {  // inputs are mapped by position
     return Value(input[0] >= input[1], DataType::DataTypeValue::BOOLEAN);
   }
   inline static Value exp(const std::vector<Value>& input) {
-    return Value(std::exp(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::exp(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value ln(const std::vector<Value>& input) {
-    return Value(std::log(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::log(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value log10(const std::vector<Value>& input) {
-    return Value(std::log10(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::log10(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value sqrt(const std::vector<Value>& input) {
-    return Value(std::sqrt(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::sqrt(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value abs(const std::vector<Value>& input) {
-    return Value(std::abs(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::abs(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value round(const std::vector<Value>& input) {
-    return Value(std::round(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::round(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value floor(const std::vector<Value>& input) {
-    return Value(std::floor(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::floor(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value ceil(const std::vector<Value>& input) {
-    return Value(std::ceil(input[0].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::ceil(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   inline static Value pow(const std::vector<Value>& input) {
-    return Value(std::pow(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::pow(input[0].as_double(), input[1].as_double()), DataType::DataTypeValue::DOUBLE);
   }
   // PMML if(condition, then-value[, else-value]); without an else part the
   // result is missing when the condition is false. A missing condition is a
@@ -552,8 +552,8 @@ class BuiltInFunction {  // inputs are mapped by position
   // (Apply::eval_if, lazily and with mapMissingTo); this is the same rule
   // over arguments already evaluated.
   inline static Value if_then_else(const std::vector<Value>& input) {
-    if (input[0].missing) return Value();
-    if (input[0].value != 0.0) return input[1];
+    if (input[0].is_missing()) return Value();
+    if (input[0].as_double() != 0.0) return input[1];
     return input.size() > 2 ? input[2] : Value();
   }
   inline static Value is_in(const std::vector<Value>& input) {
@@ -561,14 +561,14 @@ class BuiltInFunction {  // inputs are mapped by position
     return Value(found != input.end(), DataType::DataTypeValue::BOOLEAN);
   }
   inline static Value is_notin(const std::vector<Value>& input) {
-    return Value(!(is_in(input).value), DataType::DataTypeValue::BOOLEAN);
+    return Value(!(is_in(input).as_double()), DataType::DataTypeValue::BOOLEAN);
   }
 
   inline static Value replace(const std::vector<Value>& input) {
-    return input[0].replace(input[1].svalue, input[2].svalue);
+    return input[0].replace(input[1].text(), input[2].text());
   }
   inline static Value str_matches(const std::vector<Value>& input) {
-    return Value(input[0].matches(input[1].svalue), DataType::DataTypeValue::BOOLEAN);
+    return Value(input[0].matches(input[1].text()), DataType::DataTypeValue::BOOLEAN);
   }
 
   // String built-in functions
@@ -586,8 +586,8 @@ class BuiltInFunction {  // inputs are mapped by position
 
   // PMML substring uses 1-based startPos and a character count (length).
   inline static Value str_substring(const std::vector<Value>& input) {
-    const size_t start_pos = static_cast<size_t>(input[1].value);  // 1-based
-    const size_t length = static_cast<size_t>(input[2].value);
+    const size_t start_pos = static_cast<size_t>(input[1].as_double());  // 1-based
+    const size_t length = static_cast<size_t>(input[2].as_double());
     Value v = input[0];
     if (start_pos >= 1) v.substr(start_pos - 1, length);
     return v;
@@ -601,12 +601,12 @@ class BuiltInFunction {  // inputs are mapped by position
 
   inline static Value str_concat(const std::vector<Value>& input) {
     std::string result;
-    for (const auto& v : input) result += v.svalue;
+    for (const auto& v : input) result += v.text();
     return Value(result, DataType::DataTypeValue::STRING);
   }
 
   inline static Value str_length(const std::vector<Value>& input) {
-    return Value(static_cast<double>(input[0].svalue.size()), DataType::DataTypeValue::DOUBLE);
+    return Value(static_cast<double>(input[0].text().size()), DataType::DataTypeValue::DOUBLE);
   }
 
   // --- Functions the table was missing entirely ---
@@ -620,14 +620,14 @@ class BuiltInFunction {  // inputs are mapped by position
   // <cmath> function.
   inline static std::function<Value(const std::vector<Value>&)> unary(double (*f)(double)) {
     return [f](const std::vector<Value>& input) {
-      return Value(f(input[0].value), DataType::DataTypeValue::DOUBLE);
+      return Value(f(input[0].as_double()), DataType::DataTypeValue::DOUBLE);
     };
   }
 
   // "Returns one if x>y and zero otherwise." Note it returns a number, not a
   // boolean, which is why it is not written with the comparison functions.
   inline static Value threshold(const std::vector<Value>& input) {
-    return Value(input[0].value > input[1].value ? 1.0 : 0.0, DataType::DataTypeValue::DOUBLE);
+    return Value(input[0].as_double() > input[1].as_double() ? 1.0 : 0.0, DataType::DataTypeValue::DOUBLE);
   }
 
   /**
@@ -639,18 +639,18 @@ class BuiltInFunction {  // inputs are mapped by position
    *  std::fmod would give 2, 0.3, 2 and -4 -- so two of the four differ.
    */
   inline static Value modulo(const std::vector<Value>& input) {
-    const double a = input[0].value;
-    const double b = input[1].value;
+    const double a = input[0].as_double();
+    const double b = input[1].as_double();
 
     return Value(a - std::floor(a / b) * b, DataType::DataTypeValue::DOUBLE);
   }
 
   inline static Value hypot(const std::vector<Value>& input) {
-    return Value(std::hypot(input[0].value, input[1].value), DataType::DataTypeValue::DOUBLE);
+    return Value(std::hypot(input[0].as_double(), input[1].as_double()), DataType::DataTypeValue::DOUBLE);
   }
 
   inline static Value logical_not(const std::vector<Value>& input) {
-    return Value(!(input[0].value != 0.0), DataType::DataTypeValue::BOOLEAN);
+    return Value(!(input[0].as_double() != 0.0), DataType::DataTypeValue::BOOLEAN);
   }
 
   inline static Value product(const std::vector<Value>& input) {
@@ -664,7 +664,7 @@ class BuiltInFunction {  // inputs are mapped by position
     std::vector<double> values;
     values.reserve(input.size());
     for (const auto& v : input)
-      if (!v.missing) values.push_back(v.value);
+      if (!v.is_missing()) values.push_back(v.as_double());
     if (values.empty()) return Value();
     std::sort(values.begin(), values.end());
 
@@ -677,28 +677,28 @@ class BuiltInFunction {  // inputs are mapped by position
   // Φ(x) = ½·erfc(−x/√2). Written with erfc rather than 1−½erfc(x/√2) because
   // the latter loses every significant digit in the left tail.
   inline static Value std_normal_cdf(const std::vector<Value>& input) {
-    return Value(0.5 * std::erfc(-input[0].value / std::sqrt(2.0)), DataType::DataTypeValue::DOUBLE);
+    return Value(0.5 * std::erfc(-input[0].as_double() / std::sqrt(2.0)), DataType::DataTypeValue::DOUBLE);
   }
 
   inline static Value std_normal_pdf(const std::vector<Value>& input) {
-    const double x = input[0].value;
+    const double x = input[0].as_double();
 
     return Value(std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI), DataType::DataTypeValue::DOUBLE);
   }
 
   inline static Value normal_cdf(const std::vector<Value>& input) {
-    const double sigma = input[2].value;
+    const double sigma = input[2].as_double();
     if (!(sigma > 0.0)) throw cpmml::InvalidValueException("normalCDF: sigma must be positive");
 
-    return Value(0.5 * std::erfc(-(input[0].value - input[1].value) / (sigma * std::sqrt(2.0))),
+    return Value(0.5 * std::erfc(-(input[0].as_double() - input[1].as_double()) / (sigma * std::sqrt(2.0))),
                  DataType::DataTypeValue::DOUBLE);
   }
 
   inline static Value normal_pdf(const std::vector<Value>& input) {
-    const double sigma = input[2].value;
+    const double sigma = input[2].as_double();
     if (!(sigma > 0.0)) throw cpmml::InvalidValueException("normalPDF: sigma must be positive");
 
-    const double z = (input[0].value - input[1].value) / sigma;
+    const double z = (input[0].as_double() - input[1].as_double()) / sigma;
 
     return Value(std::exp(-0.5 * z * z) / (sigma * std::sqrt(2.0 * M_PI)), DataType::DataTypeValue::DOUBLE);
   }

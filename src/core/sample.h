@@ -42,7 +42,7 @@ class Feature {
 #endif
 
   inline const Value& cvalue() const {
-    if (value.missing) throw cpmml::MissingValueException("missing value");
+    if (value.is_missing()) throw cpmml::MissingValueException("missing value");
 
     return value;
   }
@@ -71,7 +71,7 @@ class Sample {
   inline void change_value_if_missing(const size_t& feature_index, const Value& value) {
     // Assigning a missing Value must not mark the slot as present: downstream
     // consumers (e.g. model-chain segments) would read the sentinel as data.
-    if (features[feature_index].value.missing && !value.missing) features[feature_index].value = value;
+    if (features[feature_index].value.is_missing() && !value.is_missing()) features[feature_index].value = value;
   }
 
   std::vector<Feature> features;

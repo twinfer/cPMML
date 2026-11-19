@@ -32,63 +32,63 @@ constexpr PredicateResult _false(const Sample& other) { return PredicateResult::
 constexpr PredicateResult _true(const Sample& other) { return PredicateResult::TRUE_; }
 
 inline PredicateResult equal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() == value);
 }
 
 inline PredicateResult not_equal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() != value);
 }
 
 inline PredicateResult greater_than(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() > value);
 }
 
 inline PredicateResult greater_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() >= value);
 }
 
 inline PredicateResult less_than(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() < value);
 }
 
 inline PredicateResult less_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue() <= value);
 }
 
 inline PredicateResult is_in(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue().is_in(values));
 }
 
 inline PredicateResult is_notin(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue().is_not_in(values));
 }
 
 inline PredicateResult is_in_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
                                   const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue().is_in(values));
 }
 
 inline PredicateResult is_notin_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
                                      const size_t& feature) {
-  if (other[feature].value.missing) return PredicateResult::UNKNOWN;
+  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
   return to_predicate_result(other[feature].cvalue().is_not_in(values));
 }
 
 inline PredicateResult is_missing(const Sample& other, const size_t& feature) {
-  return to_predicate_result(other[feature].value.missing);
+  return to_predicate_result(other[feature].value.is_missing());
 }
 
 inline PredicateResult is_not_missing(const Sample& other, const size_t& feature) {
-  return to_predicate_result(!other[feature].value.missing);
+  return to_predicate_result(!other[feature].value.is_missing());
 }
 
 // Three-valued AND: any FALSE → FALSE; else any UNKNOWN → UNKNOWN.

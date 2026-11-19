@@ -52,7 +52,7 @@ class NormDiscrete : public Expression {
 
   inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
-    if (input.missing) return mapmissing_to;
+    if (input.is_missing()) return mapmissing_to;
     if (input == value) return Value(1, output_type);
 
     return Value(0, output_type);

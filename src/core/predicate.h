@@ -79,9 +79,9 @@ class Predicate {
       case PredicateOpType::PredicateOpTypeValue::SURROGATE:
         return SURROGATE(other);
       case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
-        return to_result(other[feature].value.missing);
+        return to_result(other[feature].value.is_missing());
       case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
-        return to_result(!other[feature].value.missing);
+        return to_result(!other[feature].value.is_missing());
       default:
         try {
           return evaluate(other[feature].value);
@@ -103,9 +103,9 @@ class Predicate {
       case PredicateOpType::PredicateOpTypeValue::FALSE:
         return Result::FALSE_;
       case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
-        return to_result(other.missing);
+        return to_result(other.is_missing());
       case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
-        return to_result(!other.missing);
+        return to_result(!other.is_missing());
       case PredicateOpType::PredicateOpTypeValue::AND:
         return AND(other);
       case PredicateOpType::PredicateOpTypeValue::OR:
@@ -118,7 +118,7 @@ class Predicate {
         break;
     }
 
-    if (other.missing) return Result::UNKNOWN;  // comparison with missing → UNKNOWN
+    if (other.is_missing()) return Result::UNKNOWN;  // comparison with missing → UNKNOWN
 
     switch (predicatetype.value) {
       case PredicateOpType::PredicateOpTypeValue::EQUAL:

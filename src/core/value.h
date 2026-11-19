@@ -21,6 +21,9 @@
 
 #include <regex>
 
+#include "core/types/cast.h"
+#include "core/types/parse.h"
+#include "core/types/value.h"
 #include "datatype.h"
 #include "indexer.h"
 #include "utils/utils.h"
@@ -73,6 +76,21 @@ class Value {
     // agrees with operator== on the one case that matters here, -0.0 == 0.0.
     size_t operator()(const Value& obj) const { return std::hash<double>{}(obj.value); }
   };
+
+  // Accessors (design typed-core.md §7, P3). Every reader outside this file
+  // goes through these instead of the fields, so that P5 can change the
+  // storage behind them; each is the field read or write it names, nothing
+  // more (no copy, no check).
+  inline double as_double() const { return value; }
+  inline bool is_missing() const { return missing; }
+  inline const std::string& text() const { return svalue; }
+  inline bool has_numeric_text() const { return numeric_text; }
+
+  inline void set_double(const double number) { value = number; }
+  inline void set_missing(const bool missing_now) { missing = missing_now; }
+  inline void set_text(std::string new_text) { svalue = std::move(new_text); }
+  inline void clear_text() { svalue.clear(); }
+  inline void mark_numeric_text() { numeric_text = true; }
 
   Value() = default;
   // 3 cases: uninitialized (and missing), initialized but missing and not
@@ -247,9 +265,9 @@ class Value {
 // double here; a caller that knows the type writes java::Number{v.value, kind}
 // instead (OutputField does, from the expression's type).
 inline std::string java_text(const Value& value) {
-  if (value.missing) return std::string();
-  if (!value.svalue.empty()) return value.svalue;
-  return java::double_text(value.value);
+  if (value.is_missing()) return std::string();
+  if (!value.text().empty()) return value.text();
+  return java::double_text(value.as_double());
 }
 
 #if defined(__cpp_lib_format)
@@ -268,5 +286,122 @@ struct std::formatter<Value, char> {
   }
 };
 #endif
+
+// ---------------------------------------------------------------- adapters
+// Between the engine's Value (old storage: a double, a missing flag and a
+// text) and the P1 typed value (core/types/value.h), for P4's kernels, which
+// take P1 scalar types over the old storage (design typed-core.md §7, P3 and
+// P4). Nothing in the engine calls them in P3.
+//
+// unpack<T>(v, static_type) reads v as a value of static_type, the type the
+// binder fixed for the expression that produced it. The old storage keeps
+// every number and boolean as a double, so reading it in its static type is
+// the explicit cast from that double (§2.6, types::CastTo): Double is the
+// double itself (-0, NaN and INF kept); Float its IEEE round to nearest
+// ("double -> float ... overflow -> ±INF, underflow -> 0", XSD float value
+// space); Integer the value if it is integral and within int64, else
+// Invalid(NotIntegral) or Invalid(Overflow) (Functions.html: "a double
+// expression can not be implicitly cast as an integer"); Boolean 1 -> true,
+// 0 -> false, else Invalid(NoCast) (the XSD boolean lexical space {true,
+// false, 1, 0}, D14). A String is the text, and only the text: text() is
+// what every string reader reads (§9, decided 2026-11-18 after P2.1: string
+// readers get the text of a numeric_text value), and the string code in the
+// double is the Indexer's, which a typed String does not carry; its rep is
+// made by `ctx` (types::make_string), so a String needs the three-argument
+// form. A missing v is Missing whatever its static type.
+//
+// T is types::Value (any of the above) or the scalar type of static_type
+// itself. A scalar cannot hold Missing or Invalid, so unpack<Scalar> of a
+// missing v, of a v that is not a value of the type, or with another static
+// type is a programming error (std::logic_error), never a default.
+//
+// pack(x) is the old storage of a typed value, as the engine builds it from
+// each type: a number its double (an Integer beyond 2^53 rounds, as every
+// double the engine holds does), a boolean 1 or 0, a String Value(text,
+// STRING), whose double is the active Indexer's code of the text (and -1,
+// no code, for a text the model never saw once its Indexer is frozen), and
+// Missing Value(). Invalid has no old storage: the engine raises an
+// exception where a value is invalid, so packing one is a programming error.
+//
+// Round trip: pack(unpack(v, t)) is v, field for field, for every v the
+// engine builds as a value of t: a number of a double or integer slot (any
+// double, for double), a float of a float slot, 1 or 0 of a boolean slot, a
+// string built from its text (Value(text, STRING)), and a missing v built as
+// Value(). Two string Values do not round trip, because their double is not
+// their text's code: one edited in place by uppercase/lowercase/substring/
+// trimBlanks keeps its argument's code (B2, P6), and a numeric_text one
+// (§9) keeps its mark, which a String cannot carry (pack gives the text's
+// code and no mark).
+namespace cpmml {
+
+namespace detail {
+// v (not missing) as a value of static_type.
+inline types::Value unpack_present(const ::Value& v, const types::TypeId static_type, types::ParseContext* ctx) {
+  const types::Double d{v.as_double()};
+  switch (static_type) {
+    case types::TypeId::Integer:
+      return types::CastTo<types::Integer>{nullptr, nullptr}(d);
+    case types::TypeId::Float:
+      return types::CastTo<types::Float>{nullptr, nullptr}(d);
+    case types::TypeId::Double:
+      return d;
+    case types::TypeId::Boolean:
+      return types::CastTo<types::Boolean>{nullptr, nullptr}(d);
+    case types::TypeId::String:
+      if (!ctx) throw std::logic_error("unpack: a string needs a ParseContext to make its rep");
+      return types::String{types::make_string(*ctx, v.text())};
+    case types::TypeId::Missing:
+    case types::TypeId::Invalid:
+      break;
+  }
+  throw std::logic_error("unpack: Missing and Invalid are not static types");
+}
+
+template <class T>
+T unpack(const ::Value& v, const types::TypeId static_type, types::ParseContext* ctx) {
+  if constexpr (std::is_same_v<T, types::Value>) {
+    if (static_type == types::TypeId::Missing || static_type == types::TypeId::Invalid)
+      throw std::logic_error("unpack: Missing and Invalid are not static types");
+    if (v.is_missing()) return types::Missing{};
+    return unpack_present(v, static_type, ctx);
+  } else {
+    static_assert(types::PmmlParsedType<T>, "unpack<T>: T is types::Value or a P1 scalar type");
+    if (static_type != T::type_id)
+      throw std::logic_error("unpack<" + std::string(T::name) + ">: the static type is another");
+    if (v.is_missing()) throw std::logic_error("unpack<" + std::string(T::name) + ">: the value is missing");
+    const types::Value x = unpack_present(v, static_type, ctx);
+    if (const T* scalar = std::get_if<T>(&x)) return *scalar;
+    throw std::logic_error("unpack<" + std::string(T::name) + ">: " + java::double_text(v.as_double()) +
+                           " is not a value of the type");
+  }
+}
+}  // namespace detail
+
+// A number, boolean or missing value (T = types::Value, or Integer, Float,
+// Double, Boolean); a String static type needs the form below.
+template <class T>
+T unpack(const ::Value& v, const types::TypeId static_type) {
+  static_assert(!std::is_same_v<T, types::String>, "unpack<String> needs a ParseContext");
+  return detail::unpack<T>(v, static_type, nullptr);
+}
+
+// Any static type; a String's rep is made by ctx.
+template <class T>
+T unpack(const ::Value& v, const types::TypeId static_type, types::ParseContext& ctx) {
+  return detail::unpack<T>(v, static_type, &ctx);
+}
+
+inline ::Value pack(const types::Value& x) {
+  if (const auto* i = std::get_if<types::Integer>(&x)) return ::Value(static_cast<double>(i->v));
+  if (const auto* f = std::get_if<types::Float>(&x)) return ::Value(static_cast<double>(f->v));
+  if (const auto* d = std::get_if<types::Double>(&x)) return ::Value(d->v);
+  if (const auto* b = std::get_if<types::Boolean>(&x)) return ::Value(b->v ? 1.0 : 0.0);
+  if (const auto* s = std::get_if<types::String>(&x))
+    return ::Value(std::string(s->text()), DataType::DataTypeValue::STRING);
+  if (types::is_missing(x)) return ::Value();
+  throw std::logic_error("pack: an Invalid value has no old storage");
+}
+
+}  // namespace cpmml
 
 #endif  // CPMML_VALUE_H

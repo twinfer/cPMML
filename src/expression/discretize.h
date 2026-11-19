@@ -85,7 +85,7 @@ class Discretize : public Expression {
   inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
 
-    if (input.missing) return mapmissing_to;
+    if (input.is_missing()) return mapmissing_to;
 
     for (auto i = 0u; i < discretizebin_intervals.size(); i++)
       if (discretizebin_intervals[i](input)) return discretizebin_values[i];

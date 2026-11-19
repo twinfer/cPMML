@@ -94,7 +94,7 @@ class NormContinuous : public Expression {
   inline Value eval(const Sample& sample) const override {
     Value input = sample[index].value;
 
-    if (input.missing) return mapmissing_to;  // missing when no mapMissingTo is given
+    if (input.is_missing()) return mapmissing_to;  // missing when no mapMissingTo is given
 
     if (input < orig.front() || input > orig.back()) {  // outlier
       switch (outliertreatment_method.value) {

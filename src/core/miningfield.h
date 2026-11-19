@@ -179,9 +179,9 @@ class MiningField : public DataField {
   // Writes into the caller's Value -- in MiningSchema::prepare, the sample's
   // own slot -- rather than building and moving a temporary per input.
   static inline void set_number(Value& out, const double number) {
-    out.value = number;
-    out.missing = false;
-    out.svalue.clear();
+    out.set_double(number);
+    out.set_missing(false);
+    out.clear_text();
   }
 
   inline InputStatus parse_input(const std::string& raw, Value& parsed) const {

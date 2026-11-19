@@ -67,7 +67,7 @@ class FieldRef : public Expression {
 
   inline Value eval(const Sample& sample) const override {
     Value value = sample[index].value;
-    return value.missing ? mapmissing_to : value;
+    return value.is_missing() ? mapmissing_to : value;
   }
 };
 
@@ -103,7 +103,7 @@ class SimpleFieldRef {
 
   inline Value value(const Sample& sample) const {
     Value value = sample[index].value;
-    return value.missing ? mapmissing_to : value;
+    return value.is_missing() ? mapmissing_to : value;
   }
 
   static std::vector<SimpleFieldRef> to_simplefields(const std::vector<XmlNode>& nodes,

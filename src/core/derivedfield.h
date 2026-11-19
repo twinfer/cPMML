@@ -55,8 +55,8 @@ class DerivedField {
     Value v = expression->eval(sample);
     // Quantize to float32 when DerivedField declares dataType="float", to avoid precision issues in case of float32
     // quantization in the original model
-    if (datatype.value == DataType::DataTypeValue::FLOAT && !v.missing)
-      v.value = static_cast<double>(static_cast<float>(v.value));
+    if (datatype.value == DataType::DataTypeValue::FLOAT && !v.is_missing())
+      v.set_double(static_cast<double>(static_cast<float>(v.as_double())));
     sample.change_value(index, v);
   }
 

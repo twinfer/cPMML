@@ -108,7 +108,7 @@ class DataField {
   // rejected the whole record, because the isIn/interval constraint answers
   // UNKNOWN for a missing operand and UNKNOWN does not pass.
   inline bool validate(const Sample& sample) const {
-    if (constraints.is_empty || sample[index].value.missing) return true;
+    if (constraints.is_empty || sample[index].value.is_missing()) return true;
     return constraints(sample);
   }
   inline Value createValue(const std::string& value) const { return Value(value, datatype); }
