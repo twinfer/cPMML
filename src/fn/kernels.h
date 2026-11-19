@@ -76,9 +76,6 @@ namespace legacy {
 // NaN, substring with startPos < 1 returns its whole argument (spec:
 // invalid, then invalidValueTreatment).
 inline constexpr bool B41 = true;
-// D3 (P4.3): `if` is evaluated by ApplyNode::eval_if (P2.8b4's rule: a
-// missing condition is a missing input), not by its kernel.
-inline constexpr bool D3 = true;
 // B21 (P4.4): 0/0 gives NaN (spec: missing); floor, ceil, round and modulo
 // of +-INF give a number (spec: "Since INF and -INF can only be floating
 // point numbers, they will cause floor, ceil, round, and modulo to return an
@@ -103,7 +100,7 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B41 && D3, "B41's fix and P4.3 remove these switches together with the code they keep");
+static_assert(B41, "B41's fix removes this switch together with the code it keeps");
 static_assert(B21 && D20 && D4 && B23, "P4.4-P4.6 remove these switches together with the code they keep");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
@@ -341,6 +338,42 @@ inline Status is_not_missing(const Bound&, const ::Value* args, std::size_t, ::V
   return boolean(!args[0].is_missing(), out);
 }
 
+// `if` (design commit P2.8b4, moved here by P4.3; §4.2 "if laziness", §4.3
+// LazyIf; D3, D24), the one lazy function: its inputs are not all its
+// arguments. BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The
+// ELSE part is optional. If the ELSE part is absent and the boolean value is
+// false then a missing value is returned." Read as a conditional, the inputs
+// are the condition and the branch it takes (§4.2: "Only the condition and
+// the branch taken are inputs (so mapMissingTo applies when either is
+// missing)"), evaluated in that order; the other branch is not evaluated, so
+// its missing value is not an input. ApplyNode (MissingRule::LazyIf, §4.3
+// step 1) evaluates the condition, asks `if_taken` for the argument it
+// takes, evaluates that one only, and calls `if_then_else` with the inputs
+// it evaluated: the condition, then the branch taken if there is one.
+//
+// The argument a present condition takes: 1 (THEN) when the double it holds
+// is not 0, else 2 (ELSE); `n` (none) when that is ELSE and the call has no
+// ELSE part.
+inline std::size_t if_taken(const ::Value& condition, std::size_t n) {
+  const std::size_t taken = condition.as_double() != 0.0 ? 1 : 2;
+  return taken < n ? taken : n;
+}
+// The result over the inputs [condition, branch taken]: the branch's value as
+// it came in (a string keeps its Value, decided 2026-11-19 after P3), missing
+// or not; missing (`out` as the caller made it) when the condition is
+// missing or no branch is taken ("If the ELSE part is absent and the boolean
+// value is false then a missing value is returned"). The Apply's attributes
+// are ApplyNode's: a missing condition or branch is a missing input, so
+// mapMissingTo is returned before this is called; a missing result then
+// gives defaultValue. A false condition without ELSE is a missing result,
+// not a missing input: defaultValue applies, mapMissingTo does not. JPMML
+// 1.7.7 agrees on every case but the missing condition without
+// mapMissingTo, which it refuses (MissingArgumentException; D3).
+inline Status if_then_else(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
+  if (n == 2) out = args[1];
+  return Status::Ok;
+}
+
 // The comparisons (legacy::LegacyCompare), over arguments narrowed as the
 // numeric functions' are.
 inline ::Value compared(const Bound& b, const ::Value* args, std::size_t i) {
@@ -434,8 +467,7 @@ inline Status matches(const Bound&, const ::Value* args, std::size_t, ::Value& o
 }  // namespace adapter
 
 // ---------------------------------------------------------------- the factory
-// The kernel of a row (§4.1 `instantiate`), at load. `if` has none while
-// legacy::D3 stands: ApplyNode evaluates it (eval_if). The switch has no
+// The kernel of a row (§4.1 `instantiate`), at load. The switch has no
 // default, so a new Op that is not given a kernel is a compiler warning
 // (-Wswitch), and the logic_error below catches it at load.
 inline KernelFn instantiate(Op op) {
@@ -459,7 +491,7 @@ inline KernelFn instantiate(Op op) {
     case Op::Floor: return a::unary<s::floor>;
     case Op::Ceil: return a::unary<s::ceil>;
     case Op::Pow: return a::pow;
-    case Op::If: return nullptr;  // legacy::D3
+    case Op::If: return a::if_then_else;  // inputs: MissingRule::LazyIf (if_taken)
     case Op::IsMissing: return a::is_missing;
     case Op::IsNotMissing: return a::is_not_missing;
     case Op::Equal: return a::compare<LegacyCompare::equal>;

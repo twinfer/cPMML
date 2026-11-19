@@ -91,17 +91,13 @@ static std::vector<Value> nums(std::initializer_list<double> xs) {
 
 static void table() {
   // §4.2 status column: a kernel exactly for the functions the engine
-  // evaluates ("✓"), none for the others ("✗"); `if` has its kernel in
-  // ApplyNode::eval_if while legacy::D3 stands.
+  // evaluates ("✓"), none for the others ("✗"); `if` included (P4.3).
   int evaluated = 0;
   for (const auto& s : fn::kBuiltins) {
     const std::string rule = "row " + std::string(s.name) + ": a kernel exactly when Engine::Today";
     if (s.engine == fn::Engine::Today) {
       evaluated++;
-      if (s.op == fn::Op::If)
-        CHECK(fn::instantiate(s.op) == nullptr, rule + " (if: ApplyNode::eval_if, legacy::D3)");
-      else
-        CHECK(fn::instantiate(s.op) != nullptr, rule);
+      CHECK(fn::instantiate(s.op) != nullptr, rule);
     } else {
       CHECK(s.op == fn::Op::None, rule);
       CHECK(message_of<std::logic_error>([&] { fn::instantiate(s.op); }) ==
@@ -446,6 +442,77 @@ static void apply_output_table() {
         "asMissing in an OutputField's expression: defaultValue, not mapMissingTo");
 }
 
+// `if` (P4.3: the rule of P2.8b4's ApplyNode::eval_if, now the table's
+// MissingRule::LazyIf and the kernels if_taken / if_then_else).
+// BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The ELSE part is
+// optional. If the ELSE part is absent and the boolean value is false then a
+// missing value is returned." §4.2: "Only the condition and the branch taken
+// are inputs (so mapMissingTo applies when either is missing)"; D3: a missing
+// condition is a missing input.
+static void if_lazy() {
+  CHECK(fn::find("if")->missing == fn::MissingRule::LazyIf, "if: MissingRule::LazyIf");
+  CHECK(fn::adapter::if_taken(Value(1.0), 3) == 1 && fn::adapter::if_taken(Value(-0.5), 3) == 1,
+        "if_taken: a condition that is not 0 takes THEN");
+  CHECK(fn::adapter::if_taken(Value(0.0), 3) == 2, "if_taken: a false condition takes ELSE");
+  CHECK(fn::adapter::if_taken(Value(0.0), 2) == 2, "if_taken: a false condition without ELSE takes none (n)");
+  CHECK(fn::adapter::if_taken(Value(1.0), 2) == 1, "if_taken: THEN without ELSE");
+  {
+    Value out;
+    CHECK(call("if", {Value(1.0), Value("abc", DataType::DataTypeValue::STRING)}, out) == fn::Status::Ok &&
+              out.text() == "abc",
+          "if_then_else: the branch taken's value");
+    Value none;
+    CHECK(call("if", {Value(0.0)}, none) == fn::Status::Ok && none.is_missing(),
+          "if_then_else: no branch taken is missing");
+  }
+
+  // Through a whole document: o = if(i, e[, ELSE]) for each set of
+  // attributes; i and e are integers, the ELSE part a Constant 3 or
+  // pow(i, -1), which is invalid for i = 0 (D8) and so shows whether it was
+  // evaluated.
+  const std::string three = R"(<Constant dataType="integer">3</Constant>)";
+  const std::string invalid_else =
+      R"(<Apply function="pow"><FieldRef field="i"/><Constant dataType="integer">-1</Constant></Apply>)";
+  auto if_apply = [](const std::string& attrs, const std::string& otherwise) {
+    return R"(<Apply function="if")" + attrs + R"(><FieldRef field="i"/><FieldRef field="e"/>)" + otherwise +
+           "</Apply>";
+  };
+  const std::vector<std::string> extras = {"", R"( mapMissingTo="5")", R"( defaultValue="7")",
+                                           R"( mapMissingTo="5" defaultValue="7")"};
+  for (const std::string& extra : extras) {
+    const std::string rule = "if" + extra + ": ";
+    const bool mm = extra.find("mapMissingTo") != std::string::npos;
+    const bool dv = extra.find("defaultValue") != std::string::npos;
+    const std::string missing_input = mm ? "5" : dv ? "7" : "N/A";
+    const std::string missing_result = dv ? "7" : "N/A";
+    CHECK(apply_output(if_apply(extra, three), "", "2") == missing_input,
+          rule + "a missing condition is a missing input (D3): mapMissingTo, else missing, then defaultValue");
+    CHECK(apply_output(if_apply(extra, ""), "", "2") == missing_input,
+          rule + "a missing condition without ELSE is a missing input");
+    CHECK(apply_output(if_apply(extra, three), "1", "2") == "2", rule + "a true condition gives THEN");
+    CHECK(apply_output(if_apply(extra, three), "1", "") == missing_input,
+          rule + "a missing THEN taken is a missing input: mapMissingTo, else missing, then defaultValue");
+    CHECK(apply_output(if_apply(extra, three), "0", "2") == "3", rule + "a false condition gives ELSE");
+    CHECK(apply_output(if_apply(extra, three), "0", "") == "3",
+          rule + "a missing THEN not taken is not an input: ELSE");
+    CHECK(apply_output(if_apply(extra, ""), "0", "2") == missing_result,
+          rule + "false without ELSE is a missing result, not a missing input: defaultValue, never mapMissingTo");
+    CHECK(apply_output(if_apply(extra, invalid_else), "1", "2") == "2",
+          rule + "the ELSE not taken is not evaluated (its invalid pow raises nothing)");
+    CHECK(apply_output(if_apply(extra, invalid_else), "0", "2") ==
+              R"(ERROR: Apply "pow" in DerivedField "p": invalid result (invalidValueTreatment="returnInvalid"))",
+          rule + "the ELSE taken is evaluated (its invalid pow makes the record invalid)");
+  }
+  // The branch taken keeps its Value: a string passes through as it came in.
+  CHECK(apply_output(R"(<Apply function="if" defaultValue="none"><FieldRef field="i"/><FieldRef field="t"/>)"
+                     R"(<FieldRef field="r"/></Apply>)",
+                     "1", "", "abc", "b", "string") == "abc",
+        "if over strings: THEN");
+  CHECK(apply_output(R"(<Apply function="if" defaultValue="none"><FieldRef field="i"/><FieldRef field="t"/></Apply>)",
+                     "0", "", "abc", "b", "string") == "none",
+        "if over strings: false without ELSE gives defaultValue");
+}
+
 static void arg_buffer() {
   for (std::size_t n : {std::size_t{0}, std::size_t{3}, fn::ArgBuffer::kInline, fn::ArgBuffer::kInline + 3}) {
     fn::ArgBuffer args(n);
@@ -466,6 +533,7 @@ int main() {
   kernels();
   legacy_switches(indexer);
   apply_output_table();
+  if_lazy();
   arg_buffer();
   std::cout << checks - failures << "/" << checks << " checks passed" << std::endl;
   return failures == 0 ? 0 : 1;

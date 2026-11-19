@@ -38,8 +38,9 @@
  * function inputs are missing"), never for an invalid result.
  *
  * P4.1 (design commit) kept today's semantics exactly, including where they
- * departed from that output table (legacy::B22, removed by P4.2;
- * legacy::D3, kernels.h). It replaces core/builtinfunctions.h's
+ * departed from that output table (legacy::B22, removed by P4.2), and `if`
+ * evaluated apart (legacy::D3, removed by P4.3: its laziness is now the
+ * table's MissingRule::LazyIf, step 1, and its result a kernel). It replaces core/builtinfunctions.h's
  * BuiltInFunction, a std::function per Apply called with a
  * std::vector<Value> allocated per record: the arguments are now built in
  * place in an ArgBuffer (inline storage for up to four, §4.3), and the
@@ -157,27 +158,37 @@ class ApplyNode : public Expression {
   const Signature& signature() const { return *sig_; }
 
   inline Value eval(const Sample& sample) const override {
-    if constexpr (legacy::D3)
-      if (missing_ == MissingRule::LazyIf) return eval_if(sample);
-
-    // 1. The inputs.
+    // 1. The inputs, by the function's MissingRule: every argument, in
+    // order; for `if` (LazyIf), the condition, then the argument it takes
+    // (adapter::if_taken, fn/kernels.h), the other branch not evaluated.
     const std::size_t n = arguments_.size();
     ArgBuffer args(n);
     bool missing_input = false;
-    for (std::size_t i = 0; i < n; i++)
-      missing_input |= args.emplace([&] { return arguments_[i]->eval(sample); }).is_missing();
-
-    // 2. A missing input: mapMissingTo, for every function but isMissing and
-    // isNotMissing, which receive it; else, but for the aggregates, which
-    // skip it, a missing result, then defaultValue.
-    if (missing_input && missing_ != MissingRule::Receive) {
-      if (has_map_missing_to_) return map_missing_to_;
-      if (missing_ != MissingRule::SkipAggregate) return has_default_ ? default_value_ : Value();
+    if (missing_ == MissingRule::LazyIf) {
+      const Value& condition = args.emplace([&] { return arguments_[0]->eval(sample); });
+      if (condition.is_missing()) {
+        missing_input = true;
+      } else if (const std::size_t taken = adapter::if_taken(condition, n); taken < n) {
+        missing_input = args.emplace([&] { return arguments_[taken]->eval(sample); }).is_missing();
+      }
+    } else {
+      for (std::size_t i = 0; i < n; i++)
+        missing_input |= args.emplace([&] { return arguments_[i]->eval(sample); }).is_missing();
     }
 
-    // 3. The function.
+    // 2. A missing input: mapMissingTo, for every function but isMissing and
+    // isNotMissing, which receive it; else a missing result, then
+    // defaultValue: at once for the functions that propagate it, from the
+    // kernel for the aggregates, which skip it, and for `if`, whose result
+    // is then its missing input (if_then_else).
+    if (missing_input && missing_ != MissingRule::Receive) {
+      if (has_map_missing_to_) return map_missing_to_;
+      if (missing_ == MissingRule::Propagate) return has_default_ ? default_value_ : Value();
+    }
+
+    // 3. The function, over the inputs.
     Value result;
-    if (kernel_(bound_, args.data(), n, result) == Status::Invalid) {
+    if (kernel_(bound_, args.data(), args.size(), result) == Status::Invalid) {
       // 4. An invalid result: asMissing "replaces the invalid value with a
       // missing value" (then step 5's defaultValue, not mapMissingTo: no
       // input is missing); returnInvalid, and asIs, which "in the context of
@@ -298,34 +309,6 @@ class ApplyNode : public Expression {
     using cpmml::bind::TypeId;
     const TypeId type = cpmml::bind::expression_type(node).value_or(TypeId::Double);
     return cpmml::bind::slot_constant(node, attribute, node.required_attribute(attribute), type, slot);
-  }
-
-  // `if` (design commit P2.8b4; §4.2 "if laziness", §4.3 LazyIf; D3, D24),
-  // evaluated here while legacy::D3 stands (P4.3 moves the rule into the
-  // kernel). BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The
-  // ELSE part is optional. If the ELSE part is absent and the boolean value
-  // is false then a missing value is returned." Read as a conditional, the
-  // inputs are the condition and the branch it takes (§4.2), evaluated in
-  // that order; the other branch is not evaluated, so its missing value is
-  // not an input. A missing condition is a missing input (D3): mapMissingTo,
-  // else a missing result, then defaultValue. A false condition without an
-  // ELSE part is a missing result, not a missing input: defaultValue applies
-  // and mapMissingTo does not. The condition is true when the double it
-  // holds is not 0. JPMML 1.7.7 agrees on every case but the missing
-  // condition without mapMissingTo, which it refuses
-  // (MissingArgumentException; D3).
-  inline Value eval_if(const Sample& sample) const {
-    const Value condition = arguments_[0]->eval(sample);
-    if (condition.is_missing()) {
-      if (has_map_missing_to_) return map_missing_to_;
-      return has_default_ ? default_value_ : Value();
-    }
-    const size_t taken = condition.as_double() != 0.0 ? 1 : 2;
-    if (taken >= arguments_.size()) return has_default_ ? default_value_ : Value();
-    const Value result = arguments_[taken]->eval(sample);
-    if (!result.is_missing()) return result;
-    if (has_map_missing_to_) return map_missing_to_;
-    return has_default_ ? default_value_ : result;
   }
 
   const Signature* sig_ = nullptr;
