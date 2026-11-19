@@ -1,0 +1,4 @@
+age,income,debt,score,pred,rc1,rc2,rc3
+45,200,60,62.0,62.0,RC_DEBT,N/A,N/A
+20,200,10,56.0,56.0,RC_YOUNG,RC_DEBT,N/A
+45,40,10,34.0,34.0,RC_AGE,RC_INCOME,RC_DEBT

@@ -12,6 +12,12 @@ Two more, `fix_mapmissing_string_slot_equal` and
 `fix_mapmissing_string_slot_numeric`, are known gaps that design commit
 P2.2 left for P4.7 (notes 8 and 9). `fix_segment_outer_localtrans_derived`
 is bug B14, found by design item P2.8c and left for P7b.3 (note 10).
+Four more were added by design item P3.4b (coverage fixtures for
+ComplexPartialScore, the SVM alternate category and the GRM offset, base
+28fbb83), each the rows on which cPMML disagrees with JPMML and the spec:
+`fix_scorecard_complex_score_missing` (B49), `fix_scorecard_reasoncode_negative`
+(B50), `fix_grm_offset_general_linear` (B51) and `fix_svm_binary_no_alternate`
+(B48) (notes 11-14).
 
 Layout: `model/<name>.zip` (one `<name>.pmml` inside) and
 `dataset/<name>.csv`, the same layout as `test/data/`, with LF line endings.
@@ -88,6 +94,10 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_builtin_text_concat | P4.6 | **yes: every double and float cell** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23) | rows 1-5, 7-9 scored, differing only in number text (Java vs XQuery, the D17 change); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`) |
 | fix_builtin_text_formatnumber | P4.9 | add the float-narrowing column (design) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`) | every row refused (`%i` pattern; missing input): spec-derived throughout (POSIX printf) |
 | fix_segment_outer_localtrans_derived | P7b.3 | no (note 10) | FAIL `predicted:   expected: 1553.0` (base 9123c4f, row 1) | all 3 rows agree |
+| fix_scorecard_complex_score_missing | a fix item before P5, P8.9 at the latest (note 11) | no | FAIL `predicted: 29.0  expected: no prediction` (base 28fbb83, row 2) | row 1 agrees; rows 2-3 refused (UndefinedResultException `Undefined result`), N/A here |
+| fix_scorecard_reasoncode_negative | P8.9 (note 12) | no | FAIL `output 'rc3': predicted: RC_INCOME  expected: no value` (base 28fbb83, row 1) | all 3 rows agree |
+| fix_grm_offset_general_linear | P8.3 (note 13) | no | FAIL `predicted: 1.9  expected: 0.9` (base 28fbb83, row 2) | all 7 rows agree |
+| fix_svm_binary_no_alternate | P8.5, after a decision (note 14) | **expectation is a load error** | loads and scores `pos`, `neg`, `pos` (`--dump`, base 28fbb83; no `LOAD-ERROR` cell); `pmml_tester` itself stops at `output column 'cls' not found in fixture CSV` | rows 1, 3 refused (MissingAttributeException `Required attribute SupportVectorMachine@alternateTargetCategory is not defined`); row 2 scores `neg` |
 
 ### Notes
 
@@ -244,3 +254,64 @@ JPMML gives up on the whole file at the first row it refuses.
    field is an input of the segment and is not instantiated again. JPMML
    refuses a missing `x` (`Function "round" cannot accept missing value`),
    so the fixture has no missing row.
+11. **fix_scorecard_complex_score_missing** (design item P3.4b, base
+   28fbb83; bug B49). The model is `fix_scorecard_complex_partial_score`'s.
+   Row 2 (age 45, income missing) takes the Attribute whose
+   ComplexPartialScore is `income / 8`; row 3 (age and income missing)
+   takes the `isMissing(age)` Attribute, `income / 10`. Scorecard.html:
+   "Whenever element ComplexPartialScore is used, the actual partial score
+   is the value returned by the EXPRESSION". That value is missing, and the
+   page gives no replacement, so the score has no value. JPMML 1.7.7 throws
+   UndefinedResultException on both rows, written N/A as
+   `fix_scorecard_reasoncode` writes its own UndefinedResultException row.
+   cPMML adds `as_double()` of the missing Value, 0, and scores 29.0. The
+   fix belongs before P5, because P5 changes what a missing Value holds
+   under `as_double()`, and a behaviour-preserving swap would have to keep
+   this 0 on purpose.
+12. **fix_scorecard_reasoncode_negative** (P3.4b, base 28fbb83; bug B50).
+   The same model. A reason code whose total points missed is below 0 is
+   not returned. Scorecard.html, on its own example: the partial score of
+   "RC3" "is higher than the baseline score ("26 > 10") and so it is
+   meaningless in explaining a possible adverse decision", and "only two
+   partial scores are lower than their respective baselineScores". JPMML
+   1.7.7 drops each code whose total is below 0 and keeps a total of 0
+   (row 3, RC_DEBT). cPMML ranks every code, so row 1 returns RC_AGE (-5)
+   and RC_INCOME (-8) at ranks 2 and 3, and row 2 RC_INCOME (-8) at rank
+   3. The page's next sentence ("the second and third reason codes would
+   be populated with the same code") is not followed by JPMML, and
+   `fix_scorecard_reasoncode` already expects no value for an absent rank;
+   this fixture keeps that.
+13. **fix_grm_offset_general_linear** (P3.4b, base 28fbb83; bug B51).
+   `fix_grm_offset_variable` with `modelType="generalLinear"` and the
+   identity link. GeneralRegression.html: offsetVariable "if present, this
+   variable is used during scoring generalizedLinear, ordinalMultinomial, or
+   multinomialLogistic models" (offsetValue has the same sentence).
+   generalLinear is not one of them, and JPMML 1.7.7 does not read the
+   offset there: y = 0.5 + 0.2x, also when the offset is missing (row 7).
+   cPMML adds the offset for every model type (rows 2-5) and gives no
+   prediction on row 7. P8.3 also decides whether such an offset is
+   ignored silently or with a binder warning (project rule: no silent
+   fallbacks).
+14. **fix_svm_binary_no_alternate** (P3.4b, base 28fbb83; bug B48). One
+   SupportVectorMachine, OneAgainstOne, `targetCategory="neg"` and no
+   `alternateTargetCategory`. The target DataField declares `pos` and
+   `neg`. SupportVectorMachine.html: alternateTargetCategory "is required
+   in case of binary classification models with only one
+   SupportVectorMachine element". cPMML loads the document and takes the
+   first other Value of the target, `pos`, as the alternate category
+   (`src/svmmodel/svmmodel.h:154`). JPMML 1.7.7 loads it too, but throws
+   MissingAttributeException on every record that needs the alternate. The
+   spec's answer is a load error. A fixture CSV cannot state one, so the
+   dataset holds the three inputs only, and the registering commit adds a
+   `test/strict_parse.cc` check instead of moving the files to
+   `test/data/`. Refusing it makes a document that loads today stop
+   loading, so the user decides first. The alternative is to keep the
+   inference with a binder warning and a D-rule; then the dataset gains
+   the `cls` column from the spec's threshold rule ("If maxWins is true
+   and the prediction is larger than the threshold or maxWins is false and
+   the prediction is smaller than the threshold, the class label is the
+   targetCategory attribute, otherwise, it is the alternateTargetCategory
+   attribute"; maxWins false, threshold 0, decision x1 - x2 = 3, -3, 0):
+   `pos`, `neg`, `pos`. This is the
+   only document that reaches `svmmodel.h:154`, so until then no
+   registered fixture covers that line.
