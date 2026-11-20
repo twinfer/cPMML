@@ -194,6 +194,9 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
         if (field.invalidvalue_treatmentmethod.value != Invalid::AS_IS) put(field.handle_invalid(value));
       };
 
+      // A categorical string's trailing blanks are dropped (P6.6), also from
+      // the text the inner model reads.
+      if (found != flat.end()) found->second.resize(field.input_text(found->second).size());
       if (found == flat.end() || found->second.empty() || field.is_missing_marker(found->second)) {
         put(field.handle_missing());
         continue;

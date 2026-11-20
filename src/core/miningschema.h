@@ -95,7 +95,8 @@ class MiningSchema {
           sample.change_value(miningfield.index, miningfield.handle_missing());
           continue;
         }
-        const std::string& raw = found->second;
+        // A categorical string input without its trailing blanks (P6.6).
+        const std::string_view raw = miningfield.input_text(found->second);
         // A token the DataDictionary declared as a missing marker is missing
         // input, not data: it takes the same path as an absent field.
         if (raw.empty() || miningfield.is_missing_marker(raw)) {

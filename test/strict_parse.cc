@@ -2106,6 +2106,96 @@ static void boolean_mixed() {
   CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="d"/><Constant dataType="string">3</Constant></Apply>)")).empty());
 }
 
+// ---- P6.6: trailing blanks of categorical string inputs --------------------
+//
+// DataDictionary.html: "Trailing blanks in categorical input values are not
+// significant, and categorical values in PMML must not have trailing blanks.
+// Leading blanks are significant." BuiltinFunctions.html trimBlanks: "Blanks
+// include tab and newline characters." The XML blanks (space, tab, LF, CR)
+// at the end of the input of a categorical string field are dropped; the
+// fixtures cannot carry LF or CR (the CSV reader splits lines and drops CR),
+// so they are checked here, with the residual's blanks-only actual value.
+static void trailing_blanks() {
+  const std::string document = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="c" optype="categorical" dataType="string"><Value value="a"/><Value value="b"/></DataField>
+    <DataField name="o" optype="ordinal" dataType="string"><Value value="a"/><Value value="b"/></DataField>
+    <DataField name="m" optype="categorical" dataType="string"><Value value="NA" property="missing"/></DataField>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema>
+      <MiningField name="c"/><MiningField name="o"/><MiningField name="m" missingValueReplacement="R"/>
+      <MiningField name="y" usageType="target"/>
+    </MiningSchema>
+    <Output>
+      <OutputField name="o_m" optype="categorical" dataType="string" feature="transformedValue"><FieldRef field="m"/></OutputField>
+      <OutputField name="o_c" optype="categorical" dataType="string" feature="transformedValue"><FieldRef field="c"/></OutputField>
+    </Output>
+    <RegressionTable intercept="0">
+      <CategoricalPredictor name="c" value="a" coefficient="1"/><CategoricalPredictor name="c" value="b" coefficient="2"/>
+      <CategoricalPredictor name="o" value="a" coefficient="10"/><CategoricalPredictor name="o" value="b" coefficient="20"/>
+    </RegressionTable>
+  </RegressionModel>
+</PMML>)";
+  const cpmml::Model model = load(document);
+  const auto input = [](const std::string& c, const std::string& o, const std::string& m) {
+    cpmml::Input in;
+    in["c"] = c;
+    in["o"] = o;
+    in["m"] = m;
+    return in;
+  };
+  for (const std::string& c : {"a", "a ", "a\n", "a\r", "a\r\n", "a \t\r\n"}) {
+    const cpmml::Result r = model.evaluate(input(c, "b", "x"));
+    CHECK(r.as_double() == 21);
+    CHECK(r.str_outputs()["o_c"] == "a");
+  }
+  // Leading blanks are significant: " a" is no Value of c (returnInvalid).
+  CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input(" a", "b", "x")); }));
+  // An ordinal field keeps its text: "b " is no Value of o.
+  CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a", "b ", "x")); }));
+  CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a", "b\n", "x")); }));
+  // The marker NA, with trailing blanks; blanks only is an empty cell.
+  for (const std::string& m : {"NA", "NA ", "NA\n", "NA\r\n", "", " \n", "\r"})
+    CHECK(model.evaluate(input("a", "b", m)).str_outputs()["o_m"] == "R");
+  CHECK(model.evaluate(input("a", "b", "x\n")).str_outputs()["o_m"] == "x");
+  CHECK(model.evaluate(input("a", "b", " x")).str_outputs()["o_m"] == " x");
+  // A form feed or NBSP is no XML blank: kept, and no Value of c.
+  CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a\f", "b", "x")); }));
+  CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a\xc2\xa0", "b", "x")); }));
+
+  // The residual's actual value of a categorical string target: blanks only
+  // is the absent value an empty cell is.
+  const cpmml::Model clf = load(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="t" optype="categorical" dataType="string"><Value value="a"/><Value value="b"/></DataField>
+  </DataDictionary>
+  <TreeModel functionName="classification">
+    <MiningSchema><MiningField name="x"/><MiningField name="t" usageType="target"/></MiningSchema>
+    <Output><OutputField name="r" optype="continuous" dataType="double" feature="residual" targetField="t"/></Output>
+    <Node score="a"><True/>
+      <ScoreDistribution value="a" recordCount="40"/><ScoreDistribution value="b" recordCount="10"/>
+    </Node>
+  </TreeModel>
+</PMML>)");
+  const auto residual = [&](const std::string& t) {
+    cpmml::Input in;
+    in["x"] = std::string("1");
+    in["t"] = t;
+    const auto out = clf.evaluate(in).num_outputs();
+    const auto it = out.find("r");
+    return it == out.end() ? std::string("none") : std::to_string(it->second);
+  };
+  CHECK(residual("a\r\n") == residual("a"));
+  CHECK(residual("b\n") == residual("b"));
+  CHECK(residual("a") != residual("b"));
+  CHECK(residual(" \t\n") == residual(""));
+}
+
 int main() {
   bound_predicates();
   boolean_mixed();
@@ -2127,6 +2217,7 @@ int main() {
   boolean_arguments();
   surrogate_errors();
   writer_round_trip();
+  trailing_blanks();
 
   if (failures) std::cerr << failures << " check(s) failed\n";
   return failures;

@@ -57,7 +57,7 @@ class DataField {
   //     "Equality is identity, except that 0 = −0 (although they are not
   //     identical) and NaN ≠ NaN ... 0 and −0 are thus equivalent for
   //     purposes of enumerations".
-  std::set<std::string> missing_markers;
+  std::set<std::string, std::less<>> missing_markers;  // transparent: inputs are looked up as views
   // The markers that are values of the field's (non-string) type, read in it;
   // a marker that is not one ("?" on a double field) is matched as text only.
   // NaN is never one: NaN ≠ NaN.

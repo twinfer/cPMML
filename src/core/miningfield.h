@@ -10,6 +10,7 @@
 #include <cmath>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "fieldusagetype.h"
@@ -119,9 +120,33 @@ class MiningField : public DataField {
 
   inline Value handle_missing() const { return hasMissingReplacement ? missingvalue_replacement : Value(); }
 
+  // The text of an input as the field reads it (P6.6). DataDictionary.html:
+  // "Trailing blanks in categorical input values are not significant, and
+  // categorical values in PMML must not have trailing blanks. Leading blanks
+  // are significant." So for a field whose optype (the MiningField's, else
+  // the DataField's) is categorical and whose dataType is string, the
+  // trailing XML blanks (#x20, #x9, #xA, #xD; BuiltinFunctions.html
+  // trimBlanks: "Blanks include tab and newline characters") are dropped
+  // before anything reads the text: the missing markers, the empty-input
+  // rule, the field's Values and every predicate, so "a " is the input "a",
+  // "NA " the marker "NA" and "   " the same input as "". Leading blanks are
+  // kept, and an ordinal or continuous field keeps its text as given (the
+  // sentence names categorical values). Every other dataType reads its text
+  // by the XSD lexical rules, whose whiteSpace collapse already drops blanks
+  // at either end (lexical.h). JPMML 1.7.7 keeps trailing blanks (D49).
+  // A view of `raw`, which must outlive it.
+  inline std::string_view input_text(const std::string& raw) const {
+    std::string_view text(raw);
+    if (text.empty() || !lexical::is_xml_space(text.back()) || datatype.value != DataType::DataTypeValue::STRING ||
+        optype.value != OpType::OpTypeValue::CATEGORICAL)
+      return text;
+    while (!text.empty() && lexical::is_xml_space(text.back())) text.remove_suffix(1);
+    return text;
+  }
+
   // True when the raw input token is one the DataDictionary declared as
   // standing for a missing value (<Value property="missing">).
-  inline bool is_missing_marker(const std::string& raw) const {
+  inline bool is_missing_marker(std::string_view raw) const {
     return !missing_markers.empty() && missing_markers.find(raw) != missing_markers.cend();
   }
 
@@ -208,7 +233,7 @@ class MiningField : public DataField {
   // field "cannot accept invalid value NaN"); asIs keeps the NaN.
   enum class InputStatus { VALID, INVALID, MALFORMED };
 
-  inline InputStatus parse_input(const std::string& raw, Value& parsed) const {
+  inline InputStatus parse_input(std::string_view raw, Value& parsed) const {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING:
         parsed = Value::string(raw);
@@ -246,14 +271,14 @@ class MiningField : public DataField {
     return InputStatus::MALFORMED;  // unreachable: the switch is exhaustive
   }
 
-  inline Value handle_malformed(const std::string& raw) const {
+  inline Value handle_malformed(std::string_view raw) const {
     switch (invalidvalue_treatmentmethod.value) {
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:
-        throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + raw + "\" is not a valid " +
-                                           to_lower(datatype.to_string()));
+        throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + std::string(raw) +
+                                           "\" is not a valid " + to_lower(datatype.to_string()));
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_IS:
-        throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + raw + "\" is not a valid " +
-                                           to_lower(datatype.to_string()) +
+        throw cpmml::InvalidValueException("Invalid value for field " + name + ": \"" + std::string(raw) +
+                                           "\" is not a valid " + to_lower(datatype.to_string()) +
                                            " and cannot be used asIs");
       default:
         return handle_invalid(Value());

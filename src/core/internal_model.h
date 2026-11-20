@@ -494,10 +494,15 @@ class InternalModel {
       // value of that type fails the record (or takes the target's
       // invalidValueTreatment) only when the model declares a residual; a
       // model that never reads the column does not reject it.
-      if (it != sample.end() && !it->second.empty()) {
-        const MiningField& actual_field = mining_schema.target;
+      //
+      // A categorical string's trailing blanks are dropped first (P6.6), so
+      // an actual value of blanks only is the blank cell.
+      const MiningField& actual_field = mining_schema.target;
+      const std::string_view actual_text =
+          it != sample.end() ? actual_field.input_text(it->second) : std::string_view();
+      if (!actual_text.empty()) {
         Value& actual = internal_sample[mining_schema.target_index].value;
-        switch (actual_field.parse_input(it->second, actual)) {
+        switch (actual_field.parse_input(actual_text, actual)) {
           case MiningField::InputStatus::VALID:
             break;
           case MiningField::InputStatus::INVALID:
