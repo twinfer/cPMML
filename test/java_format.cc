@@ -122,10 +122,8 @@ int main() {
   // Value: a missing one is empty, a string its text, a number a Java double.
   check("format missing Value", std::format("{}", Value()), "");
   check("format numeric Value", std::format("{}", Value(2.0)), "2.0");
-  Value text;
-  text.set_missing(false);
-  text.set_text("abc");
-  check("format string Value", std::format("{}", text), "abc");
+  const cpmml::StringScope strings(cpmml::StringScope::Loading{}, std::make_shared<cpmml::DocumentStrings>());
+  check("format string Value", std::format("{}", Value::string("abc")), "abc");
 #else
   std::cout << "no <format> in this standard library: std::formatter checks skipped" << std::endl;
 #endif

@@ -277,20 +277,20 @@ static void legacy_switches(Indexer& indexer) {
   // B2 (P6): uppercase keeps its argument's string code.
   {
     Value out;
-    const Value abc("abc", DataType::DataTypeValue::STRING);
+    const Value abc = Value::string("abc");
     const std::vector<Value> args{abc};
     CHECK(call("uppercase", args, out) == fn::Status::Ok && out.text() == "ABC", "uppercase(abc) is ABC");
     CHECK(out.as_double() == abc.as_double(), "legacy::B2: uppercase keeps the argument's code");
   }
   // replace and matches: a pattern std::regex refuses is an invalid result.
   {
-    const Value abc("abc", DataType::DataTypeValue::STRING);
-    const Value bad("(", DataType::DataTypeValue::STRING);
-    const Value x("x", DataType::DataTypeValue::STRING);
+    const Value abc = Value::string("abc");
+    const Value bad = Value::string("(");
+    const Value x = Value::string("x");
     CHECK(invalid("replace", {abc, bad, x}), "replace with pattern ( is invalid");
     CHECK(invalid("matches", {abc, bad}), "matches with pattern ( is invalid");
     Value out;
-    CHECK(call("replace", {abc, Value("b", DataType::DataTypeValue::STRING), x}, out) == fn::Status::Ok &&
+    CHECK(call("replace", {abc, Value::string("b"), x}, out) == fn::Status::Ok &&
               out.text() == "axc",
           "replace(abc, b, x) is axc");
   }
@@ -400,10 +400,10 @@ static std::string concat_text(std::vector<cpmml::types::TypeId> types, const st
   Value out;
   if (call("concat", args, out, bound) != fn::Status::Ok || out.is_missing())
     throw std::logic_error("concat: no value");
-  return out.text();
+  return std::string(out.text());
 }
 static std::string concat_one(cpmml::types::TypeId type, const Value& v) {
-  return concat_text({type, cpmml::types::TypeId::String}, {v, Value("|", DataType::DataTypeValue::STRING)});
+  return concat_text({type, cpmml::types::TypeId::String}, {v, Value::string("|")});
 }
 static void concat_casts(Indexer& indexer) {
   using cpmml::types::TypeId;
@@ -438,18 +438,18 @@ static void concat_casts(Indexer& indexer) {
   for (const double d : {3.5, inf, -inf, std::nan(""), 9223372036854775808.0}) {
     fn::Bound bound;
     bound.argument_type = {TypeId::Integer, TypeId::String};
-    CHECK(invalid("concat", {Value(d), Value("|", DataType::DataTypeValue::STRING)}, bound),
+    CHECK(invalid("concat", {Value(d), Value::string("|")}, bound),
           "B17: concat of an integer slot holding " + std::to_string(d) + " is invalid");
   }
   // A string is its text, as it came in: an empty one, one that spells a
   // number, and a numeric_text one (§9, decided 2026-11-18: string readers
   // get the text).
-  CHECK(concat_one(TypeId::String, Value("ab", DataType::DataTypeValue::STRING)) == "ab|", "concat of a string");
-  CHECK(concat_one(TypeId::String, Value("", DataType::DataTypeValue::STRING)) == "|", "concat of the empty string");
-  CHECK(concat_one(TypeId::String, Value("2.50", DataType::DataTypeValue::STRING)) == "2.50|",
+  CHECK(concat_one(TypeId::String, Value::string("ab")) == "ab|", "concat of a string");
+  CHECK(concat_one(TypeId::String, Value::string("")) == "|", "concat of the empty string");
+  CHECK(concat_one(TypeId::String, Value::string("2.50")) == "2.50|",
         "a string that spells a number keeps its text");
   {
-    Value five("5", DataType::DataTypeValue::STRING);
+    Value five = Value::string("5");
     five.mark_numeric_text();
     CHECK(concat_one(TypeId::String, five) == "5|", "a numeric_text string keeps its text");
   }
@@ -464,18 +464,18 @@ static void concat_casts(Indexer& indexer) {
   // Every argument, in order, each by its own type.
   CHECK(concat_text({TypeId::Integer, TypeId::String, TypeId::Double, TypeId::String, TypeId::Float, TypeId::String,
                      TypeId::Boolean},
-                    {Value(2000.0), Value("|", DataType::DataTypeValue::STRING), Value(2.0),
-                     Value("|", DataType::DataTypeValue::STRING), Value(0.1),
-                     Value("|", DataType::DataTypeValue::STRING), Value(1.0)}) == "2000|2.0|0.1|true",
+                    {Value(2000.0), Value::string("|"), Value(2.0),
+                     Value::string("|"), Value(0.1),
+                     Value::string("|"), Value(1.0)}) == "2000|2.0|0.1|true",
         "concat(integer 2000, double 2.0, float 0.1, boolean true)");
   {
-    // The result is a string the kernel built, packed with the Indexer's code.
+    // The result is a string the kernel built, packed with the pool's code.
     fn::Bound bound;
     bound.argument_type = {TypeId::Integer, TypeId::String};
     Value out;
-    CHECK(call("concat", {Value(7.0), Value("|", DataType::DataTypeValue::STRING)}, out, bound) == fn::Status::Ok &&
-              out.text() == "7|" && out.as_double() == indexer.get_string_value("7|"),
-          "concat packs its text with the Indexer's code");
+    CHECK(call("concat", {Value(7.0), Value::string("|")}, out, bound) == fn::Status::Ok &&
+              out.text() == "7|" && out.as_double() == Value::string("7|").as_double(),
+          "concat packs its text with the pool's code");
   }
   // A call not bound to its arguments' types is a programming error.
   CHECK(message_of<std::logic_error>([] { concat_text({}, {Value(1.0), Value(2.0)}); }) ==
@@ -810,7 +810,7 @@ static void domains() {
   // substring (B41): "startPos and length must be positive integers"; within
   // that, XQuery fn:substring: "The characters returned do not extend beyond
   // $sourceString".
-  const Value abc("abc", DataType::DataTypeValue::STRING);
+  const Value abc = Value::string("abc");
   CHECK(invalid("substring", {abc, Value(0.0), Value(1.0)}) && invalid("substring", {abc, Value(-1.0), Value(2.0)}),
         "B41: a startPos below 1 is invalid");
   CHECK(invalid("substring", {abc, Value(1.0), Value(0.0)}) && invalid("substring", {abc, Value(2.0), Value(-1.0)}),
@@ -1112,7 +1112,7 @@ static void format_number_kernel(Indexer& indexer) {
   const auto kernel = [&](t::TypeId input, double v, const std::string& pattern, Value& out) {
     fn::Bound bound;
     bound.argument_type = {input, t::TypeId::String};
-    return call("formatNumber", {Value(v), Value(pattern, DataType::DataTypeValue::STRING)}, out, bound);
+    return call("formatNumber", {Value(v), Value::string(pattern)}, out, bound);
   };
   {
     Value out;
@@ -1127,8 +1127,8 @@ static void format_number_kernel(Indexer& indexer) {
     CHECK(kernel(t::TypeId::Double, 2.5, "%s", out) == fn::Status::Invalid, "a field pattern that cannot be applied is invalid");
     CHECK(kernel(t::TypeId::Double, 2.5, "%d", out) == fn::Status::Invalid, "a field pattern: %d of 2.5 is invalid");
     CHECK(kernel(t::TypeId::Double, 2.5, "%.1f", out) == fn::Status::Ok && out.text() == "2.5" &&
-              out.as_double() == indexer.get_string_value("2.5"),
-          "the result is packed with the Indexer's code");
+              out.as_double() == Value::string("2.5").as_double(),
+          "the result is packed with the pool's code");
     fn::Bound pattern_bound;
     pattern_bound.argument_type = {t::TypeId::Double, t::TypeId::Integer};
     CHECK(call("formatNumber", {Value(2.5), Value(5.0)}, out, pattern_bound) == fn::Status::Ok && out.text() == "5",
@@ -1138,14 +1138,14 @@ static void format_number_kernel(Indexer& indexer) {
     auto p = std::make_shared<fn::scalar::NumberPattern>();
     fn::scalar::parse_number_pattern("<%+.1e>", *p);
     parsed.number_pattern = p;
-    CHECK(call("formatNumber", {Value(2.5), Value("ignored %s", DataType::DataTypeValue::STRING)}, out, parsed) ==
+    CHECK(call("formatNumber", {Value(2.5), Value::string("ignored %s")}, out, parsed) ==
                   fn::Status::Ok &&
               out.text() == "<+2.5e+00>",
           "a pattern parsed at load is the one applied");
   }
   CHECK(message_of<std::logic_error>([] {
           Value out;
-          call("formatNumber", {Value(1.0), Value("%d", DataType::DataTypeValue::STRING)}, out);
+          call("formatNumber", {Value(1.0), Value::string("%d")}, out);
         }) == "formatNumber: the call was not bound to its argument types",
         "an unbound formatNumber throws");
 }
@@ -1247,7 +1247,7 @@ static void if_lazy() {
   CHECK(fn::adapter::if_taken(Value(1.0), 2) == 1, "if_taken: THEN without ELSE");
   {
     Value out;
-    CHECK(call("if", {Value(1.0), Value("abc", DataType::DataTypeValue::STRING)}, out) == fn::Status::Ok &&
+    CHECK(call("if", {Value(1.0), Value::string("abc")}, out) == fn::Status::Ok &&
               out.text() == "abc",
           "if_then_else: the branch taken's value");
     Value none;
@@ -1367,7 +1367,7 @@ static void declared_casts(Indexer& indexer) {
   auto text_of = [&](TypeId from, double d) {
     Value v(d);
     if (!fn::DeclaredCast(from, TypeId::String).apply(v)) return std::string("<fails>");
-    return v.text();
+    return std::string(v.text());
   };
   CHECK(text_of(TypeId::Integer, 3) == "3", "integer 3: Long.toString");
   CHECK(text_of(TypeId::Integer, -0.0) == "0", "integer -0: 0");
@@ -1383,7 +1383,7 @@ static void declared_casts(Indexer& indexer) {
   {
     Value v(2.0);
     fn::DeclaredCast(TypeId::Double, TypeId::String).apply(v);
-    CHECK(v.as_double() == Value("2.0", DataType::DataTypeValue::STRING).as_double() && !v.has_numeric_text(),
+    CHECK(v.as_double() == Value::string("2.0").as_double() && !v.has_numeric_text(),
           "the string the cast builds is packed as the engine builds one (its text's code, no mark)");
     Value constant(5.0);
     constant.set_text("5");
@@ -1410,7 +1410,7 @@ static void declared_casts(Indexer& indexer) {
                          Parse{TypeId::Boolean, "true", true, 1}, Parse{TypeId::Boolean, "1", true, 1},
                          Parse{TypeId::Boolean, "false", true, 0}, Parse{TypeId::Boolean, "0", true, 0},
                          Parse{TypeId::Boolean, "TRUE", false, 0}, Parse{TypeId::Boolean, "yes", false, 0}}) {
-    Value v(c.text, DataType::DataTypeValue::STRING);
+    Value v = Value::string(c.text);
     const bool ok = fn::DeclaredCast(TypeId::String, c.to).apply(v);
     const std::string rule = std::string("string \"") + c.text + "\" -> " +
                              std::string(cpmml::bind::type_name(c.to)) + (c.ok ? " is a value" : " fails (Q2)");
@@ -1431,7 +1431,7 @@ static void declared_casts(Indexer& indexer) {
             "the empty string (code -1) is no " + std::string(cpmml::bind::type_name(t)) + " (item 3, D42)");
       Value code(0.0);
       CHECK(!fn::DeclaredCast(TypeId::String, t).apply(code), "the empty string (code 0) is no number or boolean");
-      Value blank("   ", DataType::DataTypeValue::STRING);
+      Value blank = Value::string("   ");
       CHECK(!fn::DeclaredCast(TypeId::String, t).apply(blank), "\"   \" collapses to the empty string: no value");
     }
     {
@@ -1439,7 +1439,7 @@ static void declared_casts(Indexer& indexer) {
       CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).failure(empty) ==
                 "the string is empty, and the empty string is not a value of type integer (§2.6, D42, Q2)",
             "the failure says the string is empty");
-      const Value x("x", DataType::DataTypeValue::STRING);
+      const Value x = Value::string("x");
       CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).failure(x) ==
                 "the value \"x\" of type string is not a value of type integer (§2.6, Q2)",
             "the failure quotes a malformed text");
@@ -1455,19 +1455,19 @@ static void declared_casts(Indexer& indexer) {
     half.set_text("2.5");
     CHECK(!fn::DeclaredCast(TypeId::String, TypeId::Integer).apply(half) && half.as_double() == 2.5,
           "... strictly: \"2.5\" is no integer");
-    Value marked = Value("7", DataType::DataTypeValue::STRING);
+    Value marked = Value::string("7");
     marked.mark_numeric_text();
     CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).apply(marked) && marked.as_double() == 7,
           "a numeric_text constant is read by its text");
     // NormContinuous mapMissingTo="INF" in a string slot has the text of its
     // Cast<string>, Infinity (bind::number_constant), which is no XSD double:
     // a numeric reader takes the number the load read (decided 2026-11-18).
-    Value infinity = Value("Infinity", DataType::DataTypeValue::STRING);
+    Value infinity = Value::string("Infinity");
     infinity.mark_numeric_text();
     CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).apply(infinity) && infinity.as_double() == inf &&
               !infinity.has_numeric_text(),
           "a numeric_text constant is its number, Infinity included");
-    Value plain = Value("Infinity", DataType::DataTypeValue::STRING);
+    Value plain = Value::string("Infinity");
     CHECK(!fn::DeclaredCast(TypeId::String, TypeId::Double).apply(plain), "the text Infinity is no XSD double");
   }
   // The record errors' reason (Q2).
@@ -1475,7 +1475,7 @@ static void declared_casts(Indexer& indexer) {
         "failure: a number");
   CHECK(to_bool.failure(2.0) == "the value 2 of type integer is not a value of type boolean (§2.6, Q2)",
         "failure: an integer is written as one");
-  CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).failure(Value("x", DataType::DataTypeValue::STRING)) ==
+  CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).failure(Value::string("x")) ==
             "the value \"x\" of type string is not a value of type double (§2.6, Q2)",
         "failure: a string");
   CHECK(message_of<std::logic_error>([] {
@@ -1611,8 +1611,7 @@ static void arg_buffer() {
   for (std::size_t n : {std::size_t{0}, std::size_t{3}, fn::ArgBuffer::kInline, fn::ArgBuffer::kInline + 3}) {
     fn::ArgBuffer args(n);
     for (std::size_t i = 0; i < n; i++)
-      args.emplace([&] { return Value("text number " + std::to_string(i) + " longer than the SSO buffer",
-                                      DataType::DataTypeValue::STRING); });
+      args.emplace([&] { return Value::string("text number " + std::to_string(i) + " longer than the SSO buffer"); });
     bool ok = args.size() == n;
     for (std::size_t i = 0; i < n; i++)
       ok = ok && args.data()[i].text() == "text number " + std::to_string(i) + " longer than the SSO buffer";
@@ -1622,7 +1621,9 @@ static void arg_buffer() {
 
 int main() {
   Indexer indexer;
-  const Value::ScopedIndexer scope(&indexer);
+  // The strings these checks make are a document's being loaded: interned in
+  // its pool, codes in the order they are made (design P5).
+  const cpmml::StringScope strings(cpmml::StringScope::Loading{}, std::make_shared<cpmml::DocumentStrings>());
   table();
   kernels();
   legacy_switches(indexer);

@@ -315,9 +315,10 @@ class MultipleModelMethod {
 #pragma omp parallel for default(shared) num_threads(NUM_THREADS)
     for (long i = 0; i < n; i++) {
       try {
-        // OMP worker threads have their own thread-local active_indexer;
-        // without this scope string values would be interned in the wrong map.
-        Value::ScopedIndexer _scope(ensemble[i].model->indexer.get());
+        // A worker thread scores in a StringScope of its own (the strings it
+        // makes are its own, in its own arena); on the calling thread it
+        // shares the record's.
+        const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *ensemble[i].model->strings);
         if (ensemble[i].predicate(sample)) slots[i].emplace(eval(ensemble[i], sample));
       } catch (...) {
         // Exceptions may not escape an OMP region (std::terminate). Keep the

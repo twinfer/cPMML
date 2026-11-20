@@ -63,7 +63,7 @@
  *     string (or any text-less string) cast to a number or boolean is an
  *     invalid record, never its string code"). At run time the empty string
  *     is a Value whose text is "" and whose double is a string code (the
- *     Indexer's code of "", -1 for a string not seen at load, or the code of
+ *     pool's code of "", -1 for a string not seen at load, or the code of
  *     the string an in-place edit emptied: trimBlanks(substring("  x", 1, 2))
  *     keeps the code of "  x", B2). This is exact because nothing else of a
  *     string type is held without text: a number or boolean document
@@ -73,7 +73,7 @@
  *     text of its Cast<string> (fn::adapter::if_then_else_text, P4.7).
  * A cast never round-trips a string through unpack/pack (decided
  * 2026-11-19 after P3): a string kept is the Value it came in as, and only a
- * string the cast builds is packed (Value(text, STRING)).
+ * string the cast builds is packed (Value::string).
  *
  * Identity costs nothing: Op::None, which the caller tests before calling.
  */
@@ -192,7 +192,7 @@ class DeclaredCast {
     if (from == TypeId::String && v.text().empty() && !v.has_numeric_text())
       return "the string is empty, and the empty string is not a value of type " + std::string(type_label(to)) +
              " (§2.6, D42, Q2)";
-    return failure_text(from == TypeId::String ? "\"" + v.text() + "\"" : value_text(v.as_double()));
+    return failure_text(from == TypeId::String ? "\"" + std::string(v.text()) + "\"" : value_text(v.as_double()));
   }
   [[gnu::cold]] [[gnu::noinline]] std::string failure(double d) const { return failure_text(value_text(d)); }
   [[gnu::cold]] [[gnu::noinline]] std::string failure(std::string_view text) const {
@@ -271,7 +271,7 @@ class DeclaredCast {
       case TypeId::Invalid:
         throw std::logic_error("DeclaredCast: string, Missing and Invalid are not cast to string");
     }
-    v = ::Value(text, DataType::DataTypeValue::STRING);
+    v = ::Value::string(text);
     return true;
   }
   // §2.6 "string -> number, boolean: strict XSD reading of the text". A

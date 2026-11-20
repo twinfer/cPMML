@@ -31,8 +31,8 @@ class IntervalBuilder {
     // An absent margin means the interval is unbounded on that side.
     const std::optional<std::string> left = node.optional_attribute("leftMargin");
     const std::optional<std::string> right = node.optional_attribute("rightMargin");
-    Value left_margin = left ? Value(*left, dataType) : Value(std::numeric_limits<double>::lowest(), dataType);
-    Value right_margin = right ? Value(*right, dataType) : Value(std::numeric_limits<double>::max(), dataType);
+    Value left_margin = left ? Value::document(*left, dataType) : Value(std::numeric_limits<double>::lowest());
+    Value right_margin = right ? Value::document(*right, dataType) : Value(std::numeric_limits<double>::max());
     switch (closure.value) {
       case Closure::ClosureValue::CLOSED_CLOSED:
         tmp_constraints.push_back(Predicate(index, Op::GREATER_OR_EQUAL, left_margin));

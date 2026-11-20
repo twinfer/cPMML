@@ -29,7 +29,9 @@ class CategoricalPredictor {
   std::string name;
   size_t index = std::numeric_limits<size_t>::max();
   DataType datatype;
-  std::unordered_map<Value, double, Value::ValueHash> coefficients;
+  // Keyed by the LegacyCompare key of each value (switch 2, core/value.h):
+  // a number itself, a string its code.
+  std::unordered_map<double, double> coefficients;
 
   CategoricalPredictor() = default;
 
@@ -42,19 +44,19 @@ class CategoricalPredictor {
             get_coefficients(node.get_childs_byattribute("CategoricalPredictor", "name", name), index, datatype)) {}
 
   inline double get_term(const Sample& sample) const {
-    Value value = sample[index].value;
-
-    if (value.is_missing() || coefficients.find(value) == coefficients.cend()) return 0;
-
-    return coefficients.at(value);
+    const Value& value = sample[index].value;
+    if (value.is_missing()) return 0;
+    const auto it = coefficients.find(cpmml::legacy::LegacyCompare::key(value));
+    return it == coefficients.cend() ? 0 : it->second;
   }
 
-  static std::unordered_map<Value, double, Value::ValueHash> get_coefficients(const std::vector<XmlNode>& nodes,
-                                                                              const size_t& index,
-                                                                              const DataType& datatype) {
-    std::unordered_map<Value, double, Value::ValueHash> result;
-    for (const auto& node : nodes)
-      result[Value(node.required_attribute("value"), datatype)] = node.required_double_attribute("coefficient");
+  static std::unordered_map<double, double> get_coefficients(const std::vector<XmlNode>& nodes, const size_t& index,
+                                                              const DataType& datatype) {
+    std::unordered_map<double, double> result;
+    for (const auto& node : nodes) {
+      const double key = cpmml::legacy::LegacyCompare::key(Value::document(node.required_attribute("value"), datatype));
+      result[key] = node.required_double_attribute("coefficient");
+    }
 
     return result;
   }

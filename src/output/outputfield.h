@@ -164,7 +164,7 @@ class OutputField {
         }
         if (sv.empty()) return Value();
         into.str_outputs[name] = sv;
-        return Value(sv, datatype);
+        return Value::string(sv);
       }
       default: {
         double v = 0;
@@ -193,7 +193,7 @@ class OutputField {
           }
         }
         into.num_outputs[name] = v;
-        return Value(v, datatype);
+        return Value(v);
       }
     }
   }

@@ -45,17 +45,18 @@ class NormDiscrete : public Expression {
         exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.required_attribute("field")),
         index(indexer->get_or_set(field_name)),
-        value(Value(node.required_attribute("value"), cpmml::bind::scope_resolve(*indexer, node, field_name).datatype)),
+        value(Value::document(node.required_attribute("value"),
+                              cpmml::bind::scope_resolve(*indexer, node, field_name).datatype)),
         mapmissing_to(exist_missingreplacement ? cpmml::bind::number_constant(node, "mapMissingTo", output_type) : Value()) {
     inputs.insert(field_name);
   }
 
   inline Value eval(const Sample& sample) const override {
-    Value input = sample[index].value;
+    const Value& input = sample[index].value;
     if (input.is_missing()) return mapmissing_to;
-    if (input == value) return Value(1, output_type);
+    if (cpmml::legacy::LegacyCompare::equal(input, value)) return Value(1.0);
 
-    return Value(0, output_type);
+    return Value(0.0);
   }
 };
 

@@ -94,7 +94,7 @@ class TransformedValue : public OutputExpression {
   // The text of a string value; a number is written by OutputField::add_output
   // through value_kind.
   inline std::string eval_str(const Sample& sample, const InternalScore& /*score*/) const override {
-    return expression->eval(sample).text();
+    return std::string(expression->eval(sample).text());
   };
 
   inline double eval_double(const Sample& sample, const InternalScore& /*score*/) const override {

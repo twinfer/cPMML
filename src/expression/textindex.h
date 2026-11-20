@@ -122,7 +122,7 @@ class TextIndex : public Expression {
     const std::vector<std::string> term = current_term(sample);
     if (term.empty()) return Value(0.0);
 
-    const std::vector<std::string> text = tokenized(fold(fv.text()));
+    const std::vector<std::string> text = tokenized(fold(std::string(fv.text())));
 
     const size_t freq = count(text, term);
 
@@ -176,7 +176,7 @@ class TextIndex : public Expression {
   inline std::vector<std::string> current_term(const Sample& sample) const {
     if (!term_field) return constant_term;
     const Value v = term_field->eval(sample);
-    return v.is_missing() ? std::vector<std::string>() : tokenized(fold(v.text()));
+    return v.is_missing() ? std::vector<std::string>() : tokenized(fold(std::string(v.text())));
   }
 
   inline std::string fold(std::string s) const { return case_sensitive ? s : to_lower(s); }

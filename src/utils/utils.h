@@ -288,9 +288,24 @@ static inline std::string& rtrim(std::string& s) {
 // trim from both ends
 static inline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
+// The file's bytes, read in blocks. It used to be read through an
+// istreambuf_iterator, one byte per iteration of a loop that kept its
+// iterator and the vector's end on the stack: a third or more of the load of
+// a large document, and 1.3x slower on one 16-byte position of the stack in
+// 4 KiB (arm64 macOS; the load-gate hazard of typed-core.md §6.4 item 8,
+// which design commit P5 met with HousingRF* and the random forests).
 static inline std::vector<char> read_xml(const std::string& filepath) {
-  std::ifstream file(filepath);
-  std::vector<char> data((std::istreambuf_iterator<char>(file)), {});
+  std::ifstream file(filepath, std::ios::binary);
+  if (!file) throw cpmml::ParsingException("Input file " + filepath + " cannot be opened");
+  std::vector<char> data(std::size_t{1} << 16);
+  std::size_t used = 0;
+  while (file.read(data.data() + used, static_cast<std::streamsize>(data.size() - used))) {
+    used = data.size();
+    data.resize(data.size() * 2);
+  }
+  if (file.bad()) throw cpmml::ParsingException("Input file " + filepath + " could not be read");
+  used += static_cast<std::size_t>(file.gcount());
+  data.resize(used);
   data.push_back('\0');
 
   return data;

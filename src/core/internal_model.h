@@ -45,6 +45,9 @@
 class InternalModel {
  public:
   std::shared_ptr<Indexer> indexer;
+  // The document's strings (§2.3): each scoring entry point scores in a
+  // StringScope of them.
+  std::shared_ptr<cpmml::DocumentStrings> strings;
   MiningFunction mining_function;
   MiningSchema mining_schema;
   MiningField target_field;
@@ -89,6 +92,7 @@ class InternalModel {
   InternalModel(const XmlNode& node, const DataDictionary& data_dictionary,
                 const TransformationDictionary& transformation_dictionary, const std::shared_ptr<Indexer>& indexer)
       : indexer(indexer),
+        strings(cpmml::StringScope::loading()),
         mining_function(MiningFunction::read(node)),
         mining_schema(MiningSchema(node.get_child("MiningSchema"), data_dictionary)),
         target_field(get_target(mining_function, mining_schema, indexer)),
@@ -287,7 +291,7 @@ class InternalModel {
   }
 
   inline bool validate(const std::unordered_map<std::string, std::string>& sample) const {
-    Value::ScopedIndexer _scope(indexer.get());
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -386,8 +390,7 @@ class InternalModel {
                          target_field.datatype.value != DataType::DataTypeValue::BOOLEAN &&
                          !is_double_min(score->double_score);
     sample.change_value(indexer->get_index(target_field.name),
-                        numeric ? Value(score->double_score, target_field.datatype)
-                                : Value(score->score, target_field.datatype));
+                        numeric ? Value(score->double_score) : Value::document(score->score, target_field.datatype));
     _write_outputs_to_sample(sample, *score);
     return true;
   };
@@ -439,7 +442,7 @@ class InternalModel {
         // The displayValue, which the next steps read as the field's value
         // (JPMML 1.7.7), not the raw class in the target slot.
         if (of.datatype.value == DataType::DataTypeValue::STRING)
-          sample.change_value_if_missing(of.index, Value(shown->score, of.datatype));
+          sample.change_value_if_missing(of.index, Value::document(shown->score, of.datatype));
         else if (!is_double_min(shown->double_score))
           sample.change_value(of.index, Value(shown->double_score));
         continue;
@@ -464,7 +467,7 @@ class InternalModel {
   inline std::unique_ptr<InternalScore> score(const std::unordered_map<std::string, std::string>& sample) const {
     if (!is_scorable)
       throw cpmml::EvaluationException("The model is defined as non-scorable (isScorable=false)");
-    Value::ScopedIndexer _scope(indexer.get());
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -527,7 +530,7 @@ class InternalModel {
   virtual std::unique_ptr<InternalScore> score_raw(const Sample& sample) const = 0;
 
   inline std::string predict(const std::unordered_map<std::string, std::string>& sample) const {
-    Value::ScopedIndexer _scope(indexer.get());
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)

@@ -39,6 +39,9 @@ class TreeModel : public InternalModel {
 
   MissingValueStrategy missing_value_strategy = MissingValueStrategy::NONE;
   NoTrueChildStrategy no_true_child_strategy = NoTrueChildStrategy::RETURN_NULL_PREDICTION;
+  // The predicates of every node, as flat arrays (§6.4); declared before
+  // root_node, which fills it.
+  BoundPredicates predicates;
   Node root_node;
 
   TreeModel() = default;
@@ -50,7 +53,7 @@ class TreeModel : public InternalModel {
                                          MissingValueStrategy::NONE)),
         no_true_child_strategy(read_enum(node, "noTrueChildStrategy", NO_TRUE_CHILD_STRATEGY_TABLE,
                                          NoTrueChildStrategy::RETURN_NULL_PREDICTION)),
-        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), target_field.datatype)) {
+        root_node(Node(node.get_child("Node"), true, PredicateBuilder(indexer), predicates, target_field.datatype)) {
     // Informational for scoring (every Node's children are tried in order
     // either way), but still a TreeModel enumeration.
     static constexpr EnumEntry<bool> SPLIT_CHARACTERISTIC_TABLE[] = {{"binarySplit", true}, {"multiSplit", false}};
@@ -98,14 +101,15 @@ class TreeModel : public InternalModel {
   inline const Node* walk(const Sample& sample, const Node& current_node) const {
 #ifdef DEBUG
     static int depth = 0;
-    std::cout << std::string(depth, '\t') << current_node.predicate << (current_node.leaf ? " !!! MATCH !!!" : "")
+    std::cout << std::string(depth, '\t') << "predicate " << current_node.predicate
+              << (current_node.leaf ? " !!! MATCH !!!" : "")
               << std::endl;
 #endif
 
     if (current_node.leaf) return &current_node;
 
     for (const auto& child : current_node.children) {
-      const PredicateResult result = child.evaluate(sample);
+      const PredicateResult result = child.evaluate(predicates, sample);
 
       if (result == PredicateResult::TRUE_) {
 #ifdef DEBUG

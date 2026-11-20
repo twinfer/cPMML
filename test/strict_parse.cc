@@ -1750,8 +1750,19 @@ static void writer_round_trip() {
 // else is a load error), so the operands that throw here are written for the
 // test.
 static void surrogate_errors() {
-  using Fn = PredicateFunction;
   using R = PredicateResult;
+  using Fn = std::function<R(const Sample&)>;
+  using Op = PredicateOpType::PredicateOpTypeValue;
+  // The compound operators of BoundPredicates and Predicate
+  // (cpmml::predicate::combine), over operands written for the test.
+  const auto compound = [](Op op, const Sample& s, const std::vector<Fn>& operands) {
+    return cpmml::predicate::combine(op, operands.size(), [&](std::size_t i) { return operands[i](s); });
+  };
+  const auto surrogate = [&](const Sample& s, const std::vector<Fn>& operands) {
+    return compound(Op::SURROGATE, s, operands);
+  };
+  const auto _and = [&](const Sample& s, const std::vector<Fn>& operands) { return compound(Op::AND, s, operands); };
+  const auto _or = [&](const Sample& s, const std::vector<Fn>& operands) { return compound(Op::OR, s, operands); };
   const Sample sample(1);
   int evaluated = 0;
   const Fn unknown = [&](const Sample&) {
@@ -1820,15 +1831,86 @@ static void surrogate_errors() {
   const Predicate lt0(0, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
   const Predicate lt1(1, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
   const Predicate gt1(1, PredicateOpType::PredicateOpTypeValue::GREATER_THAN, Value(5.0));
-  const Fn fast = to_function(Predicate({lt0, gt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
-  CHECK(fast(two) == R::FALSE_);
-  CHECK(to_function(Predicate({lt0, lt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE))(two) == R::TRUE_);
-  CHECK(to_function(Predicate({lt0, lt0}, PredicateOpType::PredicateOpTypeValue::SURROGATE))(two) == R::UNKNOWN);
+  BoundPredicates bound;
+  const std::uint32_t fast = bound.add(Predicate({lt0, gt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
+  const std::uint32_t lt0_lt1 = bound.add(Predicate({lt0, lt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
+  const std::uint32_t lt0_lt0 = bound.add(Predicate({lt0, lt0}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
+  CHECK(bound.evaluate(fast, two) == R::FALSE_);
+  CHECK(bound.evaluate(lt0_lt1, two) == R::TRUE_);
+  CHECK(bound.evaluate(lt0_lt0, two) == R::UNKNOWN);
   two.change_value(0, Value(1.0));
-  CHECK(fast(two) == R::TRUE_);
+  CHECK(bound.evaluate(fast, two) == R::TRUE_);
+}
+
+// Design item P5: a tree's BoundPredicates answer exactly what the Predicate
+// they are compiled from answers (cpmml::predicate::compare over
+// LegacyCompare keys, switch 2), for every operator and every kind of
+// operand: a pooled string, one the pool lacks (the shared unseen code, B1),
+// an edit of a pooled string (its argument's code, B2), a number equal to a
+// string's code (B18), a number, missing. equal and notEqual with a string
+// value compare a string operand's code as an integer (the op x type case);
+// the answers must not change.
+static void bound_predicates() {
+  using Op = PredicateOpType::PredicateOpTypeValue;
+  auto document = std::make_shared<cpmml::DocumentStrings>();
+  const cpmml::StringScope load(cpmml::StringScope::Loading{}, document);
+  const Value abc = Value::string("abc");
+  const Value xyz = Value::string("xyz");
+  document->pool.freeze();
+  const cpmml::StringScope score(cpmml::StringScope::Scoring{}, *document);
+  Value edited = abc;
+  edited.uppercase();
+  const std::vector<Value> operands = {abc, xyz, Value::string("never named"), Value::string("another"), edited,
+                                       Value(cpmml::legacy::code_of(abc)), Value(-1.0), Value(2.5), Value()};
+  const std::vector<Value> constants = {abc, xyz, Value(cpmml::legacy::code_of(xyz)), Value(-1.0), Value(2.5)};
+  int compared = 0;
+  for (const Op op : {Op::EQUAL, Op::NOT_EQUAL, Op::LESS_THAN, Op::LESS_OR_EQUAL, Op::GREATER_THAN,
+                      Op::GREATER_OR_EQUAL}) {
+    for (const Value& c : constants) {
+      BoundPredicates bound;
+      const Predicate tree(0, op, c);
+      const std::uint32_t i = bound.add(tree);
+      for (const Value& x : operands) {
+        Sample sample(1);
+        sample.change_value(0, x);
+        CHECK(bound.evaluate(i, sample) == tree.evaluate(sample));
+        compared++;
+      }
+    }
+  }
+  CHECK(compared == 6 * 5 * 9);
+  // The expected answers of the legacy rules themselves.
+  BoundPredicates bound;
+  const std::uint32_t eq_abc = bound.add(Predicate(0, Op::EQUAL, abc));
+  const std::uint32_t ne_abc = bound.add(Predicate(0, Op::NOT_EQUAL, abc));
+  Sample s(1);
+  s.change_value(0, edited);
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::TRUE_);  // B2: an edit keeps abc's code
+  s.change_value(0, Value::string("ABC"));
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // ABC is not pooled: unseen
+  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::TRUE_);
+  s.change_value(0, Value(cpmml::legacy::code_of(abc)));
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::TRUE_);  // B18: the number of abc's code
+  s.change_value(0, Value());
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::UNKNOWN);
+  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::UNKNOWN);
+  // Sets, both containers (SET_THRESHOLD), against the tree.
+  for (const bool hashed : {false, true}) {
+    for (const Op op : {Op::IS_IN, Op::IS_NOT_IN}) {
+      BoundPredicates sets;
+      const Predicate tree(0, op, {abc, Value(2.5)}, hashed);
+      const std::uint32_t i = sets.add(tree);
+      for (const Value& x : operands) {
+        Sample sample(1);
+        sample.change_value(0, x);
+        CHECK(sets.evaluate(i, sample) == tree.evaluate(sample));
+      }
+    }
+  }
 }
 
 int main() {
+  bound_predicates();
   xsd_double();
   xsd_integer();
   xsd_boolean();

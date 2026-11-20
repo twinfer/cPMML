@@ -290,7 +290,7 @@ class GeneralRegressionModel : public InternalModel {
       // as a double on every record that reached the cell, and malformed
       // text failed each of them.
       if (is_factor) {
-        pc.level = Value(val, field.datatype);
+        pc.level = Value::document(val, field.datatype);
       } else {
         long exponent = 0;
         if (!lexical::parse_long(val, exponent))
@@ -388,10 +388,10 @@ class GeneralRegressionModel : public InternalModel {
         // "set x_i to 1 if the case being scored matches this row, 0 if it
         // does not" (GeneralRegression, scoring). The level used to be read
         // here, as a string whatever the predictor's dataType: an integer
-        // factor never matched, and since the Indexer is frozen once the model
+        // factor never matched, and since the pool is frozen once the model
         // is loaded, a level first read here got the code of every unseen
         // string, so h="zz" matched level "a".
-        if (xv != cell.level) return 0.0;  // short-circuit
+        if (cpmml::legacy::LegacyCompare::not_equal(xv, cell.level)) return 0.0;  // short-circuit
       } else {
         // Continuous covariate: x^exponent
         result *= std::pow(x, cell.exponent);

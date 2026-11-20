@@ -113,7 +113,7 @@ class NaiveBayesModel : public InternalModel {
         DiscreteInput di;
         di.field_index = idx;
         for (const auto& pvc : bi.get_childs("PairCounts")) {
-          const Value input_val(pvc.required_attribute("value"), data_dictionary.at(field).datatype);
+          const Value input_val = Value::document(pvc.required_attribute("value"), data_dictionary.at(field).datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
             di.counts[input_val.as_double()][tvc.required_attribute("value")] = tvc.required_double_attribute("count");
         }

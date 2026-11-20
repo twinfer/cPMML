@@ -93,7 +93,7 @@ class Constant : public Expression {
     // The temporal types are read as today until P10 (§2.1: the binder maps
     // them to Double "exactly as today").
     if (declared && cpmml::bind::parse_datatype(node.required_attribute("dataType"))->temporal)
-      return Value(node.value(), DataType::read(node));
+      return Value::document(node.value(), DataType::read(node));
     if (node.get_bool_attribute("missing", false)) return Value();
 
     const std::string text = content(node);
@@ -108,18 +108,18 @@ class Constant : public Expression {
                                       (declared ? std::string(" (§3.4)")
                                                 : std::string(" (inherited from the parameter of ") +
                                                       node.xml().parent().attribute("function").value() + ", S2)"));
-      if (*type == TypeId::String) return Value(text, DataType::DataTypeValue::STRING);
+      if (*type == TypeId::String) return Value::string(text);
       // A float's text keeps its double reading (B4, P6): 0.1 is the double
       // 0.1, as DataType::read stored it; INF and NaN are the same either way.
       if (const auto* f = std::get_if<cpmml::types::Float>(&v)) {
         double d = 0;
-        return Value(lexical::parse_double(text, d) ? d : static_cast<double>(f->v));
+        return cpmml::legacy::float_value(lexical::parse_double(text, d) ? d : static_cast<double>(f->v));
       }
       return cpmml::bind::engine_value(v);
     }
     using cpmml::bind::ConstantKind;
     const ConstantKind kind = cpmml::bind::infer_constant(text);
-    if (kind == ConstantKind::String) return Value(text, DataType::DataTypeValue::STRING);
+    if (kind == ConstantKind::String) return Value::string(text);
     if (kind == ConstantKind::IntegerOverflow)
       throw cpmml::ParsingException(std::string(code::kValueMalformed) + ": untyped Constant integer \"" + text +
                                     "\" is beyond the 64-bit range (§3.4, D4)");

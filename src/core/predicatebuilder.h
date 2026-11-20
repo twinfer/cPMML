@@ -74,7 +74,7 @@ class PredicateBuilder {
         const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
         if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(index, op, Value());
         // Every other operator compares with value (Predicates.html).
-        return Predicate(index, op, Value(node.required_attribute("value"), datatype));
+        return Predicate(index, op, Value::document(node.required_attribute("value"), datatype));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
@@ -88,8 +88,10 @@ class PredicateBuilder {
             throw cpmml::ParsingException(std::string(cpmml::bind::code::kKeyNaN) + ": SimpleSetPredicate field=\"" +
                                           node.required_attribute("field") +
                                           "\": a NaN member matches no input (§2.7, D26: a NaN key is a load error)");
-        if (values.size() > SET_THRESHOLD) return Predicate(index, op, Value::createUnorderedValues(values, datatype));
-        return Predicate(index, op, Value::createValues(values, datatype));
+        std::vector<Value> members;
+        members.reserve(values.size());
+        for (const auto& v : values) members.push_back(Value::document(v, datatype));
+        return Predicate(index, op, members, values.size() > SET_THRESHOLD);
       }
       case PredicateType::PredicateTypeValue::COMPOUND: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::COMPOUND_OPERATOR_TABLE);

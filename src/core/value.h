@@ -1,4 +1,3 @@
-
 /*******************************************************************************
  * Copyright 2019 AMADEUS. All rights reserved.
  * Author: Paolo Iannino
@@ -7,274 +6,436 @@
 #ifndef CPMML_VALUE_H
 #define CPMML_VALUE_H
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <limits>
 #include <memory>
-#include <numeric>
-#include <set>
-#include <sstream>
-#include <stdexcept>
-#include <string_view>
-#include <unordered_map>
-#include <unordered_set>
-
 #include <regex>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
+#include <variant>
 
 #include "core/types/cast.h"
 #include "core/types/parse.h"
+#include "core/types/string_pool.h"
 #include "core/types/value.h"
 #include "datatype.h"
-#include "indexer.h"
 #include "utils/utils.h"
+
+/**
+ * Design note -- the engine's value (docs/design/typed-core.md §2.1, §2.3,
+ * §7 P5).
+ *
+ * A Value holds a types::Value: Missing, or a value of one PMML dataType
+ * (Integer, Double, Boolean, String; Float is not stored yet, switch 1
+ * below). Numbers and booleans are the value itself; a String is a pointer to
+ * the StringRep of its text, which is one of
+ *
+ *   - the document's StringPool (DocumentStrings::pool): every string the
+ *     load names, interned in the order the load names them, so two pooled
+ *     reps are equal iff they are the same pointer. Frozen after the load,
+ *     then only read (find), from any number of threads;
+ *   - an arena: the evaluation's (StringScope, per record) for a text the
+ *     pool lacks (an input the document never names, a string a function
+ *     builds), or the document's load arena for a string the load edits.
+ *
+ * There is no Indexer string map any more: the pool is that map (§2.3). Two
+ * compatibility switches keep today's semantics, so that this representation
+ * changes no result (P5 is behaviour-preserving); each is one place below
+ * that one P6 commit deletes:
+ *
+ *   (1) legacy::float_value: a float is stored as the Double it was read as
+ *       (B4, B5; P6.2 stores a Float).
+ *   (2) legacy (LegacyCompare): equality and order compare as_double(), and
+ *       a String's as_double() is its legacy code: its pool id (pooled
+ *       strings compare by pointer), -1 for every string the pool lacks (the
+ *       shared "unseen" id), and, for a string a function edits in place
+ *       (uppercase, lowercase, substring, trimBlanks, a text given at load),
+ *       the code of the argument it came from (B1, B2, B18; P6.1, P6.3).
+ *
+ * The code is kept in the Value (code_), not in the rep, so the rep keeps the
+ * types library's meaning (id < kUnpooled: pooled) for P6.
+ *
+ * Two more fields carry what the old storage carried beside its double and
+ * that a typed value has no room for; each is read through the accessors
+ * only: a number's text (text_: a document constant given its Cast<string>
+ * text at load, §3.4, kept for the string readers), and the numeric_text mark
+ * (a number or boolean constant held as text in a string slot, §9 "Decided
+ * 2026-11-18 after P2.1"). A Value is 32 bytes and trivially copyable: a
+ * Sample is copied with memcpy and no string is copied with it.
+ */
+namespace cpmml {
+
+// The strings of one document (§2.3), shared by every model and segment of it.
+struct DocumentStrings {
+  types::StringPool pool;
+  // Reps made at load that the pool does not index: a text the load gives a
+  // value (set_text) or an edit of a document constant. They live as long as
+  // the document.
+  types::RecordArena load_arena;
+};
+
+/**
+ * Where the strings made on this thread go (§2.3, §5.1: the per-evaluation
+ * RecordArena). P5 has no frame yet to own the arena (P7), so a scope on the
+ * stack of each entry point does: a load scope (ModelBuilder::build) while the
+ * document is read, a scoring scope (score, predict, validate, the entry
+ * points of the evaluators, and each OpenMP segment worker) while a record is
+ * scored. The outermost scoring scope of a thread uses the thread's arena,
+ * from its first string the pool lacks, and empties it when it ends; a scope
+ * nested in one of the same document shares its arena, and one of another
+ * document has its own. Strings made in a scope die with it, so no Value made while
+ * scoring may outlive the entry point that made it (results are text,
+ * InternalScore).
+ */
+class StringScope {
+ public:
+  struct Loading {};
+  struct Scoring {};
+
+  StringScope(Loading, std::shared_ptr<DocumentStrings> document)
+      : loading_(std::move(document)), document_(loading_.get()), previous_(current()) {
+    if (!document_) throw std::logic_error("StringScope: no document");
+    arena_ = &document_->load_arena;
+    current() = this;
+  }
+
+  StringScope(Scoring, DocumentStrings& document) : document_(&document), previous_(current()) {
+    if (previous_ && previous_->document_ == document_) {
+      arena_owner_ = previous_->arena_owner_;  // an evaluation nested in this document's: its arena
+    } else if (previous_) {
+      own_arena_ = std::make_unique<types::RecordArena>();
+      arena_ = own_arena_.get();
+    }
+    // else the outermost scope of the thread: the thread's arena, taken on
+    // first use (most records make no string the pool lacks).
+    current() = this;
+  }
+
+  ~StringScope() {
+    current() = previous_;
+    if (reset_on_exit_) arena_->reset();
+  }
+
+  StringScope(const StringScope&) = delete;
+  StringScope& operator=(const StringScope&) = delete;
+
+  // The scope of this thread; a string made outside every scope is a
+  // programming error, never a string of some other numbering.
+  static StringScope& active() {
+    if (!current()) throw std::logic_error("no StringScope: a string Value is made outside a load or an evaluation");
+    return *current();
+  }
+
+  // The document being loaded on this thread (models keep it to score).
+  static std::shared_ptr<DocumentStrings> loading() {
+    for (StringScope* s = current(); s; s = s->previous_)
+      if (s->loading_) return s->loading_;
+    throw std::logic_error("StringScope::loading: no document is being loaded on this thread");
+  }
+
+  // The rep of the string `text`: the pooled one (interned while the pool is
+  // open, i.e. at load), else one made in this scope's arena.
+  const types::StringRep* rep(std::string_view text) {
+    types::StringPool& pool = document_->pool;
+    if (!pool.frozen()) return pool.intern(text);
+    if (const types::StringRep* pooled = pool.find(text)) return pooled;
+    return arena().make(text);
+  }
+
+  // A rep the pool does not index, in this scope's arena.
+  const types::StringRep* unindexed(std::string_view text) { return arena().make(text); }
+
+ private:
+  static StringScope*& current() {
+    thread_local StringScope* scope = nullptr;
+    return scope;
+  }
+  types::RecordArena& arena() {
+    StringScope* owner = arena_owner_;
+    if (!owner->arena_) {
+      owner->arena_ = &thread_arena();
+      owner->reset_on_exit_ = true;
+    }
+    return *owner->arena_;
+  }
+  static types::RecordArena& thread_arena() {
+    alignas(std::max_align_t) thread_local unsigned char buffer[4096];
+    thread_local types::RecordArena arena(buffer, sizeof(buffer));
+    return arena;
+  }
+
+  std::shared_ptr<DocumentStrings> loading_;
+  DocumentStrings* document_;
+  types::RecordArena* arena_ = nullptr;   // this scope's own, or null until first use
+  StringScope* arena_owner_ = this;       // the scope whose arena this one uses
+  std::unique_ptr<types::RecordArena> own_arena_;
+  bool reset_on_exit_ = false;
+  StringScope* previous_;
+};
+
+namespace legacy {
+// Switch 2 (see the note): the code of a string the pool lacks.
+inline constexpr std::uint32_t kUnseen = types::StringRep::kUnpooled;
+}  // namespace legacy
+
+}  // namespace cpmml
+
+class Value;
+namespace cpmml::legacy {
+inline double code_of(const ::Value& v);  // switch 2, below
+}
 
 /**
  * @class Value
  *
- * Internal representation of each value used by the model. Numeric types are
- * stored as double for uniform comparison and arithmetic. String types also
- * carry the original text in svalue and are assigned a stable sequential index
- * (via string_converter) so that equality and set-membership comparisons work
- * correctly through the double field. Lookups into string_converter use
- * std::string_view (C++20 heterogeneous lookup) to avoid temporary allocations.
+ * The engine's value: a types::Value and what the old storage carried beside
+ * it (see the note above). Every reader goes through the accessors.
  */
 class Value {
-  // The storage is private (design typed-core.md §7, P3.3): every reader
-  // and writer outside this class goes through the accessors below, so the
-  // compiler proves that nothing else depends on it and P5 can change it.
- private:
-  double value = double_min();
-  bool missing = true;
-  // A number or boolean document constant that is the value of a string slot
-  // (design typed-core.md §9, decided 2026-11-18 after P2.1: it "keeps its
-  // text as well as its number: string readers get the text (§3.4
-  // Cast<string>) ..., numeric readers the number"). The slot is a string, so
-  // `value` is svalue's string code, as every string's is, and the equality
-  // readers (predicates, MapValues keys, NormDiscrete, equal, isIn) compare
-  // the text as the base build did; a numeric reader that knows it reads a
-  // number takes text_number(). Set only at load (cpmml::bind::slot_constant,
-  // document_constant); the in-place string edits below clear it.
-  bool numeric_text = false;
-  std::string svalue;
-
  public:
-  // Thread-local pointer to the active model's Indexer for per-model string mapping.
-  // Set via ScopedIndexer RAII at model parse/score entry points.
-  inline static thread_local class Indexer* active_indexer = nullptr;
-
-  // RAII helper to set/restore the active indexer.
-  struct ScopedIndexer {
-    Indexer* prev;
-    explicit ScopedIndexer(Indexer* idx) : prev(active_indexer) { active_indexer = idx; }
-    ~ScopedIndexer() { active_indexer = prev; }
-    ScopedIndexer(const ScopedIndexer&) = delete;
-    ScopedIndexer& operator=(const ScopedIndexer&) = delete;
-  };
-
-  class ValueHash {
-   public:
-    // Equality compares `value`, so the hash has to be derived from it and from
-    // nothing else. Casting the double to size_t is undefined whenever it is
-    // negative or out of range, and it collapses every value in [0,1) onto the
-    // same bucket besides. std::hash<double> is defined over the whole range and
-    // agrees with operator== on the one case that matters here, -0.0 == 0.0.
-    size_t operator()(const Value& obj) const { return std::hash<double>{}(obj.value); }
-  };
-
-  // Accessors (design typed-core.md §7, P3). Every reader outside this file
-  // goes through these instead of the fields, so that P5 can change the
-  // storage behind them; each is the field read or write it names, nothing
-  // more (no copy, no check).
-  inline double as_double() const { return value; }
-  inline bool is_missing() const { return missing; }
-  inline const std::string& text() const& { return svalue; }
-  // The text of a temporary is the field as an xvalue, as `tmp.svalue` was,
-  // so a caller that takes it (return f().text();) moves it, not copies it
-  // (P3.2: TransformedValue::eval_str).
-  inline std::string&& text() && { return std::move(svalue); }
-  inline bool has_numeric_text() const { return numeric_text; }
-
-  inline void set_double(const double number) { value = number; }
-  inline void set_missing(const bool missing_now) { missing = missing_now; }
-  inline void set_text(std::string new_text) { svalue = std::move(new_text); }
-  inline void clear_text() { svalue.clear(); }
-  inline void mark_numeric_text() { numeric_text = true; }
-
   Value() = default;
-  // 3 cases: uninitialized (and missing), initialized but missing and not
-  // missing (in other constructors)
-  explicit Value(const std::string& value) : value(infer_value(value)), missing(false) {}
-  explicit Value(const double& value) : value(value), missing(false) {}
-  Value(const double& value, const DataType& datatype) : value(value), missing(false) {}
-  Value(const std::string& value, const DataType& datatype) : value(to_double(value, datatype)), missing(false) {
-    if (datatype == DataType::DataTypeValue::STRING) svalue = value;
+  // A double (and the old storage's every number).
+  explicit Value(const double number) : v_(cpmml::types::Double{number}) {}
+  explicit Value(const cpmml::types::Integer number) : v_(number) {}
+  explicit Value(const cpmml::types::Boolean flag) : v_(flag) {}
+
+  // The string `text` in this thread's StringScope: its pooled rep, or one
+  // made for it, with that rep's code (switch 2).
+  static Value string(std::string_view text) {
+    const cpmml::types::StringRep* rep = cpmml::StringScope::active().rep(text);
+    Value v;
+    v.v_ = cpmml::types::String{rep};
+    v.code_ = rep->id;
+    return v;
   }
 
-  inline Value operator+(const Value& other) const { return Value(value + other.value); }
-  inline Value operator-(const Value& other) const { return Value(value - other.value); }
-  inline Value operator/(const Value& other) const { return Value(value / other.value); }
-  inline Value operator*(const Value& other) const { return Value(value * other.value); }
-  inline bool operator==(const Value& other) const { return value == other.value; }
-  inline bool operator!=(const Value& other) const { return !operator==(other); }
-  inline bool operator>(const Value& other) const { return value > other.value; }
-  inline bool operator>=(const Value& other) const { return value >= other.value; }
-  inline bool operator<(const Value& other) const { return value < other.value; }
-  inline bool operator<=(const Value& other) const { return value <= other.value; }
-  inline bool operatorand(const Value& other) const { return value and other.value; }
-  inline bool operatoror(const Value& other) const { return (bool)value or (bool) other.value; }
-  inline bool operatornot() const { return not value; }
-  inline Value diff(const Value& other) const { return Value(std::abs(value - other.value)); }
-  inline bool is_in(const std::set<Value>& other) const { return other.find(*this) != other.end(); }
-  inline bool is_in(const std::unordered_set<Value, ValueHash>& other) const {
-    return other.find(*this) != other.end();
+  // An integer slot's number as the old storage held it, the double: an
+  // Integer when it is an int64 other than -0 (XSD integer has one zero; the
+  // old storage kept -0, Q13/D18), else the Double.
+  static Value integer_slot(const double number) {
+    if (std::trunc(number) == number && number >= -9223372036854775808.0 && number < 9223372036854775808.0 &&
+        !(number == 0 && std::signbit(number)))
+      return Value(cpmml::types::Integer{static_cast<std::int64_t>(number)});
+    return Value(number);
   }
-  inline bool is_not_in(const std::set<Value>& other) const { return other.find(*this) == other.end(); }
-  inline bool is_not_in(const std::unordered_set<Value, ValueHash>& other) const {
-    return other.find(*this) == other.end();
+
+  // A value of `datatype` read from its document text (an attribute, an
+  // Array member, a table cell), as the load always read it: a string is
+  // the string; a boolean the XSD boolean; a number the xs:double reading
+  // (switch 1 for a float; an integer field's "2.5" is the double, §3.4 K1
+  // rule 2). Malformed text throws ParsingException, which at load is a load
+  // error. Inputs do not come here (MiningField::parse_input).
+  static Value document(std::string_view text, const DataType& datatype);
+
+  // ---- readers
+  inline bool is_missing() const { return std::holds_alternative<cpmml::types::Missing>(v_); }
+
+  // The number the old storage held: a number or a boolean (1 or 0) itself,
+  // a string its legacy code (switch 2), a missing value double_min().
+  inline double as_double() const {
+    if (const auto* d = std::get_if<cpmml::types::Double>(&v_)) [[likely]]
+      return d->v;
+    // A string's code inline too: the string equalities of a tree read it per
+    // node (switch 2).
+    if (std::holds_alternative<cpmml::types::String>(v_)) return cpmml::legacy::code_of(*this);
+    return as_double_other();
   }
+
+  // The text: a string's own, the text a number carries, else empty.
+  inline std::string_view text() const {
+    const cpmml::types::StringRep* rep = text_rep();
+    return rep ? rep->text : std::string_view();
+  }
+  inline bool has_numeric_text() const { return numeric_text_; }
+
+  // The typed value (for unpack).
+  inline const cpmml::types::Value& typed() const { return v_; }
+
+  // The legacy code of a string (switch 2): its pool id, or kUnseen.
+  inline std::uint32_t legacy_code() const { return code_; }
+
+  // ---- writers
+  // The value becomes the number `number`; a text it carries stays (the old
+  // storage wrote its double and left the rest).
+  inline void set_double(const double number) {
+    if (is_missing()) throw std::logic_error("Value::set_double on a missing value");
+    if (const auto* s = std::get_if<cpmml::types::String>(&v_)) text_ = s->rep;
+    v_ = cpmml::types::Double{number};
+  }
+  // The value keeps what it is and carries `new_text` (a string's text is
+  // replaced, its code kept: switch 2).
+  inline void set_text(std::string_view new_text) {
+    if (is_missing()) throw std::logic_error("Value::set_text on a missing value");
+    put_text(cpmml::StringScope::active().unindexed(new_text));
+  }
+  inline void mark_numeric_text() { numeric_text_ = true; }
 
   // The number of a numeric_text value: its text, validated at load as a
   // number literal (an XSD double, or Java text: "Infinity") or a boolean
   // literal (1 or 0).
   inline double text_number() const {
     double number = 0;
-    if (java::parse(svalue, number)) return number;
+    if (java::parse(text(), number)) return number;
     bool flag = false;
-    if (lexical::parse_boolean(svalue, flag)) return flag ? 1 : 0;
-    throw std::logic_error("Value::text_number: \"" + svalue + "\" is not a number or boolean literal");
+    if (lexical::parse_boolean(text(), flag)) return flag ? 1 : 0;
+    throw std::logic_error("Value::text_number: \"" + std::string(text()) +
+                           "\" is not a number or boolean literal");
   }
 
+  // ---- string edits in place (legacy::B2, switch 2): the text changes, the
+  // value keeps its code; the numeric_text mark goes.
   inline void lowercase() {
-    numeric_text = false;
-    std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::tolower);
+    std::string t(text());
+    std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+    edit(t);
   }
   inline void uppercase() {
-    numeric_text = false;
-    std::transform(svalue.begin(), svalue.end(), svalue.begin(), ::toupper);
+    std::string t(text());
+    std::transform(t.begin(), t.end(), t.begin(), ::toupper);
+    edit(t);
   }
-  inline void substr(const size_t& start, const size_t& size) {
-    numeric_text = false;
-    svalue = svalue.substr(start, size);
-  }
+  inline void substr(const size_t& start, const size_t& size) { edit(std::string(text().substr(start, size))); }
   inline void trim_blanks() {
-    numeric_text = false;
-    svalue = ::trim(svalue);
+    std::string t(text());
+    edit(::trim(t));
   }
+
   // std::regex's constructor parses and compiles the pattern. Both of these
   // rebuilt it per record, though the pattern comes from a Constant the
   // document fixes at parse time. The cache is thread_local: building a regex
   // into shared state from several scoring threads is a race, and one model
   // uses a handful of distinct patterns, so per-thread duplication is cheap.
-  inline static const std::regex& cached_regex(const std::string& pattern) {
+  inline static const std::regex& cached_regex(std::string_view pattern) {
     static thread_local std::unordered_map<std::string, std::regex> cache;
-    auto it = cache.find(pattern);
-    if (it == cache.end()) it = cache.emplace(pattern, std::regex(pattern)).first;
+    auto it = cache.find(std::string(pattern));
+    if (it == cache.end()) it = cache.emplace(std::string(pattern), std::regex(std::string(pattern))).first;
 
     return it->second;
   }
 
-  inline Value replace(const std::string& regex, const std::string& replacement) const {
-    return Value(std::regex_replace(svalue, cached_regex(regex), replacement), DataType::DataTypeValue::STRING);
+  inline Value replace(std::string_view regex, std::string_view replacement) const {
+    const std::string input(text());
+    return Value::string(std::regex_replace(input, cached_regex(regex), std::string(replacement)));
   }
-  inline bool matches(const std::string& pattern) const { return std::regex_match(svalue, cached_regex(pattern)); }
-
-  // Static members
-  template <class CollectionT>
-  inline static Value sum(const CollectionT& other) {
-    return std::accumulate(other.cbegin(), other.cend(), Value());
+  inline bool matches(std::string_view pattern) const {
+    const std::string input(text());
+    return std::regex_match(input, cached_regex(pattern));
   }
 
-  template <class CollectionT>
-  inline static Value min(const CollectionT& other) {
-    return *std::min_element(other.cbegin(), other.cend());
+ private:
+  inline const cpmml::types::StringRep* text_rep() const {
+    if (const auto* s = std::get_if<cpmml::types::String>(&v_)) return s->rep;
+    return text_;
   }
 
-  template <class CollectionT>
-  inline static Value max(const CollectionT& other) {
-    return *std::max_element(other.cbegin(), other.cend());
+  inline void put_text(const cpmml::types::StringRep* rep) {
+    if (std::holds_alternative<cpmml::types::String>(v_))
+      v_ = cpmml::types::String{rep};
+    else
+      text_ = rep;
   }
 
-  inline static Value min(const std::set<Value>& other) { return *other.cbegin(); }
-  inline static Value max(const std::set<Value>& other) { return *other.crbegin(); }
-
-  // A Constant with no dataType: a number if the text is one, else a string.
-  // The int range check is the existing rule (review M-X4 questions it); what
-  // changed is the reader -- stod honoured LC_NUMERIC, accepted "inf"/"0x10",
-  // and threw out_of_range past DBL_MAX instead of answering "not an int".
-  inline static double infer_value(const std::string& value) {
-    double double_value = 0.0;
-    if (!lexical::parse_double(value, double_value) ||
-        !(double_value > std::numeric_limits<int>::min() && double_value < std::numeric_limits<int>::max()))
-      return to_double(value, DataType::DataTypeValue::STRING);
-
-    return double_value;
+  // An edit of a value without text leaves it as it is (the old storage
+  // edited its empty text), but for the mark.
+  inline void edit(std::string_view new_text) {
+    numeric_text_ = false;
+    if (!text_rep()) return;
+    put_text(cpmml::StringScope::active().unindexed(new_text));
   }
 
-  // Document text (attributes, Array members, table cells) read as `datatype`.
-  // Malformed text throws ParsingException, which at load time is a load error.
-  // Input values do not come here: MiningField::parse_input reads them and
-  // hands a malformed one to invalidValueTreatment.
-  inline static double to_double(const std::string& value, const DataType& datatype) {
-    switch (datatype.value) {
-      case DataType::DataTypeValue::BOOLEAN: {
-        bool parsed = false;
-        if (!lexical::parse_boolean(value, parsed))
-          throw cpmml::ParsingException("\"" + value + "\" is not a valid boolean (true, false, 1 or 0)");
-        return parsed ? 1 : 0;
-      }
-      case DataType::DataTypeValue::FLOAT:
-        return ::to_double(value);
-      case DataType::DataTypeValue::INTEGER:
-        return ::to_double(value);
-      case DataType::DataTypeValue::DOUBLE:
-        return ::to_double(value);
-      case DataType::DataTypeValue::STRING:
-        if (active_indexer) return active_indexer->get_string_value(value);
+  double as_double_other() const;
 
-        // String codes are only meaningful within one model's Indexer: two
-        // strings compare equal iff they were interned by the same map. There
-        // used to be a process-global fallback map here for "contexts without
-        // an active indexer", which is not a degraded answer -- a code drawn
-        // from a different numbering silently fails to match the model's own,
-        // and the map is shared mutable state across scoring threads. Every
-        // entry point establishes a ScopedIndexer, so this is unreachable;
-        // saying so beats interning into the wrong map.
-        throw cpmml::InvalidValueException("no active Indexer: cannot map the string \"" + value +
-                                           "\" to a value comparable with this model's");
-    }
-
-    return std::numeric_limits<double>::min();
-  }
-
-  // These used to strip every double quote from each member, compensating for a
-  // splitter that left the delimiters attached to the token. parse_array now
-  // consumes the delimiters and honours the spec's \" escape, so stripping here
-  // would delete quotes that are part of the value: `"say \"hi\""` is the one
-  // member `say "hi"`, and it matched nothing while this ran over it.
-  inline static std::set<Value> createValues(const std::vector<std::string>& values, DataType datatype) {
-    std::set<Value> result;
-    for (const auto& value : values) result.insert(Value(value, datatype));
-
-    return result;
-  }
-
-  inline static std::unordered_set<Value, ValueHash> createUnorderedValues(const std::vector<std::string>& values,
-                                                                           DataType datatype) {
-    std::unordered_set<Value, ValueHash> result;
-    for (const auto& value : values) result.insert(Value(value, datatype));
-
-    return result;
-  }
+  cpmml::types::Value v_ = cpmml::types::Missing{};
+  const cpmml::types::StringRep* text_ = nullptr;  // a number's text (a String's is its rep)
+  std::uint32_t code_ = cpmml::legacy::kUnseen;    // a String's legacy code (switch 2)
+  bool numeric_text_ = false;
 };
 
+static_assert(std::is_trivially_copyable_v<Value> && std::is_trivially_destructible_v<Value>,
+              "a Sample is copied with memcpy");
+static_assert(sizeof(Value) <= 32);
+
+namespace cpmml::legacy {
+
+// Switch 1 (design P5, deleted by P6.2): a float is stored as the Double it
+// was read as, not narrowed (B4, B5).
+inline ::Value float_value(const double read_as_double) { return ::Value(read_as_double); }
+
+// Switch 2 (design P5, LegacyCompare; deleted by P6.1 and P6.3): the double a
+// Value is compared by. A number or boolean is itself; a string is its code
+// (Value::legacy_code), so two strings are equal iff they are one pooled
+// string, or both strings the pool lacks (B1), or an edit of one and the
+// other (B2); a string equals the number of its code (B18); and strings are
+// ordered by their codes.
+inline double code_of(const ::Value& v) {
+  return v.legacy_code() == kUnseen ? -1.0 : static_cast<double>(v.legacy_code());
+}
+
+struct LegacyCompare {
+  static inline double key(const ::Value& v) { return v.as_double(); }
+  static inline bool equal(const ::Value& a, const ::Value& b) { return key(a) == key(b); }
+  static inline bool not_equal(const ::Value& a, const ::Value& b) { return !equal(a, b); }
+  static inline bool less_than(const ::Value& a, const ::Value& b) { return key(a) < key(b); }
+  static inline bool less_or_equal(const ::Value& a, const ::Value& b) { return key(a) <= key(b); }
+  static inline bool greater_than(const ::Value& a, const ::Value& b) { return key(a) > key(b); }
+  static inline bool greater_or_equal(const ::Value& a, const ::Value& b) { return key(a) >= key(b); }
+};
+
+}  // namespace cpmml::legacy
+
+inline double Value::as_double_other() const {
+  switch (static_cast<cpmml::types::TypeId>(v_.index())) {
+    case cpmml::types::TypeId::Missing:
+      return double_min();
+    case cpmml::types::TypeId::Integer:
+      return static_cast<double>(std::get<cpmml::types::Integer>(v_).v);
+    case cpmml::types::TypeId::Float:
+      return static_cast<double>(std::get<cpmml::types::Float>(v_).v);
+    case cpmml::types::TypeId::Double:
+      return std::get<cpmml::types::Double>(v_).v;
+    case cpmml::types::TypeId::Boolean:
+      return std::get<cpmml::types::Boolean>(v_).v ? 1.0 : 0.0;
+    case cpmml::types::TypeId::String:
+      return cpmml::legacy::code_of(*this);
+    case cpmml::types::TypeId::Invalid:
+      break;
+  }
+  throw std::logic_error("Value::as_double: an Invalid value is never stored");
+}
+
+inline Value Value::document(std::string_view text, const DataType& datatype) {
+  switch (datatype.value) {
+    case DataType::DataTypeValue::STRING:
+      return Value::string(text);
+    case DataType::DataTypeValue::BOOLEAN: {
+      bool parsed = false;
+      if (!lexical::parse_boolean(text, parsed))
+        throw cpmml::ParsingException("\"" + std::string(text) + "\" is not a valid boolean (true, false, 1 or 0)");
+      return Value(cpmml::types::Boolean{parsed});
+    }
+    case DataType::DataTypeValue::FLOAT:
+      return cpmml::legacy::float_value(::to_double(text));
+    case DataType::DataTypeValue::INTEGER:
+      return Value::integer_slot(::to_double(text));
+    case DataType::DataTypeValue::DOUBLE:
+      return Value(::to_double(text));
+  }
+  throw std::logic_error("Value::document: unknown DataType");
+}
+
 // A Value as text, as JPMML writes it (utils/java_format.h): nothing for a
-// missing value, the text of a string, Double.toString of a number. Value
-// carries no type, so an integer, float or boolean value is written as a
-// double here; a caller that knows the type writes java::Number{v.as_double(), kind}
-// instead (OutputField does, from the expression's type).
+// missing value, the text of a string, Double.toString of a number. A caller
+// that knows the type writes java::Number{v.as_double(), kind} instead
+// (OutputField does, from the expression's type).
 inline std::string java_text(const Value& value) {
   if (value.is_missing()) return std::string();
-  if (!value.text().empty()) return value.text();
+  if (!value.text().empty()) return std::string(value.text());
   return java::double_text(value.as_double());
 }
 
@@ -296,55 +457,50 @@ struct std::formatter<Value, char> {
 #endif
 
 // ---------------------------------------------------------------- adapters
-// Between the engine's Value (old storage: a double, a missing flag and a
-// text) and the P1 typed value (core/types/value.h), for P4's kernels, which
-// take P1 scalar types over the old storage (design typed-core.md §7, P3 and
-// P4). Nothing in the engine calls them in P3.
+// Between the engine's Value and the P1 typed value (core/types/value.h).
+// The Value holds a types::Value (P5), so both are the identity where the
+// value is stored in its static type, and the explicit cast where it is not.
 //
 // unpack<T>(v, static_type) reads v as a value of static_type, the type the
-// binder fixed for the expression that produced it. The old storage keeps
-// every number and boolean as a double, so reading it in its static type is
-// the explicit cast from that double (§2.6, types::CastTo): Double is the
-// double itself (-0, NaN and INF kept); Float its IEEE round to nearest
-// ("double -> float ... overflow -> ±INF, underflow -> 0", XSD float value
-// space); Integer the value if it is integral and within int64, else
-// Invalid(NotIntegral) or Invalid(Overflow) (Functions.html: "a double
-// expression can not be implicitly cast as an integer"); Boolean 1 -> true,
-// 0 -> false, else Invalid(NoCast) (the XSD boolean lexical space {true,
-// false, 1, 0}, D14). A String is the text, and only the text: text() is
-// what every string reader reads (§9, decided 2026-11-18 after P2.1: string
-// readers get the text of a numeric_text value), and the string code in the
-// double is the Indexer's, which a typed String does not carry; its rep is
-// made by `ctx` (types::make_string), so a String needs the three-argument
-// form. A missing v is Missing whatever its static type.
+// binder fixed for the expression that produced it. A value stored in that
+// type is itself (std::get). Otherwise the number it holds is cast (§2.6,
+// types::CastTo), as the old storage, which held every number as a double,
+// was read: Double the double (-0, NaN, INF kept); Float its IEEE round to
+// nearest (a float is stored as the double, switch 1); Integer the value if
+// integral and within int64, else Invalid(NotIntegral) or Invalid(Overflow)
+// (Functions.html: "a double expression can not be implicitly cast as an
+// integer"); Boolean 1 -> true, 0 -> false, else Invalid(NoCast) (the XSD
+// boolean lexical space {true, false, 1, 0}, D14). A String is the value's
+// own when it is one; the text of anything else (a number in a string slot
+// carries its text), with a rep made by `ctx` (types::make_string), so a
+// String static type needs the three-argument form. A missing v is Missing
+// whatever its static type.
 //
 // T is types::Value (any of the above) or the scalar type of static_type
 // itself. A scalar cannot hold Missing or Invalid, so unpack<Scalar> of a
 // missing v, of a v that is not a value of the type, or with another static
 // type is a programming error (std::logic_error), never a default.
 //
-// pack(x) is the old storage of a typed value, as the engine builds it from
-// each type: a number its double (an Integer beyond 2^53 rounds, as every
-// double the engine holds does), a boolean 1 or 0, a String Value(text,
-// STRING), whose double is the active Indexer's code of the text (and -1,
-// no code, for a text the model never saw once its Indexer is frozen), and
-// Missing Value(). Invalid has no old storage: the engine raises an
-// exception where a value is invalid, so packing one is a programming error.
+// pack(x) is the Value of a typed value: a number or boolean itself (a Float
+// as its double, switch 1), Missing Value(). A String is the string of its
+// text in this thread's StringScope (Value::string: the pooled rep and its
+// code, or an arena's and the unseen code), not the rep it came with: the
+// binder reads document text with pools of its own (bind::document_constant),
+// whose reps and ids are not the document's. Invalid has no Value: the engine
+// raises an exception where a value is invalid, so packing one is a
+// programming error.
 //
-// Round trip: pack(unpack(v, t)) is v, field for field, for every v the
-// engine builds as a value of t: a number of a double or integer slot (any
-// double, for double), a float of a float slot, 1 or 0 of a boolean slot, a
-// string built from its text (Value(text, STRING)), and a missing v built as
-// Value(). Two string Values do not round trip, because their double is not
-// their text's code: one edited in place by uppercase/lowercase/substring/
-// trimBlanks keeps its argument's code (B2, P6), and a numeric_text one
-// (§9) keeps its mark, which a String cannot carry (pack gives the text's
-// code and no mark).
+// Round trip: pack(unpack(v, t)) is v, accessor for accessor, for every v
+// the engine builds as a value of t, but for three: a string edited in place
+// (B2) keeps its argument's code and gets its text's; a numeric_text string
+// loses the mark; and -0 in an integer or boolean slot packs as +0 (XSD
+// integer has one zero).
 namespace cpmml {
 
 namespace detail {
 // v (not missing) as a value of static_type.
 inline types::Value unpack_present(const ::Value& v, const types::TypeId static_type, types::ParseContext* ctx) {
+  if (types::type_of(v.typed()) == static_type) return v.typed();
   const types::Double d{v.as_double()};
   switch (static_type) {
     case types::TypeId::Integer:
@@ -400,14 +556,13 @@ T unpack(const ::Value& v, const types::TypeId static_type, types::ParseContext&
 }
 
 inline ::Value pack(const types::Value& x) {
-  if (const auto* i = std::get_if<types::Integer>(&x)) return ::Value(static_cast<double>(i->v));
-  if (const auto* f = std::get_if<types::Float>(&x)) return ::Value(static_cast<double>(f->v));
+  if (const auto* i = std::get_if<types::Integer>(&x)) return ::Value(*i);
+  if (const auto* f = std::get_if<types::Float>(&x)) return legacy::float_value(static_cast<double>(f->v));
   if (const auto* d = std::get_if<types::Double>(&x)) return ::Value(d->v);
-  if (const auto* b = std::get_if<types::Boolean>(&x)) return ::Value(b->v ? 1.0 : 0.0);
-  if (const auto* s = std::get_if<types::String>(&x))
-    return ::Value(std::string(s->text()), DataType::DataTypeValue::STRING);
+  if (const auto* b = std::get_if<types::Boolean>(&x)) return ::Value(*b);
+  if (const auto* s = std::get_if<types::String>(&x)) return ::Value::string(s->text());
   if (types::is_missing(x)) return ::Value();
-  throw std::logic_error("pack: an Invalid value has no old storage");
+  throw std::logic_error("pack: an Invalid value has no Value");
 }
 
 }  // namespace cpmml

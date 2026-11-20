@@ -81,7 +81,8 @@ inline CompareFunc read_compare_function(const XmlNode& node, CompareFunc when_a
 //
 // x and y are the same kind of double: a number for a numeric or boolean field
 // (the query's boolean is 0/1, a cluster center any number, a mean such as
-// 0.37 included), the model's Indexer code for a string field (a string
+// 0.37 included), the document's legacy code for a string field (switch 2,
+// core/value.h; a string
 // center is the Java text of its number, see ClusteringModel::parse_clusters;
 // a KNN training cell is read with the field's dataType). So x = y is equality
 // of the field's values. Value carries no type tag to compare by, so this is

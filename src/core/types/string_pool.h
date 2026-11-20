@@ -86,6 +86,9 @@ class StringPool {
 class RecordArena {
  public:
   RecordArena() = default;
+  // Reps go to `buffer` first; reset() keeps it, so an arena reused per
+  // evaluation allocates nothing while a record's strings fit there.
+  RecordArena(void* buffer, std::size_t size) : arena_(buffer, size) {}
   RecordArena(const RecordArena&) = delete;
   RecordArena& operator=(const RecordArena&) = delete;
 

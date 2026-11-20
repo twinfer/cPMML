@@ -38,7 +38,7 @@ class Feature {
   }
 
 #ifdef DEBUG
-  const std::string to_string() const { return "{\"" + name + "\": " + value.to_string() + "}"; };
+  const std::string to_string() const { return "{\"" + name + "\": \"" + java_text(value) + "\"}"; };
 #endif
 
   inline const Value& cvalue() const {

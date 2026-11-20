@@ -73,12 +73,13 @@ class MiningField : public DataField {
         high_value(hasOutlierTreatment && hasHighValue ? Value(node.required_double_attribute("highValue")) : Value()),
         // missingValueReplacement and invalidValueReplacement are xs:string
         // values of the field, read by the K1 rule (§3.4): Value(text,
-        // datatype) is that rule in the engine's storage (bind/load_scope.h),
+        // datatype) is that rule in the engine's storage (Value::document),
         // so an integer field's "2.5" is the double 2.5 (rule 2; the design
         // widens the slot, W-SLOT-WIDENED, which a double slot already is).
         hasMissingReplacement(node.exists_attribute("missingValueReplacement")),
-        missingvalue_replacement(hasMissingReplacement ? Value(node.required_attribute("missingValueReplacement"), datatype)
-                                                       : Value()),  //, data_dictionary.datafields[name].datatype)),
+        missingvalue_replacement(hasMissingReplacement
+                                     ? Value::document(node.required_attribute("missingValueReplacement"), datatype)
+                                     : Value()),
         // missingValueTreatment is not consulted while scoring (the replacement
         // is missingValueReplacement), except that returnInvalid, which cPMML
         // does not implement, is refused at load.
@@ -93,7 +94,7 @@ class MiningField : public DataField {
       if (!node.exists_attribute("invalidValueReplacement"))
         throw cpmml::ParsingException("MiningField " + name +
                                       ": invalidValueTreatment=\"asValue\" needs invalidValueReplacement");
-      invalidvalue_replacement = Value(node.required_attribute("invalidValueReplacement"), datatype);
+      invalidvalue_replacement = Value::document(node.required_attribute("invalidValueReplacement"), datatype);
     }
     // pmml-4-4.xsd: importance is an optional PROB-NUMBER without a default.
     // No scoring rule reads it, so it is checked and not kept (a member
@@ -129,7 +130,9 @@ class MiningField : public DataField {
     // since other treatment methods imply low and high value. If treated "asIs"
     // then it's not considered an outlier
 
-    return hasOutlierTreatment && hasLowValue && hasHighValue && (value < low_value || value > high_value);
+    using Compare = cpmml::legacy::LegacyCompare;
+    return hasOutlierTreatment && hasLowValue && hasHighValue &&
+           (Compare::less_than(value, low_value) || Compare::greater_than(value, high_value));
   }
 
   inline Value handle_outlier(const Value& value) const {
@@ -137,7 +140,7 @@ class MiningField : public DataField {
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
         return handle_missing();
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-        if (value < low_value) return low_value;
+        if (cpmml::legacy::LegacyCompare::less_than(value, low_value)) return low_value;
         return high_value;
       default:
         return value;  // "asIs" treatment
@@ -176,36 +179,33 @@ class MiningField : public DataField {
   // field "cannot accept invalid value NaN"); asIs keeps the NaN.
   enum class InputStatus { VALID, INVALID, MALFORMED };
 
-  // Writes into the caller's Value -- in MiningSchema::prepare, the sample's
-  // own slot -- rather than building and moving a temporary per input.
-  static inline void set_number(Value& out, const double number) {
-    out.set_double(number);
-    out.set_missing(false);
-    out.clear_text();
-  }
-
   inline InputStatus parse_input(const std::string& raw, Value& parsed) const {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING:
-        parsed = Value(raw, datatype);
+        parsed = Value::string(raw);
         return InputStatus::VALID;
       case DataType::DataTypeValue::BOOLEAN: {
         bool b = false;
         if (!lexical::parse_boolean(raw, b)) return InputStatus::MALFORMED;
-        set_number(parsed, b ? 1.0 : 0.0);
+        parsed = Value(cpmml::types::Boolean{b});
         return InputStatus::VALID;
       }
       case DataType::DataTypeValue::INTEGER: {
         double d = 0.0;
         if (!lexical::parse_integer_as_double(raw, d)) return InputStatus::MALFORMED;
-        set_number(parsed, d);
+        parsed = Value::integer_slot(d);
         return InputStatus::VALID;
       }
-      case DataType::DataTypeValue::FLOAT:
+      case DataType::DataTypeValue::FLOAT: {
+        double d = 0.0;
+        if (!lexical::parse_double(raw, d)) return InputStatus::MALFORMED;
+        parsed = cpmml::legacy::float_value(d);
+        return std::isnan(d) ? InputStatus::INVALID : InputStatus::VALID;
+      }
       case DataType::DataTypeValue::DOUBLE: {
         double d = 0.0;
         if (!lexical::parse_double(raw, d)) return InputStatus::MALFORMED;
-        set_number(parsed, d);
+        parsed = Value(d);
         return std::isnan(d) ? InputStatus::INVALID : InputStatus::VALID;
       }
     }

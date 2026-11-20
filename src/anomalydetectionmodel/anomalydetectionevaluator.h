@@ -168,12 +168,12 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
    * as the same value), missing as empty. A value it leaves alone is passed on
    * exactly as given.
    *
-   * Runs under this model's Indexer: reading a string value interns it, and
-   * there is no Indexer active outside a scoring entry point.
+   * Runs in a StringScope of the document: reading a string value makes a
+   * string Value, and there is no StringScope outside a scoring entry point.
    */
   std::unordered_map<std::string, std::string> apply_mining_schema(
       std::unordered_map<std::string, std::string> flat) const {
-    Value::ScopedIndexer scope(indexer.get());
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     using Invalid = InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue;
 
     for (const MiningField& field : mining_schema.miningfields) {
@@ -221,7 +221,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
 
   // A value of `field` as input text that reads back as the same value.
   static std::string input_text(const MiningField& field, const Value& value) {
-    if (field.datatype.value == DataType::DataTypeValue::STRING) return value.text();
+    if (field.datatype.value == DataType::DataTypeValue::STRING) return std::string(value.text());
     // A float is carried as a double (MiningField::parse_input), so it is
     // written as one: Float.toString would round it.
     const java::Kind kind = java_kind(field.datatype);

@@ -38,7 +38,7 @@ class ScoreDistribution {
   ScoreDistribution() = default;
 
   ScoreDistribution(XmlNode node, DataType dataType)
-      : value(Value(node.required_attribute("value"), dataType)),
+      : value(Value::document(node.required_attribute("value"), dataType)),
         value_string(node.required_attribute("value")),
         record_count(node.required_double_attribute("recordCount")),
         confidence(node.optional_double_attribute("confidence")),

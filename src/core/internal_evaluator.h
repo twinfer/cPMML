@@ -17,6 +17,7 @@
 #include "indexer.h"
 #include "internal_score.h"
 #include "transformationdictionary.h"
+#include "value.h"
 
 /**
  * @class InternalEvaluator
@@ -37,6 +38,10 @@ class InternalEvaluator {
   using Input = std::unordered_map<std::string, FieldValue>;
 
   std::shared_ptr<Indexer> indexer;
+  // The document's strings (§2.3, design P5): its StringPool, which replaced
+  // the Indexer's string map. ModelBuilder::build makes it and loads the
+  // document in a StringScope of it.
+  std::shared_ptr<DocumentStrings> strings;
   std::string name;
   std::string version;
   Header header;
@@ -52,15 +57,9 @@ class InternalEvaluator {
 
   InternalEvaluator() = default;
 
-  // Helper: creates an Indexer and activates it as the thread-local string context.
-  static std::shared_ptr<Indexer> make_and_activate_indexer() {
-    auto idx = std::make_shared<Indexer>();
-    Value::active_indexer = idx.get();
-    return idx;
-  }
-
   InternalEvaluator(const XmlNode& node)
-      : indexer(make_and_activate_indexer()),
+      : indexer(std::make_shared<Indexer>()),
+        strings(StringScope::loading()),
         name(node.name()),
         version(node.required_attribute("version")),
         header(node.get_child("Header")),

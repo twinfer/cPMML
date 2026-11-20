@@ -1,4 +1,3 @@
-
 /*******************************************************************************
  * Copyright 2019 AMADEUS. All rights reserved.
  * Author: Paolo Iannino
@@ -7,196 +6,197 @@
 #ifndef CPMML_FASTPREDICATE_H
 #define CPMML_FASTPREDICATE_H
 
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+
 #include "predicate.h"
 #include "predicateoptype.h"
 #include "sample.h"
 
 /**
- * Compiled counterpart of Predicate, used on the TreeModel hot path.
+ * Bound predicates (docs/design/typed-core.md §6.4, P5): a TreeModel stores
+ * the predicates of its nodes as flat arrays, one BoundPredicate per
+ * predicate, and evaluates them with one switch over the operator; no
+ * std::function, no bound Value copy (review N9).
  *
  * Like Predicate these are three-valued: a comparison against a missing value
  * is UNKNOWN, not false. The tree traversal needs that distinction to apply
- * missingValueStrategy, and treating missing as "compares less than anything"
- * (the previous behaviour, inherited from the Value sentinel) silently took
- * the wrong branch.
+ * missingValueStrategy.
+ *
+ * A comparison reads the operand's LegacyCompare key (switch 2, core/value.h):
+ * a number itself, a string its code. `type` is the type of the predicate's
+ * value; equal and notEqual with a string value read it to compare a string
+ * operand's code as an integer (the same answer, switch 2). P6.3 turns this
+ * into the typed comparisons, one switch over op x type.
  */
-using PredicateResult = Predicate::Result;
-using PredicateFunction = std::function<PredicateResult(const Sample&)>;
+using PredicateResult = PredicateTruth;
 
-inline PredicateResult to_predicate_result(const bool value) {
-  return value ? PredicateResult::TRUE_ : PredicateResult::FALSE_;
-}
+struct BoundPredicate {
+  std::uint8_t op;              // PredicateOpType::PredicateOpTypeValue
+  cpmml::types::TypeId type;    // the type of its value (an ordered set's first member; else Missing)
+  std::uint8_t kind;            // what `operand` indexes (Kind)
+  std::uint32_t slot;           // the sample slot compared; a compound's number of operands
+  std::uint32_t operand;        // constants_, sets_, or a compound's first operand in children_
 
-constexpr PredicateResult _false(const Sample& other) { return PredicateResult::FALSE_; }
+  enum Kind : std::uint8_t { Constant, Simple, Set, Compound };
+};
 
-constexpr PredicateResult _true(const Sample& other) { return PredicateResult::TRUE_; }
+class BoundPredicates {
+ public:
+  using Op = PredicateOpType::PredicateOpTypeValue;
 
-inline PredicateResult equal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() == value);
-}
-
-inline PredicateResult not_equal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() != value);
-}
-
-inline PredicateResult greater_than(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() > value);
-}
-
-inline PredicateResult greater_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() >= value);
-}
-
-inline PredicateResult less_than(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() < value);
-}
-
-inline PredicateResult less_orequal(const Sample& other, const Value& value, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue() <= value);
-}
-
-inline PredicateResult is_in(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue().is_in(values));
-}
-
-inline PredicateResult is_notin(const Sample& other, const std::set<Value>& values, const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue().is_not_in(values));
-}
-
-inline PredicateResult is_in_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
-                                  const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue().is_in(values));
-}
-
-inline PredicateResult is_notin_hash(const Sample& other, const std::unordered_set<Value, Value::ValueHash>& values,
-                                     const size_t& feature) {
-  if (other[feature].value.is_missing()) return PredicateResult::UNKNOWN;
-  return to_predicate_result(other[feature].cvalue().is_not_in(values));
-}
-
-inline PredicateResult is_missing(const Sample& other, const size_t& feature) {
-  return to_predicate_result(other[feature].value.is_missing());
-}
-
-inline PredicateResult is_not_missing(const Sample& other, const size_t& feature) {
-  return to_predicate_result(!other[feature].value.is_missing());
-}
-
-// Three-valued AND: any FALSE → FALSE; else any UNKNOWN → UNKNOWN.
-inline PredicateResult _and(const Sample& other, const std::vector<PredicateFunction>& predicates) {
-  bool unknown = false;
-  for (const auto& predicate : predicates) {
-    const PredicateResult result = predicate(other);
-    if (result == PredicateResult::FALSE_) return PredicateResult::FALSE_;
-    if (result == PredicateResult::UNKNOWN) unknown = true;
+  // Compiles `p` and returns its index.
+  std::uint32_t add(const Predicate& p) {
+    BoundPredicate b{static_cast<std::uint8_t>(p.predicatetype.value), cpmml::types::TypeId::Missing,
+                     BoundPredicate::Constant, 0, 0};
+    switch (p.predicatetype.value) {
+      case Op::TRUE:
+      case Op::FALSE:
+        break;
+      case Op::AND:
+      case Op::OR:
+      case Op::XOR:
+      case Op::SURROGATE: {
+        std::vector<std::uint32_t> operands;
+        operands.reserve(p.predicates.size());
+        for (const Predicate& child : p.predicates) operands.push_back(add(child));
+        b.kind = BoundPredicate::Compound;
+        b.slot = narrow(operands.size());
+        b.operand = narrow(children_.size());
+        children_.insert(children_.end(), operands.begin(), operands.end());
+        break;
+      }
+      case Op::IS_MISSING:
+      case Op::IS_NOT_MISSING:
+        b.kind = BoundPredicate::Simple;
+        b.slot = narrow(p.feature);
+        break;
+      case Op::IS_IN:
+      case Op::IS_NOT_IN:
+        b.kind = BoundPredicate::Set;
+        b.slot = narrow(p.feature);
+        b.operand = narrow(sets_.size());
+        b.type = p.values.empty() ? cpmml::types::TypeId::Missing : cpmml::types::type_of(p.values.front().typed());
+        sets_.push_back(p.keys);
+        break;
+      default:
+        b.kind = BoundPredicate::Simple;
+        b.slot = narrow(p.feature);
+        b.operand = narrow(constants_.size());
+        b.type = cpmml::types::type_of(p.value.typed());
+        constants_.push_back(p.key);
+        codes_.push_back(p.value.legacy_code());
+        break;
+    }
+    code_.push_back(b);
+    return narrow(code_.size() - 1);
   }
 
-  return unknown ? PredicateResult::UNKNOWN : PredicateResult::TRUE_;
-}
-
-// Three-valued OR: any TRUE → TRUE; else any UNKNOWN → UNKNOWN.
-inline PredicateResult _or(const Sample& other, const std::vector<PredicateFunction>& predicates) {
-  bool unknown = false;
-  for (const auto& predicate : predicates) {
-    const PredicateResult result = predicate(other);
-    if (result == PredicateResult::TRUE_) return PredicateResult::TRUE_;
-    if (result == PredicateResult::UNKNOWN) unknown = true;
+  // One switch over the operator. The comparisons and the sets are inline
+  // (a tree's predicates are almost all SimplePredicates and
+  // SimpleSetPredicates); the compounds and the missing tests are out of
+  // line.
+  [[gnu::always_inline]] inline PredicateResult evaluate(const std::uint32_t i, const Sample& sample) const {
+    const BoundPredicate& p = code_[i];
+    switch (static_cast<Op>(p.op)) {
+      case Op::LESS_OR_EQUAL:
+        return simple(p, sample, [](double x, double c) { return x <= c; });
+      case Op::GREATER_THAN:
+        return simple(p, sample, [](double x, double c) { return x > c; });
+      case Op::LESS_THAN:
+        return simple(p, sample, [](double x, double c) { return x < c; });
+      case Op::GREATER_OR_EQUAL:
+        return simple(p, sample, [](double x, double c) { return x >= c; });
+      case Op::EQUAL:
+        if (p.type == cpmml::types::TypeId::String) return string_equality(p, sample, true);
+        return simple(p, sample, [](double x, double c) { return x == c; });
+      case Op::NOT_EQUAL:
+        if (p.type == cpmml::types::TypeId::String) return string_equality(p, sample, false);
+        return simple(p, sample, [](double x, double c) { return !(x == c); });
+      case Op::IS_IN:
+        return member(p, sample, true);
+      case Op::IS_NOT_IN:
+        return member(p, sample, false);
+      case Op::TRUE:
+        return PredicateResult::TRUE_;
+      case Op::FALSE:
+        return PredicateResult::FALSE_;
+      default:
+        return evaluate_other(p, sample);
+    }
   }
 
-  return unknown ? PredicateResult::UNKNOWN : PredicateResult::FALSE_;
-}
+  std::size_t size() const { return code_.size(); }
 
-// Parity XOR: true when an odd number of operands are true; any UNKNOWN → UNKNOWN.
-inline PredicateResult _xor(const Sample& other, const std::vector<PredicateFunction>& predicates) {
-  bool acc = false;
-  for (const auto& predicate : predicates) {
-    const PredicateResult result = predicate(other);
-    if (result == PredicateResult::UNKNOWN) return PredicateResult::UNKNOWN;
-    acc ^= (result == PredicateResult::TRUE_);
+ private:
+  // A comparison of the slot's LegacyCompare key with the constant
+  // (cpmml::predicate::compare, switch 2): UNKNOWN for a missing value.
+  template <class Compare>
+  [[gnu::always_inline]] inline PredicateResult simple(const BoundPredicate& p, const Sample& sample,
+                                                       Compare compare) const {
+    const Value& x = sample[p.slot].value;
+    if (x.is_missing()) return PredicateResult::UNKNOWN;
+    return compare(cpmml::legacy::LegacyCompare::key(x), constants_[p.operand]) ? PredicateResult::TRUE_
+                                                                                 : PredicateResult::FALSE_;
   }
 
-  return to_predicate_result(acc);
-}
-
-// Surrogate: the first predicate whose result is not UNKNOWN wins.
-// TreeModel.html: "The cascaded predicates are applied when the primary
-// predicate evaluates to UNKNOWN" and "surrogate(a,b) is equivalent to if not
-// unknown(a) then a else b". An error is not UNKNOWN: an exception from an
-// operand ends the record, as it does outside a surrogate (Predicate::SURROGATE
-// agrees). The operands compiled here report a missing input as UNKNOWN and
-// throw nothing per record (load errors cover the rest).
-inline PredicateResult surrogate(const Sample& other, const std::vector<PredicateFunction>& predicates) {
-  for (const auto& predicate : predicates) {
-    const PredicateResult result = predicate(other);
-    if (result != PredicateResult::UNKNOWN) return result;
+  // equal / notEqual with a string value (the op x type case of §6.4): a
+  // string operand compares its code with the value's, which is the
+  // comparison of their LegacyCompare keys (switch 2: the code -> key map is
+  // one to one); an operand of any other type compares its key (B18).
+  [[gnu::always_inline]] inline PredicateResult string_equality(const BoundPredicate& p, const Sample& sample,
+                                                                const bool equal) const {
+    const Value& x = sample[p.slot].value;
+    if (x.is_missing()) return PredicateResult::UNKNOWN;
+    const bool same = std::holds_alternative<cpmml::types::String>(x.typed())
+                          ? x.legacy_code() == codes_[p.operand]
+                          : cpmml::legacy::LegacyCompare::key(x) == constants_[p.operand];
+    return same == equal ? PredicateResult::TRUE_ : PredicateResult::FALSE_;
   }
 
-  return PredicateResult::UNKNOWN;
-}
-
-inline std::vector<PredicateFunction> to_function(const std::vector<Predicate>& predicates);
-
-inline PredicateFunction to_function(const Predicate& predicate) {
-  switch (predicate.predicatetype.value) {
-    case PredicateOpType::PredicateOpTypeValue::TRUE:
-      return std::bind(_true, std::placeholders::_1);
-    case PredicateOpType::PredicateOpTypeValue::FALSE:
-      return std::bind(_false, std::placeholders::_1);
-    case PredicateOpType::PredicateOpTypeValue::EQUAL:
-      return std::bind(equal, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::NOT_EQUAL:
-      return std::bind(not_equal, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::GREATER_THAN:
-      return std::bind(greater_than, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::GREATER_OR_EQUAL:
-      return std::bind(greater_orequal, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::LESS_THAN:
-      return std::bind(less_than, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::LESS_OR_EQUAL:
-      return std::bind(less_orequal, std::placeholders::_1, predicate.value, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::IS_IN:
-      // Large sets are stored in values_hash (see PredicateBuilder's
-      // SET_THRESHOLD); binding the wrong member would evaluate against an
-      // empty set.
-      if (predicate.is_hash_set)
-        return std::bind(is_in_hash, std::placeholders::_1, predicate.values_hash, predicate.feature);
-      return std::bind(is_in, std::placeholders::_1, predicate.values, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::IS_NOT_IN:
-      if (predicate.is_hash_set)
-        return std::bind(is_notin_hash, std::placeholders::_1, predicate.values_hash, predicate.feature);
-      return std::bind(is_notin, std::placeholders::_1, predicate.values, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::AND:
-      return std::bind(_and, std::placeholders::_1, to_function(predicate.predicates));
-    case PredicateOpType::PredicateOpTypeValue::OR:
-      return std::bind(_or, std::placeholders::_1, to_function(predicate.predicates));
-    case PredicateOpType::PredicateOpTypeValue::XOR:
-      return std::bind(_xor, std::placeholders::_1, to_function(predicate.predicates));
-    case PredicateOpType::PredicateOpTypeValue::SURROGATE:
-      return std::bind(surrogate, std::placeholders::_1, to_function(predicate.predicates));
-    case PredicateOpType::PredicateOpTypeValue::IS_MISSING:
-      return std::bind(is_missing, std::placeholders::_1, predicate.feature);
-    case PredicateOpType::PredicateOpTypeValue::IS_NOT_MISSING:
-      return std::bind(is_not_missing, std::placeholders::_1, predicate.feature);
+  // SimpleSetPredicate: membership of the slot's LegacyCompare key; UNKNOWN
+  // for a missing value.
+  [[gnu::always_inline]] inline PredicateResult member(const BoundPredicate& p, const Sample& sample,
+                                                       const bool is_in) const {
+    const Value& x = sample[p.slot].value;
+    if (x.is_missing()) return PredicateResult::UNKNOWN;
+    return sets_[p.operand].contains(cpmml::legacy::LegacyCompare::key(x)) == is_in ? PredicateResult::TRUE_
+                                                                                     : PredicateResult::FALSE_;
   }
 
-  return std::bind(_false, std::placeholders::_1);
-}
+  [[gnu::noinline]] PredicateResult evaluate_other(const BoundPredicate& p, const Sample& sample) const {
+    using cpmml::predicate::to_result;
+    switch (static_cast<Op>(p.op)) {
+      case Op::IS_MISSING:
+        return to_result(sample[p.slot].value.is_missing());
+      case Op::IS_NOT_MISSING:
+        return to_result(!sample[p.slot].value.is_missing());
+      case Op::AND:
+      case Op::OR:
+      case Op::XOR:
+      case Op::SURROGATE: {
+        const std::uint32_t* operands = children_.data() + p.operand;
+        return cpmml::predicate::combine(static_cast<Op>(p.op), p.slot,
+                                         [&](std::size_t k) { return evaluate(operands[k], sample); });
+      }
+      default:
+        throw std::logic_error("BoundPredicates: an operator without a case");
+    }
+  }
 
-inline std::vector<PredicateFunction> to_function(const std::vector<Predicate>& predicates) {
-  std::vector<PredicateFunction> result;
+  static std::uint32_t narrow(const std::size_t n) {
+    if (n >= std::numeric_limits<std::uint32_t>::max())
+      throw cpmml::ParsingException("too many predicates or fields for a BoundPredicate");
+    return static_cast<std::uint32_t>(n);
+  }
 
-  for (const auto& predicate : predicates) result.push_back(to_function(predicate));
-
-  return result;
-}
+  std::vector<BoundPredicate> code_;
+  std::vector<std::uint32_t> children_;
+  std::vector<double> constants_;      // LegacyCompare keys of the SimplePredicate values (switch 2)
+  std::vector<std::uint32_t> codes_;   // their legacy codes, read for a string value (switch 2)
+  std::vector<cpmml::predicate::LegacyKeySet> sets_;
+};
 
 #endif

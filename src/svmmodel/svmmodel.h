@@ -151,7 +151,7 @@ class SupportVectorMachineModel : public InternalModel {
         for (const auto& pred : c.is_compound_predicate ? c.predicates : std::vector<Predicate>{c}) {
           if (pred.is_set_predicate && pred.predicatetype.value == PredicateOpType::PredicateOpTypeValue::IS_IN) {
             for (const auto& v : pred.values) {
-              std::string lbl = v.text();
+              std::string lbl(v.text());
               if (!lbl.empty() && lbl != machines[0].target_category) {
                 machines[0].alternate_category = lbl;
                 break;
@@ -287,7 +287,8 @@ class SupportVectorMachineModel : public InternalModel {
             {cpmml::bind::scope_resolve(*indexer, child, child.required_attribute("field")).index, false, Value()});
       } else if (kind == "CategoricalPredictor") {
         const auto field = cpmml::bind::scope_resolve(*indexer, child, child.required_attribute("name"));
-        vector_fields.push_back({field.index, true, Value(child.required_attribute("value"), field.datatype)});
+        vector_fields.push_back(
+            {field.index, true, Value::document(child.required_attribute("value"), field.datatype)});
       } else if (kind != "Extension" && !kind.empty()) {
         throw cpmml::ParsingException("SupportVectorMachineModel: unexpected element " + kind + " in VectorFields");
       }
@@ -302,7 +303,8 @@ class SupportVectorMachineModel : public InternalModel {
       const VectorField& f = vector_fields[i];
       const Value& v = sample[f.index].value;
       if (f.is_indicator) {
-        x[static_cast<Eigen::Index>(i)] = !v.is_missing() && v == f.category ? 1.0 : 0.0;
+        x[static_cast<Eigen::Index>(i)] =
+            !v.is_missing() && cpmml::legacy::LegacyCompare::equal(v, f.category) ? 1.0 : 0.0;
         continue;
       }
       if (v.is_missing()) throw cpmml::MissingValueException("missing value for SVM vector field");

@@ -160,7 +160,7 @@ class ClusteringModel : public InternalModel {
   // AnomalyDetectionModel clusterMeanDist record with every ClusteringField
   // missing aborted scoring instead of giving no prediction.
   Nearest nearest(const std::unordered_map<std::string, std::string>& sample) const {
-    Value::ScopedIndexer _scope(indexer.get());
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     Sample internal_sample = base_sample;
     mining_schema.prepare(internal_sample, sample);
     if (!transformation_dictionary.empty)
@@ -255,14 +255,15 @@ class ClusteringModel : public InternalModel {
       // typically a mean such as 0.37, and "1.0" is its true. That is what the
       // query's 0/1 is compared with, as in JPMML 1.7.7.
       //
-      // A string field's query value is an Indexer code, so its center has to
+      // A string field's query value is its legacy code (switch 2,
+      // core/value.h), so its center has to
       // become a string to be compared with it. JPMML 1.7.7 compares the
       // string with the text Java's Double.toString gives the center, whatever
       // the Array's type (int or real): the center 0 is the string "0.0", 7 is
       // "7.0", 1e7 is "1.0E7", and -0 is "0.0" (java::double_text). So the
       // query "0" does not match the center 0 and "0.0" does. The center used
       // to be read as a bare number for a string field too, and compared with
-      // the Indexer code of the query's string, so it matched whichever
+      // the code of the query's string, so it matched whichever
       // category happened to have that code. An Array of type="string"
       // (refused by JPMML, so there is no oracle) is read token by token.
       const bool string_array = arr.required_attribute("type") == "string";
@@ -275,7 +276,7 @@ class ClusteringModel : public InternalModel {
         }
         const std::string center =
             string_array ? vals[i] : java::double_text(::to_double(vals[i]) + 0.0);  // + 0.0: -0 is 0, as in JPMML
-        c.centroid[at] = Value(center, DataType::DataTypeValue::STRING).as_double();
+        c.centroid[at] = Value::string(center).as_double();
       }
 
       clusters.push_back(std::move(c));

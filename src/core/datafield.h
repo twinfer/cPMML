@@ -66,11 +66,11 @@ class DataField {
         optype(OpType::read(node)) {
     auto values = node.get_childs("Value");
     std::vector<Predicate> tmp_contraints;
-    std::set<Value> allowed_values;
-    std::set<Value> forbidden_values;
+    std::vector<Value> allowed_values;
+    std::vector<Value> forbidden_values;
     // Document text (§3.4, design commit P2.2): a valid or invalid
     // Value@value is a value of the field, read by the K1 rule, which
-    // Value(text, datatype) is in the engine's storage (bind/load_scope.h:
+    // Value::document(text, datatype) is in the engine's storage (bind/load_scope.h:
     // an integer field's "4.0" is the double 4, rule 2); a missing marker is
     // matched as raw text first (§2.8), so it may be anything. Interval
     // margins are NUMBER (xs:double), whatever the field's type.
@@ -78,20 +78,26 @@ class DataField {
       auto property = Property(value);
       switch (property.value) {
         case Property::PropertyValue::VALID:
-          allowed_values.emplace(Value(value.required_attribute("value"), datatype));
+          allowed_values.push_back(Value::document(value.required_attribute("value"), datatype));
           valid_values.push_back(value.required_attribute("value"));
           break;
         case Property::PropertyValue::MISSING:
           missing_markers.insert(value.required_attribute("value"));
           break;
         case Property::PropertyValue::INVALID:
-          forbidden_values.emplace(Value(value.required_attribute("value"), datatype));
+          forbidden_values.push_back(Value::document(value.required_attribute("value"), datatype));
           break;
       }
     }
     using Op = PredicateOpType::PredicateOpTypeValue;
-    if (allowed_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_IN, allowed_values));
-    if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_NOT_IN, forbidden_values));
+    // The members are one per LegacyCompare key, as the std::set<Value> they
+    // were (switch 2): n_values counts the distinct ones.
+    std::size_t n_allowed = 0;
+    if (allowed_values.size() > 0) {
+      tmp_contraints.push_back(Predicate(index, Op::IS_IN, allowed_values, false));
+      n_allowed = tmp_contraints.back().values.size();
+    }
+    if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_NOT_IN, forbidden_values, false));
 
     auto intervals = node.get_childs("Interval");
     for (const auto& interval : intervals)
@@ -99,7 +105,7 @@ class DataField {
 
     if (tmp_contraints.size() > 0) constraints = Predicate(tmp_contraints, Op::AND);
 
-    n_values = allowed_values.size() > 0 ? allowed_values.size() : 1;
+    n_values = n_allowed > 0 ? n_allowed : 1;
   };
 
   // A missing value is not an invalid one: PMML keeps the two apart, and what
@@ -111,7 +117,6 @@ class DataField {
     if (constraints.is_empty || sample[index].value.is_missing()) return true;
     return constraints(sample);
   }
-  inline Value createValue(const std::string& value) const { return Value(value, datatype); }
 
   static std::unordered_map<std::string, DataField> to_datafields(const std::vector<XmlNode>& nodes,
                                                                   const std::shared_ptr<Indexer>& indexer) {

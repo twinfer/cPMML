@@ -5,10 +5,12 @@
  * R3 in the review was that scoring was not thread-safe despite the
  * thread-local indexer design: the per-model string map was mutated during
  * scoring, and OMP worker threads scored against whichever indexer happened to
- * be active on their thread. Both are fixed -- the map is frozen when parsing
- * ends and every entry point establishes a ScopedIndexer -- but nothing in the
- * suite would notice if either regressed, because a data race does not fail a
- * single-threaded fixture.
+ * be active on their thread. Both are fixed -- since P5 the document's
+ * StringPool is frozen when parsing ends and only read while scoring, and
+ * every entry point (and every OMP segment worker) scores in a StringScope
+ * whose arena is its thread's -- but nothing in the suite would notice if
+ * either regressed, because a data race does not fail a single-threaded
+ * fixture.
  *
  * The assertion is not "it did not crash", which a race passes almost every
  * time. It is that every concurrent answer is identical to the single-threaded
@@ -17,7 +19,7 @@
  *
  * Run it under `cmake -DSANITIZE=thread`. That is where it earns its keep:
  * reintroduce the R3 defect -- delete the frozen check in
- * Indexer::get_string_value -- and a plain Release build passes this test every
+ * cpmml::StringScope::rep -- and a plain Release build passes this test every
  * time, while the same binary built with -fsanitize=thread reports the race and
  * fails the divergence assertion as well.
  *******************************************************************************/

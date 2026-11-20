@@ -57,11 +57,11 @@ class ModelBuilder {
         document.child("PMML"), std::string_view(file_data.data(), file_data.size()));
     scope->check();
     const cpmml::bind::LoadScope::Active active_scope(*scope);
-    // Parse-time indexer scope guard: evaluator constructors set
-    // Value::active_indexer (via make_and_activate_indexer); this guard
-    // restores the previous value on every exit path so the thread-local never
-    // dangles past the model's lifetime.
-    Value::ScopedIndexer parse_scope(Value::active_indexer);
+    // The document's strings (§2.3, design P5): every string the load names
+    // is interned in its pool, in the order the load names it; the evaluator
+    // and its models keep it (StringScope::loading()).
+    const auto strings = std::make_shared<cpmml::DocumentStrings>();
+    const cpmml::StringScope load_strings(cpmml::StringScope::Loading{}, strings);
 
     std::unique_ptr<InternalEvaluator> evaluator;
     for (const auto& entry : MODEL_TABLE)
@@ -72,9 +72,9 @@ class ModelBuilder {
 
     if (!evaluator) throw cpmml::ParsingException("unsupported model type");
 
-    // Parsing is done: freeze the per-model string map so concurrent scoring
+    // Parsing is done: freeze the document's pool so concurrent scoring
     // threads can read it without synchronization.
-    if (evaluator->indexer) evaluator->indexer->freeze();
+    strings->pool.freeze();
     evaluator->load_scope = scope;
 
     return evaluator;

@@ -30,8 +30,9 @@ class NormContinuous : public Expression {
   std::string field_name;
   size_t index = std::numeric_limits<size_t>::max();
   OutlierTreatmentMethod outliertreatment_method;
-  std::vector<Value> orig;
-  std::vector<Value> norm;
+  // LinearNorm@orig and @norm: NUMBER (xs:double).
+  std::vector<double> orig;
+  std::vector<double> norm;
 
   NormContinuous() = default;
 
@@ -54,26 +55,28 @@ class NormContinuous : public Expression {
     inputs.insert(field_name);
   }
 
-  static std::vector<Value> get_values(const std::string& linearnorm_type, const XmlNode& node) {
-    std::vector<Value> result;
+  static std::vector<double> get_values(const std::string& linearnorm_type, const XmlNode& node) {
+    std::vector<double> result;
 
     for (const auto& linear_norm : node.get_childs("LinearNorm"))
-      result.push_back(cpmml::bind::number_attribute(linear_norm, linearnorm_type));
+      result.push_back(cpmml::bind::number_attribute(linear_norm, linearnorm_type).as_double());
 
     return result;
   }
 
+  // The input is read as the double it holds (a string as its code, switch 2,
+  // core/value.h).
   inline unsigned int get_interval(
-      const Value& value) const {  // if value == orig then the closest interval will be right and
+      const double value) const {  // if value == orig then the closest interval will be right and
                                    // the interpolation also (look at formula and ifs to see it)
     unsigned int i, min_i = std::numeric_limits<unsigned int>::min();
-    Value min(std::numeric_limits<double>::max(), DataType::DataTypeValue::DOUBLE), a, b;
+    double min = std::numeric_limits<double>::max(), a = 0, b = 0;
     for (i = 0; i < (orig.size() - 1); i++) {
       if (value > orig[i] && value < orig[i + 1]) {
         return i;  // correct interval
       } else {
-        a = value.diff(orig[i]);
-        b = value.diff(orig[i + 1]);
+        a = std::abs(value - orig[i]);
+        b = std::abs(value - orig[i + 1]);
         if (a < min || b < min) {
           min_i = i;
           if (a < min) min = a;
@@ -85,16 +88,17 @@ class NormContinuous : public Expression {
     return min_i;  // nearest interval (see outlier below)
   }
 
-  inline Value interpolate(const Value& value) const {
+  inline Value interpolate(const double value) const {
     unsigned int i = get_interval(value);
-    return norm[i] + (value - orig[i]) / (orig[i + 1] - orig[i]) *
-                         (norm[i + 1] - norm[i]);  // that's why input and output type must be equal
+    return Value(norm[i] + (value - orig[i]) / (orig[i + 1] - orig[i]) *
+                               (norm[i + 1] - norm[i]));  // that's why input and output type must be equal
   }
 
   inline Value eval(const Sample& sample) const override {
-    Value input = sample[index].value;
+    const Value& value = sample[index].value;
 
-    if (input.is_missing()) return mapmissing_to;  // missing when no mapMissingTo is given
+    if (value.is_missing()) return mapmissing_to;  // missing when no mapMissingTo is given
+    const double input = cpmml::legacy::LegacyCompare::key(value);
 
     if (input < orig.front() || input > orig.back()) {  // outlier
       switch (outliertreatment_method.value) {
@@ -103,7 +107,7 @@ class NormContinuous : public Expression {
         case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
           return mapmissing_to;
         case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-          return input < orig.front() ? norm.front() : norm.back();
+          return Value(input < orig.front() ? norm.front() : norm.back());
       }
     }
 

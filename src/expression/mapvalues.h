@@ -55,7 +55,9 @@ class MapValues : public Expression {
   std::unordered_map<std::string, size_t> index;
   std::unordered_map<std::string, DataType> datatype;
   std::vector<std::string> columns;
-  TreeTable<Value, Value, Value::ValueHash> tree_table;
+  // Keyed by each cell's LegacyCompare key (switch 2, core/value.h): a number
+  // itself, a string its code.
+  TreeTable<double, Value, std::hash<double>> tree_table;
   std::unordered_map<std::string, std::string> fieldcolumn_pairs;
   std::vector<size_t> raw_columns;
 
@@ -105,7 +107,7 @@ class MapValues : public Expression {
     std::set<std::vector<double>> seen;
     const bool reads_slot = cpmml::bind::slot_reads_values(node, type, output_type);
     for (const auto& n : raw_node.get_child("InlineTable").get_childs("row")) {
-      std::vector<Value> keys;
+      std::vector<double> keys;
       std::vector<double> typed;
       for (const auto& column : columns) {
         // Keys must carry the same datatype as the field they are compared
@@ -118,8 +120,8 @@ class MapValues : public Expression {
           throw cpmml::ParsingException(std::string(cpmml::bind::code::kKeyNaN) + ": MapValues row <" + column +
                                         ">NaN</" + column +
                                         ">: a NaN key matches no input (§2.7, D26: a NaN key is a load error)");
-        keys.push_back(Value(text, type));
-        const double key = keys.back().as_double();
+        keys.push_back(cpmml::legacy::LegacyCompare::key(Value::document(text, type)));
+        const double key = keys.back();
         typed.push_back(type == DataType::DataTypeValue::FLOAT ? static_cast<double>(static_cast<float>(key)) : key);
       }
       if (!seen.insert(typed).second) {
@@ -135,15 +137,14 @@ class MapValues : public Expression {
   }
 
   inline Value eval(const Sample& sample) const override {
-    std::vector<Value> keys;
-    Value tmp;
+    std::vector<double> keys;
     bool missing_input = false;
 
     for (const auto& column : raw_columns) {
-      tmp = sample[column].value;
+      const Value& tmp = sample[column].value;
       if (tmp.is_missing()) missing_input = true;
 
-      keys.push_back(tmp);
+      keys.push_back(cpmml::legacy::LegacyCompare::key(tmp));
     }
 
     if (missing_input) {

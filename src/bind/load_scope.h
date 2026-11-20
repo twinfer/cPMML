@@ -220,12 +220,12 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
 //
 // The K1 rule itself (§3.4: "1. the text is a T literal -> a value of T;
 // 2. else it is an xs:double literal -> a Double ...; 3. else (non-numeric
-// text) -> load error") is what Value(text, DataType) computes in the old
-// storage, where integer, float and double are all doubles: an integer
-// field's "33.0" (rule 2) is the double 33 either way, and float text is not
-// narrowed until P6 (B4). So a value of a field is Value(text, the field's
-// type): what P2.2 changes is which type that is (the field's, from
-// scope_resolve, not the enclosing DerivedField's).
+// text) -> load error") is what Value::document(text, DataType) computes in
+// the engine's storage, where every number is read as an xs:double: an
+// integer field's "33.0" (rule 2) is the number 33 either way, and float text
+// is not narrowed until P6 (B4, switch 1). So a value of a field is
+// Value::document(text, the field's type): what P2.2 changes is which type
+// that is (the field's, from scope_resolve, not the enclosing DerivedField's).
 
 // The engine type's TypeId (the temporal types are DOUBLE).
 inline TypeId type_id(const DataType& t) {
@@ -309,7 +309,7 @@ inline ::Value document_constant(const XmlNode& node, const std::string& what, c
   const auto kind = [](TypeId t) { return t == TypeId::String ? 0 : t == TypeId::Boolean ? 1 : 2; };
   // Same kind: the text as the engine reads it in `store` (a float's text
   // keeps its double reading, B4; an integer is a double).
-  if (kind(type) == kind(to)) return ::Value(text, store);
+  if (kind(type) == kind(to)) return ::Value::document(text, store);
   std::string scratch;
   const types::Value cast = types::cold::cast(ColdPathIssuer::make(), to, v, ctx, scratch);
   if (types::is_invalid(cast) || types::is_missing(cast))
@@ -398,7 +398,7 @@ inline DataType constant_store(const XmlNode& node, TypeId own) {
 // predictor, a DerivedField of a number type over the slot) read the code as
 // they do for every string value until P4.7 casts the reader.
 inline ::Value string_slot_constant(const std::string& text, double number) {
-  ::Value v(text, DataType::DataTypeValue::STRING);
+  ::Value v = ::Value::string(text);
   v.mark_numeric_text();
   const double back = v.text_number();
   if (!(back == number || (std::isnan(back) && std::isnan(number))))
@@ -490,7 +490,7 @@ inline ::Value element_constant(const XmlNode& element, const XmlNode& node, con
 // orig/norm, MiningField lowValue/highValue. Read as a double whatever the
 // enclosing type (L1, B11).
 inline ::Value number_attribute(const XmlNode& node, const std::string& name) {
-  return ::Value(node.required_double_attribute(name), DataType::DataTypeValue::DOUBLE);
+  return ::Value(node.required_double_attribute(name));
 }
 
 // NormContinuous@mapMissingTo and NormDiscrete@mapMissingTo: NUMBER (B11),

@@ -139,7 +139,7 @@ class AssociationModel : public InternalModel {
     // Transactional: extract collection from the item field, build active items
     // from the collection values, then score. MiningSchema preparation uses
     // only the string fields (group field is skipped).
-    Value::ScopedIndexer _scope(indexer.get());  // string interning must use this model's map
+    const cpmml::StringScope strings_scope(cpmml::StringScope::Scoring{}, *strings);
     Sample internal_sample = base_sample;
     std::unordered_map<std::string, std::string> flat;
     std::vector<std::string> basket;
@@ -244,7 +244,7 @@ class AssociationModel : public InternalModel {
         const DataType dt  = indexer->get_type(item.field);
         if (sample[idx].value.is_missing()) continue;
         const std::string& match = !item.category.empty() ? item.category : item.value;
-        if (sample[idx].value == Value(match, dt))
+        if (cpmml::legacy::LegacyCompare::equal(sample[idx].value, Value::document(match, dt)))
           active.insert(id);
       } else {
         // Binary encoding: field name == item value, item present when field != 0

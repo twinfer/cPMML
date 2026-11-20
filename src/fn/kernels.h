@@ -49,8 +49,8 @@
  * binder types a slot that a MiningField widens as double, also from the
  * TransformationDictionary; see integer_operand).
  * Comparisons delegate
- * to `LegacyCompare`, today's Value operators (the double: a number, a boolean's 1 or 0, a
- * string's Indexer code), until P6. The string edits (uppercase, lowercase,
+ * to `LegacyCompare`, switch 2 of core/value.h (the double: a number, a boolean's 1 or 0, a
+ * string's legacy code), until P6. The string edits (uppercase, lowercase,
  * substring, trimBlanks) delegate to `LegacyStringEdit`, the Value's own
  * in-place edit, which keeps the argument's string code (B2, P6) and its
  * Value: decided 2026-11-19 after P3, "a kernel never round-trips a string
@@ -106,8 +106,7 @@ struct NumberPattern;  // formatNumber's pattern, below
 // arguments' static types (bind::expression_type, the binder's answer) and
 // the result type (bind::apply_result_type, the table's result rule). Set by
 // ApplyNode for the numeric functions, the comparisons, concat and
-// formatNumber; all false (empty) for the others (core/builtinfunctions.h's `typed()` flags,
-// unchanged).
+// formatNumber; all false (empty) for the others.
 struct Bound {
   // A float argument is an xs:float, so it is narrowed before use (the
   // engine carries it as a double).
@@ -649,15 +648,10 @@ inline bool format_number(const NumberPattern& pattern, double v, std::string& o
 }  // namespace scalar
 
 // ---------------------------------------------------------------- legacy delegates
-// Comparisons as today (legacy::LegacyCompare): the Value operators.
-struct LegacyCompare {
-  static bool equal(const ::Value& a, const ::Value& b) { return a == b; }
-  static bool not_equal(const ::Value& a, const ::Value& b) { return a != b; }
-  static bool less_than(const ::Value& a, const ::Value& b) { return a < b; }
-  static bool less_or_equal(const ::Value& a, const ::Value& b) { return a <= b; }
-  static bool greater_than(const ::Value& a, const ::Value& b) { return a > b; }
-  static bool greater_or_equal(const ::Value& a, const ::Value& b) { return a >= b; }
-};
+// Comparisons as today (legacy::LegacyCompare): the engine's one
+// LegacyCompare, switch 2 of core/value.h (the double each Value is compared
+// by).
+using LegacyCompare = ::cpmml::legacy::LegacyCompare;
 
 // The string edits as today (legacy::B2): the argument's Value, edited in
 // place, keeping its string code.
@@ -1073,7 +1067,8 @@ inline Status substring(const Bound&, const ::Value* args, std::size_t, ::Value&
 // A missing argument never reaches the kernel (MissingRule::Propagate:
 // "any missing inputs to a built-in function will result in a missing value
 // being returned"). The result is a string the kernel built: packed as the
-// engine builds one (Value(text, STRING): the active Indexer's code).
+// engine builds one (Value::string: its pooled rep and code, or the unseen
+// code of a text the pool lacks).
 inline bool append_text(std::string& out, const ::Value& v, types::TypeId type) {
   if (type == types::TypeId::String || !v.text().empty()) return scalar::append(out, v.text()), true;
   const double d = v.as_double();
@@ -1099,7 +1094,7 @@ inline Status concat(const Bound& bound, const ::Value* args, std::size_t n, ::V
   std::string result;
   for (std::size_t i = 0; i < n; i++)
     if (!append_text(result, args[i], bound.argument_type[i])) return Status::Invalid;
-  out = ::Value(result, DataType::DataTypeValue::STRING);
+  out = ::Value::string(result);
   return Status::Ok;
 }
 // The static type concat casts an argument from: the binder's
@@ -1121,8 +1116,8 @@ inline types::TypeId text_type(const std::optional<types::TypeId>& type) {
 // then a load error), else the argument's text, cast to string by its static
 // type as concat casts (append_text), parsed here: a pattern that cannot be
 // applied is an invalid result, as is a value an integer conversion cannot
-// take. The result is a string the kernel built: packed (Value(text,
-// STRING)). A missing input or pattern never reaches the kernel
+// take. The result is a string the kernel built: packed
+// (Value::string). A missing input or pattern never reaches the kernel
 // (MissingRule::Propagate).
 inline Status format_number(const Bound& bound, const ::Value* args, std::size_t n, ::Value& out) {
   if (bound.argument_type.size() != n)
@@ -1139,7 +1134,7 @@ inline Status format_number(const Bound& bound, const ::Value* args, std::size_t
     if (!scalar::parse_number_pattern(text, pattern).empty() || !scalar::format_number(pattern, v, result))
       return Status::Invalid;
   }
-  out = ::Value(result, DataType::DataTypeValue::STRING);
+  out = ::Value::string(result);
   return Status::Ok;
 }
 inline Status string_length(const Bound&, const ::Value* args, std::size_t, ::Value& out) {

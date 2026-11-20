@@ -107,15 +107,15 @@ class Discretize : public Expression {
     std::vector<Predicate> bounds;
     if (const auto left = node.optional_attribute("leftMargin"))
       bounds.push_back(Predicate(index, left_closed ? Op::GREATER_OR_EQUAL : Op::GREATER_THAN,
-                                 Value(*left, DataType::DataTypeValue::DOUBLE)));
+                                 Value::document(*left, DataType::DataTypeValue::DOUBLE)));
     if (const auto right = node.optional_attribute("rightMargin"))
       bounds.push_back(Predicate(index, right_closed ? Op::LESS_OR_EQUAL : Op::LESS_THAN,
-                                 Value(*right, DataType::DataTypeValue::DOUBLE)));
+                                 Value::document(*right, DataType::DataTypeValue::DOUBLE)));
     return Predicate(bounds, Op::AND);
   }
 
   inline Value eval(const Sample& sample) const override {
-    Value input = sample[index].value;
+    const Value& input = sample[index].value;
 
     if (input.is_missing()) return mapmissing_to;
 

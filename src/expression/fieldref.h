@@ -66,7 +66,7 @@ class FieldRef : public Expression {
   }
 
   inline Value eval(const Sample& sample) const override {
-    Value value = sample[index].value;
+    const Value& value = sample[index].value;
     return value.is_missing() ? mapmissing_to : value;
   }
 };
@@ -98,11 +98,12 @@ class SimpleFieldRef {
       : exist_missingreplacement(node.exists_attribute("mapMissingTo")),
         field_name(node.required_attribute("field")),
         index(field.index),
-        mapmissing_to(exist_missingreplacement ? Value(node.required_attribute("mapMissingTo"), field.datatype)
-                                               : Value()) {}
+        mapmissing_to(exist_missingreplacement
+                          ? Value::document(node.required_attribute("mapMissingTo"), field.datatype)
+                          : Value()) {}
 
   inline Value value(const Sample& sample) const {
-    Value value = sample[index].value;
+    const Value& value = sample[index].value;
     return value.is_missing() ? mapmissing_to : value;
   }
 

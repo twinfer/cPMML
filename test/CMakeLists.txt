@@ -58,10 +58,11 @@ target_include_directories(typed_value.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
 add_dependencies(unit_tests typed_value.exe)
 add_test(typed_value typed_value.exe)
 
-# The P3 accessors of the engine's Value and the adapters between it and the
-# typed value (src/core/value.h, docs/design/typed-core.md §7 P3): pack(unpack)
-# round trips over every P1 scalar type and missing. Links the library for the
-# exceptions and the Indexer's string codes.
+# The engine's Value (src/core/value.h, docs/design/typed-core.md §7 P3, P5):
+# the accessors over the types::Value it holds, the document StringPool and
+# the per-evaluation arena (StringScope), the two compatibility switches, and
+# pack(unpack) round trips over every P1 scalar type and missing. Links the
+# library for the exceptions.
 add_executable(value_adapters.exe value_adapters.cc)
 target_include_directories(value_adapters.exe PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(value_adapters.exe PRIVATE ${PROJECT_SOURCE_DIR}/src)
