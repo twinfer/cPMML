@@ -1391,6 +1391,7 @@ static void arity() {
       {"tan", 1, 1},
       {"atan", 1, 1},
       {"tanh", 1, 1},
+      {"formatNumber", 2, 2},  // design item P4.9: input, pattern
   };
   const auto apply = [](const std::string& function, int n, const std::string& attrs = "") {
     std::string e = "<Apply function=\"" + function + "\"" + attrs + ">";

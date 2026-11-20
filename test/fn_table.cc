@@ -19,6 +19,9 @@
  *     kernel by kernel and through a whole document.
  *   - The int64 kernels of integer calls (P4.5, D4), exactness and
  *     overflow, kernel by kernel and through a whole document.
+ *   - formatNumber (P4.9): POSIX printf patterns against the C library's
+ *     snprintf, the patterns it cannot apply, float narrowing, and through a
+ *     whole document (load errors included).
  *   - ArgBuffer, inline and on the heap.
  *
  * Usage: fn_table.exe   (exit 0 when every check holds)
@@ -29,6 +32,8 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -115,9 +120,9 @@ static void table() {
             rule);
     }
   }
-  // The 59 functions core/builtinfunctions.h evaluated, and and or (P4.8);
-  // the 9 others it refused.
-  CHECK(evaluated == 61, "every function cPMML evaluated before P4.1, and and or, has a kernel");
+  // The 59 functions core/builtinfunctions.h evaluated, and and or (P4.8),
+  // formatNumber (P4.9); the 8 others it refused.
+  CHECK(evaluated == 62, "every function cPMML evaluated before P4.1, and, or and formatNumber, has a kernel");
   CHECK(std::size(fn::kBuiltins) == 70, "BuiltinFunctions.html lists 70 functions");
 
   // The load errors the engine gave (core/builtinfunctions.h from_string),
@@ -138,14 +143,13 @@ static void table() {
       "isNotMissing, equal, notEqual, lessThan, lessOrEqual, greaterThan, greaterOrEqual, isIn, isNotIn, replace, "
       "matches, uppercase, lowercase, substring, trimBlanks, concat, stringLength, median, product, threshold, "
       "modulo, not, expm1, ln1p, hypot, rint, sin, asin, sinh, cos, acos, cosh, tan, atan, tanh, erf, normalCDF, "
-      "normalPDF, stdNormalCDF, stdNormalPDF, and, or";
-  for (const char* refused : {"isValid", "isNotValid", "normalIDF", "stdNormalIDF", "formatNumber",
-                              "formatDatetime", "dateDaysSinceYear", "dateSecondsSinceYear",
+      "normalPDF, stdNormalCDF, stdNormalPDF, and, or, formatNumber";
+  for (const char* refused : {"isValid", "isNotValid", "normalIDF", "stdNormalIDF", "formatDatetime", "dateDaysSinceYear", "dateSecondsSinceYear",
                               "dateSecondsSinceMidnight"})
     CHECK(message_of<cpmml::ParsingException>([&] { fn::engine_row(refused); }) ==
               "unsupported value \"" + std::string(refused) + "\" for Apply@function; cPMML supports " + supported,
           std::string(refused) + ": refused at load, as before P4.1 (and and or are evaluated since P4.8, "
-                                 "at the end of the list)");
+                                 "formatNumber since P4.9, at the end of the list)");
   CHECK(&fn::engine_row("+") == fn::find("+"), "the engine reads the binder's row");
 }
 
@@ -858,6 +862,326 @@ static void concat_in_document() {
   CHECK(out(cat(i + bar), "", "2") == "N/A", "a missing argument: a missing result");
 }
 
+// formatNumber (design item P4.9). BuiltinFunctions.html: "Formats numbers
+// according to a pattern. The pattern uses the Posix descriptors as used,
+// e.g., in the C function printf". The oracle is the C library's snprintf
+// (POSIX printf), called here with the C argument each conversion takes;
+// cPMML formats with std::to_chars and its own flags, width and padding, so
+// the two are independent. An integer conversion is given the value as a
+// long long ("ll" inserted before the specifier), only when the value is an
+// integer the conversion takes.
+static std::string printf_text(const std::string& pattern, double v) {
+  char buffer[2048];
+  const std::size_t at = pattern.find_last_of("diouxXfFeEgGaA");
+  const char s = pattern[at];
+  if (std::string("diouxX").find(s) != std::string::npos) {
+    const std::string format = pattern.substr(0, at) + "ll" + pattern.substr(at);
+    std::snprintf(buffer, sizeof(buffer), format.c_str(), static_cast<long long>(v));
+  } else {
+    std::snprintf(buffer, sizeof(buffer), pattern.c_str(), v);
+  }
+  return buffer;
+}
+static std::optional<std::string> format_one(const std::string& pattern, double v) {
+  fn::scalar::NumberPattern parsed;
+  const std::string reason = fn::scalar::parse_number_pattern(pattern, parsed);
+  if (!reason.empty()) throw std::logic_error("pattern " + pattern + ": " + reason);
+  std::string out;
+  if (!fn::scalar::format_number(parsed, v, out)) return std::nullopt;
+  return out;
+}
+static std::string refusal(const std::string& pattern) {
+  fn::scalar::NumberPattern parsed;
+  return fn::scalar::parse_number_pattern(pattern, parsed);
+}
+
+static void format_number_kernel(Indexer& indexer) {
+  const fn::Signature* sig = fn::find("formatNumber");
+  CHECK(sig && sig->min_args == 2 && sig->max_args == 2 && sig->param(0) == fn::Param::Numeric &&
+            sig->param(1) == fn::Param::String && sig->result == fn::Result::Fixed &&
+            sig->fixed == t::TypeId::String && sig->missing == fn::MissingRule::Propagate &&
+            sig->engine == fn::Engine::Today && sig->op == fn::Op::FormatNumber,
+        "formatNumber: input, pattern dataType=string; result dataType=string; missing propagates");
+  // The spec's example: "%3d" of 2 is "  2".
+  CHECK(format_one("%3d", 2) == std::optional<std::string>("  2"), "BuiltinFunctions.html: %3d of 2 is \"  2\"");
+
+  // Every flag, width and precision of the integer conversions, against
+  // printf.
+  const double inf = std::numeric_limits<double>::infinity();
+  int compared = 0, agreed = 0;
+  std::string first_disagreement;
+  const auto against_printf = [&](const std::string& pattern, double v) {
+    compared++;
+    const auto mine = format_one(pattern, v);
+    const std::string c = printf_text(pattern, v);
+    if (mine && *mine == c) agreed++;
+    else if (first_disagreement.empty())
+      first_disagreement = pattern + " of " + std::to_string(v) + ": " + (mine ? *mine : "<invalid>") + " vs " + c;
+  };
+  for (const char* conversion : {"d", "i", "o", "u", "x", "X"})
+    for (const char* flags : {"", "-", "+", " ", "0", "#", "-0", "+0", " 0", "#0", "-#", "+ "})
+      for (const char* width : {"", "1", "6"})
+        for (const char* precision : {"", ".", ".0", ".1", ".4"}) {
+          const std::string c(conversion), f(flags);
+          if (f.find('#') != std::string::npos && (c == "d" || c == "i" || c == "u")) continue;
+          for (double v : {0.0, 1.0, 7.0, 42.0, 255.0, 1000000.0, 9007199254740993.0, 4611686018427387904.0})
+            against_printf("[%" + f + width + precision + c + "]", v);
+          if (c == "d" || c == "i")
+            for (double v : {-1.0, -42.0, -1000000.0, -9223372036854775808.0})
+              against_printf("[%" + f + width + precision + c + "]", v);
+        }
+  // The floating conversions: flags, width, precision; values whose digits
+  // round (0.125, 2.5, 1.005, 0.0005), large and small, negative zero,
+  // infinities and NaN (positive: C writes "-nan" for a NaN with its sign bit
+  // set, PMML's NaN has no sign). NaN is compared only under flags with no +
+  // and no <space>: POSIX leaves the sign of a NaN to the implementation
+  // (glibc writes "+nan" and " nan", macOS "nan"); cPMML's rule, no sign, is
+  // pinned by the "[%+ 5f]" check below, not by the host's printf.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const char* conversion : {"f", "F", "e", "E", "g", "G", "a", "A"})
+    for (const char* flags : {"", "-", "+", " ", "0", "#", "-0", "+0", "#0", "-#", "+ ", " +"})
+      for (const char* width : {"", "4", "14"})
+        for (const char* precision : {"", ".", ".0", ".1", ".3", ".17"}) {
+          const std::string f(flags);
+          const bool signed_flag = f.find_first_of("+ ") != std::string::npos;
+          for (double v : {0.0, -0.0, 0.5, 2.5, 0.125, 1.005, 0.0005, 1e-5, 1.0 / 3, 123456789.0, 1e10, 1e16, 1e22,
+                           1.7976931348623157e308, 2.2250738585072014e-308, -1234.5678, 9.999999, 99.95, inf, -inf,
+                           nan}) {
+            if (signed_flag && std::isnan(v)) continue;
+            against_printf("[%" + f + width + precision + conversion + "]", v);
+          }
+        }
+  CHECK(agreed == compared, "formatNumber agrees with printf on " + std::to_string(compared) +
+                                " pattern and value pairs; first disagreement: " + first_disagreement);
+
+  // The text around the conversion, %%, no conversion, %1$.
+  CHECK(format_one("rate %.1f%%", 0.25) == std::optional<std::string>("rate 0.2%"), "text and %% (0.25: ties to even)");
+  CHECK(format_one("no conversion", 7) == std::optional<std::string>("no conversion"),
+        "no conversion: the text alone (\"the excess arguments shall be evaluated but are otherwise ignored\")");
+  CHECK(format_one("%%d", 7) == std::optional<std::string>("%d"), "%% is a percent sign, then text");
+  CHECK(format_one("%1$.0f|%1$e|%1$x", 10) == std::optional<std::string>("10|1.000000e+01|a"),
+        "%1$ conversions all convert the one input");
+  CHECK(format_one("", 7) == std::optional<std::string>(""), "the empty pattern is the empty string");
+  // Rounding from the binary value, ties to even (printf: "rounded in an
+  // implementation-defined manner"; IEEE 754's default; JPMML rounds the
+  // decimal half up).
+  CHECK(format_one("%.2f", 0.125) == std::optional<std::string>("0.12") &&
+            format_one("%.2f", 0.375) == std::optional<std::string>("0.38") &&
+            format_one("%.0f", 0.5) == std::optional<std::string>("0") &&
+            format_one("%.0f", 1.5) == std::optional<std::string>("2") &&
+            format_one("%.2f", 1.005) == std::optional<std::string>("1.00"),
+        "ties to even on the exact binary value: 0.12, 0.38, 0, 2; 1.005 is 1.00499999999999989...");
+  CHECK(format_one("%g", 100000) == std::optional<std::string>("100000") &&
+            format_one("%g", 1000000) == std::optional<std::string>("1e+06") &&
+            format_one("%g", 0.0001) == std::optional<std::string>("0.0001") &&
+            format_one("%g", 0.00001) == std::optional<std::string>("1e-05") &&
+            format_one("%#.3g", 2) == std::optional<std::string>("2.00") &&
+            format_one("%.0g", 25) == std::optional<std::string>("2e+01"),
+        "%g: style f when P > X >= -4, else e; trailing zeros dropped unless #; 25 to one digit is 2e+01 (a tie)");
+  CHECK(format_one("%a", 1) == std::optional<std::string>("0x1p+0") &&
+            format_one("%A", 0.5) == std::optional<std::string>("0X1P-1") &&
+            format_one("%a", 4.9406564584124654e-324) == std::optional<std::string>("0x0.0000000000001p-1022"),
+        "%a: the subnormal's leading digit is 0 (\"otherwise unspecified\"; std::to_chars)");
+  CHECK(format_one("[%5f]", inf) == std::optional<std::string>("[  inf]") &&
+            format_one("[%05F]", -inf) == std::optional<std::string>("[ -INF]") &&
+            format_one("%E", std::numeric_limits<double>::quiet_NaN()) == std::optional<std::string>("NAN") &&
+            format_one("%f", -std::numeric_limits<double>::quiet_NaN()) == std::optional<std::string>("nan") &&
+            format_one("[%+ 5f]", std::numeric_limits<double>::quiet_NaN()) == std::optional<std::string>("[  nan]") &&
+            format_one("[%+f]", inf) == std::optional<std::string>("[+inf]"),
+        "inf, INF, nan with no sign (+ and <space> included), blank-padded (\"except when converting an infinity or NaN\")");
+  // printf: "If the <space> and '+' flags both appear, the <space> flag shall
+  // be ignored", in either order, for every floating conversion.
+  CHECK(format_one("[%+ .1f]", 1) == std::optional<std::string>("[+1.0]") &&
+            format_one("[% +.1f]", 1) == std::optional<std::string>("[+1.0]") &&
+            format_one("[% +.1e]", 1) == std::optional<std::string>("[+1.0e+00]") &&
+            format_one("[%+ g]", 1) == std::optional<std::string>("[+1]") &&
+            format_one("[% +a]", 1) == std::optional<std::string>("[+0x1p+0]") &&
+            format_one("[% +f]", inf) == std::optional<std::string>("[+inf]") &&
+            format_one("[% .1f]", 1) == std::optional<std::string>("[ 1.0]"),
+        "+ wins over <space> (\"the <space> flag shall be ignored\"); <space> alone gives a blank");
+  CHECK(format_one("[%.2f]", -0.0) == std::optional<std::string>("[-0.00]") &&
+            format_one("[%d]", -0.0) == std::optional<std::string>("[0]"),
+        "-0.0 keeps its sign in f (XSD double has -0, D18); the integer has one zero");
+  CHECK(format_one("%.0d", 0) == std::optional<std::string>("") && format_one("%#.0o", 0) == std::optional<std::string>("0") &&
+            format_one("%#x", 0) == std::optional<std::string>("0"),
+        "zero with precision 0 is no characters; #o gives one 0; # prefixes 0x to a non-zero result only");
+  CHECK(format_one("%300.250f", 1e300)->size() == 552, "a wide, precise fixed conversion (buffer)");
+
+  // A value an integer conversion cannot take: invalid.
+  CHECK(!format_one("%d", 2.5) && !format_one("%d", inf) && !format_one("%d", -inf) &&
+            !format_one("%d", std::numeric_limits<double>::quiet_NaN()) && !format_one("%d", 9223372036854775808.0) &&
+            !format_one("%d", 1e300),
+        "%d of a fraction, an infinity, NaN, or a value past int64 (D4) has no integer to convert: invalid");
+  CHECK(!format_one("%x", -3) && !format_one("%o", -1) && !format_one("%u", -42) && !format_one("%X", -0.5),
+        "o u x X take an unsigned argument: a negative value is invalid (JPMML: 32-bit two's complement)");
+  CHECK(format_one("%d", -9223372036854775808.0) == std::optional<std::string>("-9223372036854775808") &&
+            format_one("%x", 9223372036854775807.0 - 1024) == std::optional<std::string>("7ffffffffffffc00"),
+        "the int64 range, both ends");
+  CHECK(!format_one("%d|", 2.5) && !format_one("%1$f|%1$d", 2.5), "invalid when any conversion has no integer");
+
+  // Patterns formatNumber cannot apply, each with its reason.
+  struct Refused {
+    const char* pattern;
+    const char* reason;
+  };
+  for (const Refused& r : {
+           Refused{"%", "the conversion at the end is incomplete"},
+           Refused{"abc %5.", "the conversion at the end is incomplete"},
+           Refused{"%s", "'%s' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%5s", "'%s' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%c", "'%c' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%n", "'%n' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%p", "'%p' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%k", "'%k' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%5%", "'%%' is not a numeric conversion (d i o u x X f F e E g G a A)"},
+           Refused{"%ld", "the length modifier 'l' is not supported: the input is a PMML number, not a C type"},
+           Refused{"%hhd", "the length modifier 'h' is not supported: the input is a PMML number, not a C type"},
+           Refused{"%Lf", "the length modifier 'L' is not supported: the input is a PMML number, not a C type"},
+           Refused{"%jd", "the length modifier 'j' is not supported: the input is a PMML number, not a C type"},
+           Refused{"%*d", "a width given by an argument (*) is not supported: formatNumber has one input"},
+           Refused{"%.*f", "a precision given by an argument (.*) is not supported: formatNumber has one input"},
+           Refused{"%'d", "the thousands' grouping flag (') is not supported: its characters are the locale's"},
+           Refused{"%#d", "the flag '#' is undefined for '%d'"},
+           Refused{"%#i", "the flag '#' is undefined for '%i'"},
+           Refused{"%#u", "the flag '#' is undefined for '%u'"},
+           Refused{"%d %d", "it has 2 conversions: formatNumber has one input"},
+           Refused{"%f%e%g", "it has 3 conversions: formatNumber has one input"},
+           Refused{"%2$d", "argument \"%2$\" does not exist: formatNumber has one input"},
+           Refused{"%01$d", "argument \"%01$\" does not exist: formatNumber has one input"},
+           Refused{"%1$d %d", "numbered (%1$) and unnumbered conversions are mixed"},
+           Refused{"%2147483648d", "the field width is beyond C's int range"},
+           Refused{"%.2147483648f", "the precision is beyond C's int range"},
+       })
+    CHECK(refusal(r.pattern) == r.reason,
+          std::string("pattern \"") + r.pattern + "\": " + r.reason + " (got \"" + refusal(r.pattern) + "\")");
+  CHECK(refusal("%2147483647d").empty() && refusal("%-+ #0e").empty() && refusal("%1$d|%1$x").empty() &&
+            refusal("%%%%").empty(),
+        "C's int width, every flag of e, numbered conversions, two %%");
+
+  // The kernel over the engine's storage: the input by its static type (a
+  // float narrowed), the pattern parsed per record when no Constant was.
+  const auto kernel = [&](t::TypeId input, double v, const std::string& pattern, Value& out) {
+    fn::Bound bound;
+    bound.argument_type = {input, t::TypeId::String};
+    return call("formatNumber", {Value(v), Value(pattern, DataType::DataTypeValue::STRING)}, out, bound);
+  };
+  {
+    Value out;
+    CHECK(kernel(t::TypeId::Float, 0.1, "%.10f", out) == fn::Status::Ok && out.text() == "0.1000000015",
+          "a float input is narrowed, then promoted to double (the verifier's fix: not 0.1000000000)");
+    CHECK(kernel(t::TypeId::Double, 0.1, "%.10f", out) == fn::Status::Ok && out.text() == "0.1000000000",
+          "a double input is the double");
+    CHECK(kernel(t::TypeId::Float, 16777217, "%d", out) == fn::Status::Ok && out.text() == "16777216",
+          "%d of the float 16777217 is 16777216");
+    CHECK(kernel(t::TypeId::Integer, 2, "%.2f", out) == fn::Status::Ok && out.text() == "2.00",
+          "%.2f of an integer converts its value");
+    CHECK(kernel(t::TypeId::Double, 2.5, "%s", out) == fn::Status::Invalid, "a field pattern that cannot be applied is invalid");
+    CHECK(kernel(t::TypeId::Double, 2.5, "%d", out) == fn::Status::Invalid, "a field pattern: %d of 2.5 is invalid");
+    CHECK(kernel(t::TypeId::Double, 2.5, "%.1f", out) == fn::Status::Ok && out.text() == "2.5" &&
+              out.as_double() == indexer.get_string_value("2.5"),
+          "the result is packed with the Indexer's code");
+    fn::Bound pattern_bound;
+    pattern_bound.argument_type = {t::TypeId::Double, t::TypeId::Integer};
+    CHECK(call("formatNumber", {Value(2.5), Value(5.0)}, out, pattern_bound) == fn::Status::Ok && out.text() == "5",
+          "a number pattern is cast to string as concat casts (Java text of the integer 5): text alone");
+    fn::Bound parsed;
+    parsed.argument_type = {t::TypeId::Double, t::TypeId::String};
+    auto p = std::make_shared<fn::scalar::NumberPattern>();
+    fn::scalar::parse_number_pattern("<%+.1e>", *p);
+    parsed.number_pattern = p;
+    CHECK(call("formatNumber", {Value(2.5), Value("ignored %s", DataType::DataTypeValue::STRING)}, out, parsed) ==
+                  fn::Status::Ok &&
+              out.text() == "<+2.5e+00>",
+          "a pattern parsed at load is the one applied");
+  }
+  CHECK(message_of<std::logic_error>([] {
+          Value out;
+          call("formatNumber", {Value(1.0), Value("%d", DataType::DataTypeValue::STRING)}, out);
+        }) == "formatNumber: the call was not bound to its argument types",
+        "an unbound formatNumber throws");
+}
+
+static std::string load_error(const std::string& apply, const std::string& type = "string") {
+  const std::string path = "fn_table_load.pmml";
+  {
+    std::ofstream out(path);
+    out << apply_document(apply, type, false);
+  }
+  std::string error = "<loads>";
+  try {
+    cpmml::Model model(path, false);
+  } catch (const cpmml::ParsingException& e) {
+    error = e.what();
+  }
+  std::remove(path.c_str());
+  return error;
+}
+
+// formatNumber through a whole document (design item P4.9): i and e are
+// integer fields, t and r string fields.
+static void format_number_in_document() {
+  auto fmt = [](const std::string& input, const std::string& pattern, const std::string& attrs = "") {
+    return R"(<Apply function="formatNumber")" + attrs + ">" + input + pattern + "</Apply>";
+  };
+  auto pat = [](const std::string& p) { return R"(<Constant dataType="string">)" + p + "</Constant>"; };
+  const std::string i = R"(<FieldRef field="i"/>)", t = R"(<FieldRef field="t"/>)", r = R"(<FieldRef field="r"/>)";
+  auto out = [](const std::string& apply, const std::string& iv, const std::string& tv = "abc",
+                const std::string& rv = "b") { return apply_output(apply, iv, "2", tv, rv, "string"); };
+  CHECK(out(fmt(i, R"(<Constant>%3d</Constant>)"), "2") == "  2",
+        "the spec's example: an untyped Constant pattern (a string, S2), %3d of 2");
+  CHECK(out(fmt("<Extension/>" + i, "<Extension/>" + pat("[%05.1f]")), "-3") == "[-03.0]", "Extensions are no arguments");
+  CHECK(out(fmt(R"(<Constant dataType="float">0.1</Constant>)", pat("%.10f")), "2") == "0.1000000015",
+        "a float Constant is narrowed (its static type is float)");
+  CHECK(out(fmt(R"(<Apply function="/">)" + i + R"(<FieldRef field="e"/></Apply>)", pat("%.2f")), "7") == "3.00",
+        "integer 7/2 is the integer 3");
+  CHECK(out(fmt(R"(<Apply function="avg">)" + i + R"(<FieldRef field="e"/></Apply>)", pat("%.2f")), "7") == "4.50",
+        "avg is a double");
+  CHECK(out(fmt(i, pat("%d")), "") == "N/A", "a missing input: a missing result");
+  CHECK(out(fmt(i, pat("%d"), R"( mapMissingTo="none")"), "") == "none", "a missing input: mapMissingTo");
+  CHECK(out(fmt(i, R"(<Constant missing="true"/>)", R"( defaultValue="dv")"), "3") == "dv",
+        "a missing Constant pattern: a missing result, then defaultValue");
+  CHECK(out(fmt(i, t), "255", "%#x") == "0xff", "a pattern read from a field, per record");
+  CHECK(out(fmt(i, t, R"( invalidValueTreatment="asMissing" defaultValue="dv")"), "255", "%s") == "dv",
+        "a field pattern that cannot be applied is invalid: asMissing, then defaultValue");
+  CHECK(out(fmt(i, t), "255", "%s") ==
+            R"(ERROR: Apply "formatNumber" in DerivedField "p": invalid result (invalidValueTreatment="returnInvalid"))",
+        "a field pattern that cannot be applied is invalid: returnInvalid ends the record");
+  CHECK(out(fmt(i, t, R"( invalidValueTreatment="asIs")"), "-3", "%x") ==
+            R"(ERROR: Apply "formatNumber" in DerivedField "p": invalid result (invalidValueTreatment="asIs"))",
+        "%x of -3 is invalid: asIs is returnInvalid in an Apply");
+  CHECK(out(fmt(i, t), "3", "") == "N/A", "an empty pattern field is a missing input: a missing result");
+
+  // Load errors: a Constant pattern formatNumber cannot apply; an input that
+  // is no number; a boolean pattern.
+  const std::string where = R"(Apply "formatNumber" in RegressionModel)";
+  CHECK(load_error(fmt(i, pat("[%5s]"))) ==
+            "E-VALUE-MALFORMED: " + where +
+                R"(: pattern "[%5s]" cannot be applied: '%s' is not a numeric conversion (d i o u x X f F e E g G a A) )"
+                R"((BuiltinFunctions.html: "The pattern uses the Posix descriptors as used, e.g., in the C function printf"))",
+        "a Constant pattern that cannot be applied is a load error");
+  CHECK(load_error(fmt(i, R"(<Constant>%d %d</Constant>)")).find(
+            "cannot be applied: it has 2 conversions: formatNumber has one input") != std::string::npos,
+        "an untyped Constant pattern is checked at load too");
+  CHECK(load_error(fmt(i, R"(<Constant dataType="integer">5</Constant>)")) == "<loads>",
+        "an integer Constant pattern is the text 5 (no conversion)");
+  CHECK(load_error(fmt(t, pat("%d"))) ==
+            "E-TYPE-PARAM: " + where +
+                R"(: argument 1 of formatNumber is string, where a number is expected (BuiltinFunctions.html: "Formats numbers according to a pattern"; §2.5))",
+        "a string input is a load error");
+  CHECK(load_error(fmt(R"(<Apply function="isMissing">)" + i + "</Apply>", pat("%d"))) ==
+            "E-TYPE-BOOLEAN-MIXED: " + where +
+                R"(: argument 1 of formatNumber is boolean, where a number is expected (Functions.html: boolean "can not be mixed with other types", Q7))",
+        "a boolean input is a load error");
+  CHECK(load_error(fmt(i, R"(<Apply function="isMissing">)" + i + "</Apply>")) ==
+            "E-TYPE-BOOLEAN-MIXED: " + where +
+                R"(: argument 2 of formatNumber is boolean, where a string is expected (Functions.html: boolean "can not be mixed with other types", Q7))",
+        "a boolean pattern is a load error");
+  CHECK(load_error(fmt(i, "<Extension/>" + pat("%q"))).find(R"(pattern "%q" cannot be applied)") != std::string::npos,
+        "the pattern is the second argument after Extension*");
+  CHECK(load_error(fmt(i, pat("%d") + pat("%d"))).rfind("E-ARITY: ", 0) == 0, "three arguments: E-ARITY first");
+  (void)r;
+}
+
 // `if` (P4.3: the rule of P2.8b4's ApplyNode::eval_if, now the table's
 // MissingRule::LazyIf and the kernels if_taken / if_then_else).
 // BuiltinFunctions.html, if: "Implements IF-THEN-ELSE logic. The ELSE part is
@@ -957,6 +1281,8 @@ int main() {
   domains();
   domains_in_document();
   concat_in_document();
+  format_number_kernel(indexer);
+  format_number_in_document();
   integer_kernels();
   integer_in_document();
   arg_buffer();

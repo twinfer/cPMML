@@ -57,13 +57,16 @@
  */
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/types/arithmetic.h"
@@ -97,12 +100,16 @@ static_assert(B17, "P4.7 removes this switch together with the code it keeps");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
 
+namespace scalar {
+struct NumberPattern;  // formatNumber's pattern, below
+}
+
 // ---------------------------------------------------------------- bound call
 // What a kernel needs to know about its call, fixed at load from the
 // arguments' static types (bind::expression_type, the binder's answer) and
 // the result type (bind::apply_result_type, the table's result rule). Set by
-// ApplyNode for the numeric functions, the comparisons and concat; all false
-// (empty) for the others (core/builtinfunctions.h's `typed()` flags,
+// ApplyNode for the numeric functions, the comparisons, concat and
+// formatNumber; all false (empty) for the others (core/builtinfunctions.h's `typed()` flags,
 // unchanged).
 struct Bound {
   // A float argument is an xs:float, so it is narrowed before use (the
@@ -115,6 +122,10 @@ struct Bound {
   // concat (P4.6, B23): the static type each argument is cast to string
   // from, one per argument (adapter::text_type). Empty for every other call.
   std::vector<types::TypeId> argument_type;
+  // formatNumber (P4.9): the pattern, parsed at load when it is a Constant
+  // (null otherwise: parsed per record). argument_type holds the input's and
+  // the pattern's static types.
+  std::shared_ptr<const scalar::NumberPattern> number_pattern;
 };
 
 enum class Status : std::uint8_t { Ok, Invalid };
@@ -375,6 +386,274 @@ inline void append(std::string& out, types::Double x) { types::java_text(x, out)
 inline void append(std::string& out, types::Boolean x) { types::java_text(x, out); }
 // stringLength: "Returns the length of a string".
 inline types::Integer string_length(std::string_view text) { return {static_cast<std::int64_t>(text.size())}; }
+
+// formatNumber(input, pattern) (design item P4.9). BuiltinFunctions.html:
+// "Formats numbers according to a pattern. The pattern uses the Posix
+// descriptors as used, e.g., in the C function printf"; its example:
+// formatNumber(Num, "%3d") with Num=2 "is the string \"  2\"" ("a string of
+// length 3 with leading blanks"). The descriptors are POSIX fprintf()'s
+// (IEEE Std 1003.1, fprintf), in the POSIX locale ("In the POSIX locale ...
+// the radix character shall default to a <period>"): "Each conversion
+// specification is introduced by the '%' character or by the character
+// sequence "%n$", after which the following appear in sequence: Zero or more
+// flags ... An optional minimum field width ... An optional precision ... An
+// optional length modifier ... A conversion specifier character". The text
+// outside the conversions is copied; "%%" is a '%'.
+//
+// What a pattern may hold, the rest being a pattern formatNumber cannot
+// apply (a load error when the pattern is a Constant, else an invalid
+// result; adapter::format_number):
+//   - the numeric conversions d i o u x X f F e E g G a A ("%c", "%s", "%p",
+//     "%n" convert no number);
+//   - the flags - + <space> # 0, with POSIX's meaning; '#' with d, i or u is
+//     refused ("For other conversion specifiers, the behavior is
+//     undefined"), and so is the <apostrophe> (thousands' grouping), whose
+//     characters are the locale's, which PMML does not name;
+//   - a width and a precision written as decimal digits (up to INT_MAX, C's
+//     own limit); '*' is refused: "an argument of type int supplies the
+//     field width or precision", and formatNumber has one argument;
+//   - no length modifier (hh h l ll j z t L): each names the C type of the
+//     argument ("applies to a short ... argument"), which a PMML value does
+//     not have;
+//   - one conversion, or any number of "%1$" conversions (all of the input:
+//     "%n$" with n = 1, the only argument); another n, two unnumbered
+//     conversions ("If there are insufficient arguments for the format, the
+//     behavior is undefined") or numbered and unnumbered ones mixed are
+//     refused. No conversion is the text alone ("If the format is exhausted
+//     while arguments remain, the excess arguments shall be evaluated but are
+//     otherwise ignored").
+// The value is the input as a number of its static type, a float narrowed
+// first (a float "is promoted to double" by C's default argument promotions,
+// so %.10f of the float 0.1 is 0.1000000015; JPMML 1.7.7 agrees). The integer
+// conversions take a value that is an integer (d, i: "The int argument shall
+// be converted to a signed decimal"; o, u, x, X: "The unsigned argument"):
+// the input's value, of whatever type, when it is integral, within the int64
+// range (D4), and, for o u x X, not negative; another value (3.5, -3 for %x,
+// INF, NaN) has no integer to convert and the result is invalid. The other
+// conversions take the value as a double ("The double argument"). The low-
+// order digit is rounded from the exact binary value, to nearest, ties to
+// even ("rounded in an implementation-defined manner"; IEEE 754's default
+// rounding, as std::to_chars, which is "as if by printf in the C locale",
+// and the C libraries of glibc and macOS do), so %.2f of 0.125 is 0.12 and
+// of 1.005 (1.00499999999999989...) 1.00. An infinity is "inf" ("[-]inf"),
+// a NaN "nan" with no sign, '+' and <space> included (PMML's NaN has none;
+// "[-]nan", the sign implementation-defined; macOS's C library agrees,
+// glibc writes "+nan" for '+'), "INF"/"NAN"
+// for F, E, G and A, padded with blanks ("except when converting an
+// infinity or NaN"). %a writes the significand std::to_chars gives (a
+// normal number "1.h...", a subnormal "0.h...": "which shall be non-zero if
+// the argument is a normalized floating-point number and is otherwise
+// unspecified").
+struct NumberConversion {
+  char specifier = 'd';
+  bool left = false, plus = false, space = false, alternate = false, zero = false;
+  int width = 0;
+  int precision = -1;  // -1: none
+};
+struct NumberPattern {
+  std::vector<std::string> text;            // text[k] precedes conversion k; one more than conversions
+  std::vector<NumberConversion> conversion;
+};
+
+// Parses `pattern` into `out`; the reason it cannot be applied, or empty.
+inline std::string parse_number_pattern(std::string_view pattern, NumberPattern& out) {
+  out = NumberPattern{};
+  out.text.emplace_back();
+  bool numbered = false, unnumbered = false;
+  const auto digits = [&](std::size_t& i, int& value) {
+    long long v = 0;
+    while (i < pattern.size() && pattern[i] >= '0' && pattern[i] <= '9') {
+      v = v * 10 + (pattern[i++] - '0');
+      if (v > std::numeric_limits<int>::max()) return false;
+    }
+    value = static_cast<int>(v);
+    return true;
+  };
+  std::size_t i = 0;
+  while (i < pattern.size()) {
+    const char c = pattern[i++];
+    if (c != '%') {
+      out.text.back() += c;
+      continue;
+    }
+    if (i < pattern.size() && pattern[i] == '%') {
+      out.text.back() += '%';
+      i++;
+      continue;
+    }
+    NumberConversion conv;
+    // "%n$": digits then '$'.
+    std::size_t j = i;
+    while (j < pattern.size() && pattern[j] >= '0' && pattern[j] <= '9') j++;
+    if (j > i && j < pattern.size() && pattern[j] == '$') {
+      if (pattern.substr(i, j - i) != "1")
+        return "argument \"%" + std::string(pattern.substr(i, j - i)) +
+               "$\" does not exist: formatNumber has one input";
+      numbered = true;
+      i = j + 1;
+    } else {
+      unnumbered = true;
+    }
+    for (; i < pattern.size(); i++) {
+      const char f = pattern[i];
+      if (f == '-') conv.left = true;
+      else if (f == '+') conv.plus = true;
+      else if (f == ' ') conv.space = true;
+      else if (f == '#') conv.alternate = true;
+      else if (f == '0') conv.zero = true;
+      else if (f == '\'') return "the thousands' grouping flag (') is not supported: its characters are the locale's";
+      else break;
+    }
+    if (i < pattern.size() && pattern[i] == '*')
+      return "a width given by an argument (*) is not supported: formatNumber has one input";
+    if (!digits(i, conv.width)) return "the field width is beyond C's int range";
+    if (i < pattern.size() && pattern[i] == '.') {
+      i++;
+      if (i < pattern.size() && pattern[i] == '*')
+        return "a precision given by an argument (.*) is not supported: formatNumber has one input";
+      if (!digits(i, conv.precision)) return "the precision is beyond C's int range";
+    }
+    if (i == pattern.size()) return "the conversion at the end is incomplete";
+    const char s = pattern[i++];
+    if (std::string_view("hljztLqI").find(s) != std::string_view::npos)
+      return std::string("the length modifier '") + s + "' is not supported: the input is a PMML number, not a C type";
+    if (std::string_view("diouxXfFeEgGaA").find(s) == std::string_view::npos)
+      return std::string("'%") + s + "' is not a numeric conversion (d i o u x X f F e E g G a A)";
+    if (conv.alternate && (s == 'd' || s == 'i' || s == 'u'))
+      return std::string("the flag '#' is undefined for '%") + s + "'";
+    conv.specifier = s;
+    out.conversion.push_back(conv);
+    out.text.emplace_back();
+  }
+  if (numbered && unnumbered) return "numbered (%1$) and unnumbered conversions are mixed";
+  if (unnumbered && out.conversion.size() > 1)
+    return "it has " + std::to_string(out.conversion.size()) + " conversions: formatNumber has one input";
+  return {};
+}
+
+namespace posix {
+// The converted text `body` with its `prefix` (sign, 0x), padded to the width.
+inline void pad(std::string& out, const NumberConversion& c, std::string_view prefix, std::string_view body,
+                bool zero) {
+  const std::size_t size = prefix.size() + body.size();
+  const std::size_t fill = c.width > 0 && static_cast<std::size_t>(c.width) > size ? c.width - size : 0;
+  if (c.left) {
+    out.append(prefix).append(body).append(fill, ' ');
+  } else if (zero) {
+    out.append(prefix).append(fill, '0').append(body);
+  } else {
+    out.append(fill, ' ').append(prefix).append(body);
+  }
+}
+inline std::string to_chars(double a, std::chars_format format, int precision) {
+  // The longest fixed text of a double is 309 integer digits; then the
+  // precision.
+  std::string buffer(static_cast<std::size_t>(precision < 0 ? 0 : precision) + 400, '\0');
+  const auto r = precision < 0 ? std::to_chars(buffer.data(), buffer.data() + buffer.size(), a, format)
+                               : std::to_chars(buffer.data(), buffer.data() + buffer.size(), a, format, precision);
+  if (r.ec != std::errc()) throw std::logic_error("formatNumber: std::to_chars failed");
+  buffer.resize(static_cast<std::size_t>(r.ptr - buffer.data()));
+  return buffer;
+}
+inline void upper(std::string& s) {
+  for (char& ch : s)
+    if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+}
+// d i o u x X over the integer `v`; false when the value is no integer the
+// conversion takes.
+inline bool format_integer(std::string& out, const NumberConversion& c, double v) {
+  if (!(v >= -9223372036854775808.0 && v < 9223372036854775808.0) || v != std::trunc(v)) return false;
+  const std::int64_t n = static_cast<std::int64_t>(v);
+  const bool is_signed = c.specifier == 'd' || c.specifier == 'i';
+  if (!is_signed && n < 0) return false;
+  const std::uint64_t magnitude = n < 0 ? std::uint64_t{0} - static_cast<std::uint64_t>(n) : static_cast<std::uint64_t>(n);
+  const int base = c.specifier == 'o' ? 8 : (c.specifier == 'x' || c.specifier == 'X') ? 16 : 10;
+  char buffer[24];
+  std::string body(buffer, std::to_chars(buffer, buffer + sizeof(buffer), magnitude, base).ptr);
+  if (c.specifier == 'X') upper(body);
+  if (c.precision == 0 && magnitude == 0) body.clear();  // "converting zero with an explicit precision of zero"
+  if (c.precision > 0 && body.size() < static_cast<std::size_t>(c.precision))
+    body.insert(0, static_cast<std::size_t>(c.precision) - body.size(), '0');
+  if (c.alternate && c.specifier == 'o' && (body.empty() || body[0] != '0')) body.insert(0, 1, '0');
+  std::string_view prefix;
+  if (is_signed) prefix = n < 0 ? "-" : c.plus ? "+" : c.space ? " " : "";
+  else if (c.alternate && magnitude != 0 && c.specifier == 'x') prefix = "0x";
+  else if (c.alternate && magnitude != 0 && c.specifier == 'X') prefix = "0X";
+  pad(out, c, prefix, body, c.zero && !c.left && c.precision < 0);
+  return true;
+}
+// f F e E g G a A over the double `v`.
+inline void format_double(std::string& out, const NumberConversion& c, double v) {
+  const char s = c.specifier;
+  const bool uppercase = s == 'F' || s == 'E' || s == 'G' || s == 'A';
+  const bool negative = std::signbit(v);
+  const std::string_view sign = std::isnan(v) ? "" : negative ? "-" : c.plus ? "+" : c.space ? " " : "";
+  if (!std::isfinite(v)) {
+    pad(out, c, sign, std::isnan(v) ? (uppercase ? "NAN" : "nan") : (uppercase ? "INF" : "inf"), false);
+    return;
+  }
+  const double a = std::abs(v);
+  const int p = c.precision < 0 ? 6 : c.precision;
+  std::string body;
+  std::string_view base;
+  if (s == 'f' || s == 'F') {
+    body = to_chars(a, std::chars_format::fixed, p);
+    if (c.alternate && p == 0) body += '.';
+  } else if (s == 'e' || s == 'E') {
+    body = to_chars(a, std::chars_format::scientific, p);
+    if (c.alternate && p == 0) body.insert(body.find('e'), 1, '.');
+  } else if (s == 'g' || s == 'G') {
+    // "Let P equal the precision if non-zero, 6 if the precision is omitted,
+    // or 1 if the precision is zero. Then, if a conversion with style E
+    // would have an exponent of X: If P > X>=-4, the conversion shall be with
+    // style f (or F) and precision P -(X+1). Otherwise, the conversion shall
+    // be with style e (or E) and precision P -1. Finally, unless the '#' flag
+    // is used, any trailing zeros shall be removed from the fractional
+    // portion of the result and the decimal-point character shall be removed
+    // if there is no fractional portion remaining."
+    const int P = c.precision < 0 ? 6 : c.precision == 0 ? 1 : c.precision;
+    body = to_chars(a, std::chars_format::scientific, P - 1);
+    const std::size_t e = body.find('e');
+    const int X = std::stoi(body.substr(e + 1));
+    if (P > X && X >= -4) body = to_chars(a, std::chars_format::fixed, P - (X + 1));
+    const std::size_t end = body.find('e') == std::string::npos ? body.size() : body.find('e');
+    if (!c.alternate) {
+      std::size_t point = body.find('.');
+      if (point != std::string::npos && point < end) {
+        std::size_t last = end;
+        while (last > point + 1 && body[last - 1] == '0') last--;
+        if (last == point + 1) last = point;
+        body.erase(last, end - last);
+      }
+    } else if (body.find('.') == std::string::npos) {
+      body.insert(end, 1, '.');
+    }
+  } else {  // a, A
+    body = to_chars(a, std::chars_format::hex, c.precision);
+    if (c.alternate && body.find('.') == std::string::npos) body.insert(body.find('p'), 1, '.');
+    base = uppercase ? "0X" : "0x";
+  }
+  if (uppercase) upper(body);
+  const std::string prefix = std::string(sign) + std::string(base);
+  pad(out, c, prefix, body, c.zero && !c.left);
+}
+}  // namespace posix
+
+// The pattern applied to `v`; false when a conversion has no integer to
+// convert (the result is invalid).
+inline bool format_number(const NumberPattern& pattern, double v, std::string& out) {
+  out = pattern.text[0];
+  for (std::size_t k = 0; k < pattern.conversion.size(); k++) {
+    const NumberConversion& c = pattern.conversion[k];
+    if (std::string_view("diouxX").find(c.specifier) != std::string_view::npos) {
+      if (!posix::format_integer(out, c, v)) return false;
+    } else {
+      posix::format_double(out, c, v);
+    }
+    out += pattern.text[k + 1];
+  }
+  return true;
+}
 }  // namespace scalar
 
 // ---------------------------------------------------------------- legacy delegates
@@ -813,6 +1092,34 @@ inline types::TypeId text_type(const std::optional<types::TypeId>& type) {
     throw std::logic_error("concat: a sentinel is not a static type");
   return *type;
 }
+// formatNumber (P4.9; scalar::format_number). The input is read as a number
+// of its static type (Bound::argument_type[0]): the double the Value holds, a
+// float narrowed first. The pattern is the one parsed at load when it is a
+// Constant (Bound::number_pattern; a pattern formatNumber cannot apply is
+// then a load error), else the argument's text, cast to string by its static
+// type as concat casts (append_text), parsed here: a pattern that cannot be
+// applied is an invalid result, as is a value an integer conversion cannot
+// take. The result is a string the kernel built: packed (Value(text,
+// STRING)). A missing input or pattern never reaches the kernel
+// (MissingRule::Propagate).
+inline Status format_number(const Bound& bound, const ::Value* args, std::size_t n, ::Value& out) {
+  if (bound.argument_type.size() != n)
+    throw std::logic_error("formatNumber: the call was not bound to its argument types");
+  double v = args[0].as_double();
+  if (bound.argument_type[0] == types::TypeId::Float) v = static_cast<double>(types::narrow_to_float(v));
+  std::string result;
+  if (bound.number_pattern) {
+    if (!scalar::format_number(*bound.number_pattern, v, result)) return Status::Invalid;
+  } else {
+    std::string text;
+    append_text(text, args[1], bound.argument_type[1]);
+    scalar::NumberPattern pattern;
+    if (!scalar::parse_number_pattern(text, pattern).empty() || !scalar::format_number(pattern, v, result))
+      return Status::Invalid;
+  }
+  out = ::Value(result, DataType::DataTypeValue::STRING);
+  return Status::Ok;
+}
 inline Status string_length(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   // The integer stored as a double (the old Value's only number, until P5).
   out = ::Value(static_cast<double>(scalar::string_length(args[0].text()).v));
@@ -934,6 +1241,7 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
     case Op::StdNormalPDF: return a::unary<s::std_normal_pdf>;
     case Op::And: return a::logical_and;
     case Op::Or: return a::logical_or;
+    case Op::FormatNumber: return a::format_number;
     case Op::None: break;
   }
   throw std::logic_error("fn::instantiate: no kernel for this function");
@@ -942,8 +1250,9 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
 // The functions whose numeric arguments and result ApplyNode types (the
 // arithmetic, aggregate, mathematical and distribution functions), and the
 // comparisons, whose float arguments it narrows. The others (if, isMissing,
-// isNotMissing, not, and, or, the string functions) read their arguments as
-// they are.
+// isNotMissing, not, and, or, the string functions, formatNumber) read their
+// arguments as they are (formatNumber narrows its float input itself, by
+// Bound::argument_type).
 constexpr bool compares(Op op) {
   switch (op) {
     case Op::Equal:
@@ -976,6 +1285,7 @@ constexpr bool numeric(Op op) {
     case Op::TrimBlanks:
     case Op::Concat:
     case Op::StringLength:
+    case Op::FormatNumber:
       return false;
     default:
       return !compares(op);

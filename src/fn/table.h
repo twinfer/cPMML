@@ -19,7 +19,7 @@
  * core/builtinfunctions.h).
  *
  * Rows cover every function of BuiltinFunctions.html, including those the
- * engine refuses today (isValid, isNotValid, formatNumber,
+ * engine refuses today (isValid, isNotValid,
  * normalIDF, stdNormalIDF, the date functions): typing them is independent of
  * evaluating them. `engine` records where the engine stands (§4.2 status);
  * `op` names the kernel, and a row has one exactly when the engine evaluates
@@ -30,8 +30,8 @@
  * the engine refuses lists them in that order ('unsupported value "and" for
  * Apply@function; cPMML supports +, -, *, ...'), and that text is a cell of
  * the fixture dumps that P4.1 keeps unchanged; the functions added since
- * (and, or: design item P4.8) follow them, so that list only grows at its
- * end. Then the rows the engine refuses, in that table's order too.
+ * (and, or: design item P4.8; formatNumber: P4.9) follow them, so that list
+ * only grows at its end. Then the rows the engine refuses, in that table's order too.
  *
  * Spec basis of the columns:
  *
@@ -159,8 +159,9 @@ enum class Op : std::uint8_t {
   NormalPDF,
   StdNormalCDF,
   StdNormalPDF,
-  And,  // P4.8
-  Or,   // P4.8
+  And,           // P4.8
+  Or,            // P4.8
+  FormatNumber,  // P4.9
 };
 
 inline constexpr std::uint8_t kVariadic = 255;
@@ -301,6 +302,15 @@ inline constexpr Signature kBuiltins[] = {
     // ... will result in a missing value being returned" (Propagate)
     detail::variadic("and", Op::And, 2, Param::Boolean, types::TypeId::Boolean),
     detail::variadic("or", Op::Or, 2, Param::Boolean, types::TypeId::Boolean),
+    // formatNumber (design item P4.9): "Formats numbers according to a
+    // pattern"; `<ParameterField name="input" optype="continuous"/>` (a
+    // number, no dataType) and `<ParameterField name="pattern"
+    // dataType="string"/>`; `<DefineFunction name="formatNumber"
+    // optype="categorical" dataType="string">`. No missing rule of its own:
+    // Propagate. After and/or, so that the load error's list of supported
+    // functions only grows at its end.
+    detail::fixed("formatNumber", Op::FormatNumber, 2, {Param::Numeric, Param::String, Param::String}, Param::String,
+                  types::TypeId::String),
 
     // ---- refused by the engine (load error), typed by the binder
     // isValid, isNotValid
@@ -311,10 +321,8 @@ inline constexpr Signature kBuiltins[] = {
                   types::TypeId::Double, Engine::Unplanned),
     detail::fixed("stdNormalIDF", Op::None, 1, {Param::Double, Param::Double, Param::Double}, Param::Double,
                   types::TypeId::Double, Engine::Unplanned),
-    // formatNumber, formatDatetime, dateDaysSinceYear, dateSecondsSinceYear,
+    // formatDatetime, dateDaysSinceYear, dateSecondsSinceYear,
     // dateSecondsSinceMidnight
-    detail::fixed("formatNumber", Op::None, 2, {Param::Numeric, Param::String, Param::String}, Param::String,
-                  types::TypeId::String, Engine::P4),
     detail::fixed("formatDatetime", Op::None, 2, {Param::Temporal, Param::String, Param::String}, Param::String,
                   types::TypeId::String, Engine::P10),
     detail::fixed("dateDaysSinceYear", Op::None, 2, {Param::Temporal, Param::Integer, Param::Integer},

@@ -65,6 +65,7 @@
 #include "core/invalidvaluetreatmentmethod.h"
 #include "core/value.h"
 #include "core/xmlnode.h"
+#include "expression/constant.h"
 #include "expression/expression.h"
 #include "fn/kernels.h"
 #include "fn/table.h"
@@ -215,9 +216,10 @@ class ApplyNode : public Expression {
   // the comparisons the arguments' static types (bind::expression_type), a
   // string ordered against a number (§2.7, E-TYPE-ORDER-MIXED) and the
   // typing flags of `bound`; for concat the static type each argument is
-  // cast to string from (Bound::argument_type, P4.6). The arguments are the
-  // element children after Extension* (pmml-4-4.xsd Apply, B25), as the
-  // binder counts them.
+  // cast to string from (Bound::argument_type, P4.6); for formatNumber the
+  // input's and the pattern's types and a Constant pattern, parsed (P4.9).
+  // The arguments are the element children after Extension* (pmml-4-4.xsd
+  // Apply, B25), as the binder counts them.
   static KernelFn instantiate_checked(const XmlNode& apply, const Signature& sig, Bound& bound) {
     using cpmml::bind::TypeId;
     std::size_t n = 0;
@@ -250,6 +252,40 @@ class ApplyNode : public Expression {
         const cpmml::bind::StaticType type = cpmml::bind::expression_type(argument);
         if (type && *type != TypeId::Boolean)
           throw cpmml::ParsingException(boolean_argument_message(apply, sig, i, *type));
+      }
+      return kernel;
+    }
+    if (sig.op == Op::FormatNumber) {
+      // P4.9: the input is a number (`<ParameterField name="input"
+      // optype="continuous"/>`), the pattern a string (`dataType="string"`);
+      // a pattern that is a Constant is parsed here, and one formatNumber
+      // cannot apply is a load error (scalar::parse_number_pattern).
+      std::vector<pugi::xml_node> arguments;
+      for (pugi::xml_node argument : apply.xml().children())
+        if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0)
+          arguments.push_back(argument);
+      const cpmml::bind::StaticType input = cpmml::bind::expression_type(arguments[0]);
+      const cpmml::bind::StaticType pattern = cpmml::bind::expression_type(arguments[1]);
+      if (input && (*input == TypeId::Boolean || *input == TypeId::String))
+        throw cpmml::ParsingException(format_number_type_message(apply, 1, *input));
+      if (pattern && *pattern == TypeId::Boolean)
+        throw cpmml::ParsingException(format_number_type_message(apply, 2, *pattern));
+      bound.argument_type = {adapter::text_type(input), adapter::text_type(pattern)};
+      if (std::strcmp(arguments[1].name(), "Constant") == 0) {
+        const Value constant = Constant::read(XmlNode(arguments[1]));
+        if (!constant.is_missing()) {
+          std::string text;
+          adapter::append_text(text, constant, bound.argument_type[1]);
+          auto parsed = std::make_shared<scalar::NumberPattern>();
+          const std::string reason = scalar::parse_number_pattern(text, *parsed);
+          if (!reason.empty())
+            throw cpmml::ParsingException(std::string(cpmml::bind::code::kValueMalformed) + ": " +
+                                          cpmml::bind::apply_label(apply, "formatNumber") + ": pattern \"" + text +
+                                          "\" cannot be applied: " + reason +
+                                          " (BuiltinFunctions.html: \"The pattern uses the Posix descriptors as "
+                                          "used, e.g., in the C function printf\")");
+          bound.number_pattern = std::move(parsed);
+        }
       }
       return kernel;
     }
@@ -304,6 +340,22 @@ class ApplyNode : public Expression {
            ": argument " + std::to_string(i) + " of " + name + " is " + std::string(cpmml::bind::type_name(type)) +
            ", where the parameter is declared boolean (" + basis +
            "; Functions.html: boolean \"can not be mixed with other types\", Q7)";
+  }
+
+  // The load error of a formatNumber argument of the wrong type (design item
+  // P4.9), in the words of the binder's report of the same check
+  // (Binder::check_param: E-TYPE-PARAM for a string input,
+  // E-TYPE-BOOLEAN-MIXED for a boolean input or pattern).
+  static std::string format_number_type_message(const XmlNode& apply, std::size_t i, cpmml::bind::TypeId type) {
+    const std::string what = cpmml::bind::apply_label(apply, "formatNumber") + ": argument " + std::to_string(i) +
+                             " of formatNumber is " + std::string(cpmml::bind::type_name(type));
+    if (type == cpmml::bind::TypeId::Boolean)
+      return std::string(cpmml::bind::code::kTypeBooleanMixed) + ": " + what + ", where a " +
+             (i == 1 ? "number" : "string") +
+             " is expected (Functions.html: boolean \"can not be mixed with other types\", Q7)";
+    return std::string(cpmml::bind::code::kTypeParam) + ": " + what +
+           ", where a number is expected (BuiltinFunctions.html: \"Formats numbers according to a pattern\"; "
+           "§2.5)";
   }
 
   // The field whose expression holds the Apply, for the record error of an
