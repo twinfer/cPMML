@@ -274,13 +274,20 @@ static void legacy_switches(Indexer& indexer) {
     CHECK(number("+", nums({3, 1}), {}, kInteger) == 4, "integer 3 + 1 is 4");
     CHECK(number("sum", nums({-0.0, 1}), {}, kInteger) == 1, "a -0 operand is the integer 0");
   }
-  // B2 (P6): uppercase keeps its argument's string code.
+  // B2 (closed by P6.1): uppercase gives the string of its text, not its
+  // argument's string code.
   {
     Value out;
     const Value abc = Value::string("abc");
+    const Value up = Value::string("ABC");
     const std::vector<Value> args{abc};
     CHECK(call("uppercase", args, out) == fn::Status::Ok && out.text() == "ABC", "uppercase(abc) is ABC");
-    CHECK(out.as_double() == abc.as_double(), "legacy::B2: uppercase keeps the argument's code");
+    CHECK(out.as_double() == up.as_double() && out.as_double() != abc.as_double(),
+          "P6.1 (B2): uppercase(abc) has the code of ABC, not its argument's");
+    Value eq;
+    CHECK(call("equal", {out, up}, eq) == fn::Status::Ok && eq.as_double() == 1.0 &&
+              call("equal", {out, abc}, eq) == fn::Status::Ok && eq.as_double() == 0.0,
+          "P6.1 (B2): equal(uppercase(abc), ABC) is true, equal(uppercase(abc), abc) false");
   }
   // replace and matches: a pattern std::regex refuses is an invalid result.
   {

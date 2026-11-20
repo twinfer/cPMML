@@ -120,7 +120,7 @@ class MapValues : public Expression {
           throw cpmml::ParsingException(std::string(cpmml::bind::code::kKeyNaN) + ": MapValues row <" + column +
                                         ">NaN</" + column +
                                         ">: a NaN key matches no input (§2.7, D26: a NaN key is a load error)");
-        keys.push_back(cpmml::legacy::LegacyCompare::key(Value::document(text, type)));
+        keys.push_back(cpmml::legacy::LegacyCompare::constant_key(Value::document(text, type)));
         const double key = keys.back();
         typed.push_back(type == DataType::DataTypeValue::FLOAT ? static_cast<double>(static_cast<float>(key)) : key);
       }

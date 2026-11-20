@@ -54,7 +54,8 @@ class CategoricalPredictor {
                                                               const DataType& datatype) {
     std::unordered_map<double, double> result;
     for (const auto& node : nodes) {
-      const double key = cpmml::legacy::LegacyCompare::key(Value::document(node.required_attribute("value"), datatype));
+      const double key =
+          cpmml::legacy::LegacyCompare::constant_key(Value::document(node.required_attribute("value"), datatype));
       result[key] = node.required_double_attribute("coefficient");
     }
 

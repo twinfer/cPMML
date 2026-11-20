@@ -26,9 +26,10 @@
  * missingValueStrategy.
  *
  * A comparison reads the operand's LegacyCompare key (switch 2, core/value.h):
- * a number itself, a string its code. `type` is the type of the predicate's
- * value; equal and notEqual with a string value read it to compare a string
- * operand's code as an integer (the same answer, switch 2). P6.3 turns this
+ * a number itself, a string its code (its text's code: reps are canonical
+ * and the predicates' strings pooled, P6.1). `type` is the type of the
+ * predicate's value; equal and notEqual with a string value read it to
+ * compare a string operand's code as an integer (the same answer). P6.3 turns this
  * into the typed comparisons, one switch over op x type.
  */
 using PredicateResult = PredicateTruth;
@@ -87,7 +88,11 @@ class BoundPredicates {
         b.operand = narrow(constants_.size());
         b.type = cpmml::types::type_of(p.value.typed());
         constants_.push_back(p.key);
-        codes_.push_back(p.value.legacy_code());
+        {
+          // Predicate's constructor took constant_key: a string value is pooled.
+          const auto* str = std::get_if<cpmml::types::String>(&p.value.typed());
+          reps_.push_back(str ? str->rep : nullptr);
+        }
         break;
     }
     code_.push_back(b);
@@ -143,15 +148,18 @@ class BoundPredicates {
   }
 
   // equal / notEqual with a string value (the op x type case of §6.4): a
-  // string operand compares its code with the value's, which is the
-  // comparison of their LegacyCompare keys (switch 2: the code -> key map is
-  // one to one); an operand of any other type compares its key (B18).
+  // string operand compares its rep with the value's. That is equality of
+  // their texts (P6.1): the value is pooled (LegacyCompare::constant_key) and
+  // an operand's rep is canonical (core/value.h), so the reps are one iff the
+  // texts are equal (types::string_equal's pointer case: a rep the pool
+  // lacks has a text the pool, and so the value, does not). An operand of any
+  // other type compares its key (B18).
   [[gnu::always_inline]] inline PredicateResult string_equality(const BoundPredicate& p, const Sample& sample,
                                                                 const bool equal) const {
     const Value& x = sample[p.slot].value;
     if (x.is_missing()) return PredicateResult::UNKNOWN;
     const bool same = std::holds_alternative<cpmml::types::String>(x.typed())
-                          ? x.legacy_code() == codes_[p.operand]
+                          ? std::get<cpmml::types::String>(x.typed()).rep == reps_[p.operand]
                           : cpmml::legacy::LegacyCompare::key(x) == constants_[p.operand];
     return same == equal ? PredicateResult::TRUE_ : PredicateResult::FALSE_;
   }
@@ -195,7 +203,7 @@ class BoundPredicates {
   std::vector<BoundPredicate> code_;
   std::vector<std::uint32_t> children_;
   std::vector<double> constants_;      // LegacyCompare keys of the SimplePredicate values (switch 2)
-  std::vector<std::uint32_t> codes_;   // their legacy codes, read for a string value (switch 2)
+  std::vector<const cpmml::types::StringRep*> reps_;  // their pooled reps, read for a string value (P6.1)
   std::vector<cpmml::predicate::LegacyKeySet> sets_;
 };
 

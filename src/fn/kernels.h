@@ -49,11 +49,13 @@
  * binder types a slot that a MiningField widens as double, also from the
  * TransformationDictionary; see integer_operand).
  * Comparisons delegate
- * to `LegacyCompare`, switch 2 of core/value.h (the double: a number, a boolean's 1 or 0, a
- * string's legacy code), until P6. The string edits (uppercase, lowercase,
- * substring, trimBlanks) delegate to `LegacyStringEdit`, the Value's own
- * in-place edit, which keeps the argument's string code (B2, P6) and its
- * Value: decided 2026-11-19 after P3, "a kernel never round-trips a string
+ * to `LegacyCompare`, switch 2 of core/value.h (two strings by their text
+ * since P6.1; otherwise the double: a number, a boolean's 1 or 0, a
+ * string's legacy code), until P6.3. The string edits (uppercase, lowercase,
+ * substring, trimBlanks) delegate to `StringEdit`, the Value's own
+ * in-place edit, which gives the result the string of its new text (P6.1
+ * closed B2, where it kept its argument's string code) and keeps the rest of
+ * the Value: decided 2026-11-19 after P3, "a kernel never round-trips a string
  * through unpack/pack ... an argument string that the kernel passes through
  * or returns must keep the old Value it came in as; only strings the kernel
  * builds are packed" (concat, replace).
@@ -86,15 +88,12 @@ namespace cpmml::fn {
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
 namespace legacy {
-// B2 (P6): uppercase, lowercase, substring and trimBlanks edit a copy of
-// their argument's Value, which keeps the argument's string code
-// (LegacyStringEdit).
-inline constexpr bool B2 = true;
-// B1, B18, B44 (P6): comparisons compare the double each Value holds
-// (LegacyCompare).
+// B18, B44 (P6.3): comparisons but the equality of two strings compare the
+// double each Value holds (LegacyCompare). P6.1 removed B1 and B2 (strings
+// compare by text; an edit is the string of its new text).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
+static_assert(LegacyCompare, "P6.3 removes this switch together with the code it keeps");
 }  // namespace legacy
 
 namespace scalar {
@@ -653,9 +652,9 @@ inline bool format_number(const NumberPattern& pattern, double v, std::string& o
 // by).
 using LegacyCompare = ::cpmml::legacy::LegacyCompare;
 
-// The string edits as today (legacy::B2): the argument's Value, edited in
-// place, keeping its string code.
-struct LegacyStringEdit {
+// The string edits: the argument's Value, edited in place; a string result
+// is the string of its new text (Value::uppercase and friends, P6.1).
+struct StringEdit {
   static void uppercase(::Value& v) { v.uppercase(); }
   static void lowercase(::Value& v) { v.lowercase(); }
   static void trim_blanks(::Value& v) { v.trim_blanks(); }
@@ -1017,7 +1016,7 @@ inline Status logical_or(const Bound&, const ::Value* args, std::size_t n, ::Val
   return boolean(false, out);
 }
 
-// String edits (legacy::B2).
+// String edits (StringEdit).
 template <void (*Edit)(::Value&)>
 Status string_edit(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   out = args[0];
@@ -1227,10 +1226,10 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
     case Op::IsNotIn: return a::is_not_in;
     case Op::Replace: return a::replace;
     case Op::Matches: return a::matches;
-    case Op::Uppercase: return a::string_edit<LegacyStringEdit::uppercase>;
-    case Op::Lowercase: return a::string_edit<LegacyStringEdit::lowercase>;
+    case Op::Uppercase: return a::string_edit<StringEdit::uppercase>;
+    case Op::Lowercase: return a::string_edit<StringEdit::lowercase>;
     case Op::Substring: return a::substring;
-    case Op::TrimBlanks: return a::string_edit<LegacyStringEdit::trim_blanks>;
+    case Op::TrimBlanks: return a::string_edit<StringEdit::trim_blanks>;
     case Op::Concat: return a::concat;
     case Op::StringLength: return a::string_length;
     case Op::Median: return a::median;

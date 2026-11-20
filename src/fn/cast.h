@@ -63,10 +63,9 @@
  *     string (or any text-less string) cast to a number or boolean is an
  *     invalid record, never its string code"). At run time the empty string
  *     is a Value whose text is "" and whose double is a string code (the
- *     pool's code of "", -1 for a string not seen at load, or the code of
- *     the string an in-place edit emptied: trimBlanks(substring("  x", 1, 2))
- *     keeps the code of "  x", B2). This is exact because nothing else of a
- *     string type is held without text: a number or boolean document
+ *     pool's code of "", or -1 for a string the pool lacks; since P6.1 an
+ *     in-place edit that empties a string gives it the code of "" too).
+ *     This is exact because nothing else of a string type is held without text: a number or boolean document
  *     constant that the load casts to the number or boolean slot of the
  *     field its element gives (bind::document_constant) keeps its document
  *     text, and an `if` of type string gives a number or boolean branch the

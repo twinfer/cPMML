@@ -73,8 +73,8 @@ JPMML gives up on the whole file at the first row it refuses.
 
 | fixture | registered by | re-derive? | base (4467498) | JPMML 1.7.7 |
 |---|---|---|---|---|
-| fix_string_unseen_equal | P6.1 | no | FAIL `predicted: same  expected: diff` | all 8 rows agree |
-| fix_string_builtin_recode | P6.1 | no | FAIL `predicted: other  expected: up` | all 10 rows agree |
+| fix_string_unseen_equal | **registered by P6.1** (moved to `test/data/`, as are its files; base 92994f3 FAIL `predicted: same  expected: diff`, rows 1, 3, 8) | no | FAIL `predicted: same  expected: diff` | all 8 rows agree (re-checked on 92994f3) |
+| fix_string_builtin_recode | **registered by P6.1** (moved to `test/data/`, as are its files; base 92994f3 FAIL `predicted: other  expected: up`, rows 1, 3-5, 7, 8) | no | FAIL `predicted: other  expected: up` | all 10 rows agree (re-checked on 92994f3) |
 | fix_float_equal | P6.2 | **yes: `e_isin`** (see note 1) | FAIL `predicted: 72.0  expected: 9.0` | all 6 rows agree |
 | fix_float_set_narrow | P6.2 | no; **header to write** (note 2) | FAIL `predicted: 240.0  expected: 0.20000000149011612` (the `o_fpd` column) | all 7 rows agree |
 | fix_output_double_float_target | P6.2 | no | FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity` | all 7 rows agree |

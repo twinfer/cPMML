@@ -1845,23 +1845,29 @@ static void surrogate_errors() {
 // Design item P5: a tree's BoundPredicates answer exactly what the Predicate
 // they are compiled from answers (cpmml::predicate::compare over
 // LegacyCompare keys, switch 2), for every operator and every kind of
-// operand: a pooled string, one the pool lacks (the shared unseen code, B1),
-// an edit of a pooled string (its argument's code, B2), a number equal to a
-// string's code (B18), a number, missing. equal and notEqual with a string
-// value compare a string operand's code as an integer (the op x type case);
-// the answers must not change.
+// operand: a pooled string, one the pool lacks (the unseen code -1), an edit
+// of a pooled string (the string of its new text since P6.1: pooled ABC, or
+// unseen ABCD), a number equal to a string's code (B18), a number, missing.
+// equal and notEqual with a string value compare a string operand's code as
+// an integer (the op x type case); the answers must not change.
 static void bound_predicates() {
   using Op = PredicateOpType::PredicateOpTypeValue;
   auto document = std::make_shared<cpmml::DocumentStrings>();
   const cpmml::StringScope load(cpmml::StringScope::Loading{}, document);
   const Value abc = Value::string("abc");
   const Value xyz = Value::string("xyz");
+  const Value pooled_up = Value::string("ABC");
   document->pool.freeze();
   const cpmml::StringScope score(cpmml::StringScope::Scoring{}, *document);
   Value edited = abc;
   edited.uppercase();
-  const std::vector<Value> operands = {abc, xyz, Value::string("never named"), Value::string("another"), edited,
-                                       Value(cpmml::legacy::code_of(abc)), Value(-1.0), Value(2.5), Value()};
+  Value edited_unseen = Value::string("abcd");
+  edited_unseen.uppercase();
+  const std::vector<Value> operands = {abc,           xyz,
+                                       Value::string("never named"), Value::string("another"),
+                                       edited,        edited_unseen,
+                                       Value(cpmml::legacy::code_of(abc)), Value(-1.0),
+                                       Value(2.5),    Value()};
   const std::vector<Value> constants = {abc, xyz, Value(cpmml::legacy::code_of(xyz)), Value(-1.0), Value(2.5)};
   int compared = 0;
   for (const Op op : {Op::EQUAL, Op::NOT_EQUAL, Op::LESS_THAN, Op::LESS_OR_EQUAL, Op::GREATER_THAN,
@@ -1878,16 +1884,21 @@ static void bound_predicates() {
       }
     }
   }
-  CHECK(compared == 6 * 5 * 9);
-  // The expected answers of the legacy rules themselves.
+  CHECK(compared == 6 * 5 * 10);
+  // The expected answers of the rules themselves.
   BoundPredicates bound;
   const std::uint32_t eq_abc = bound.add(Predicate(0, Op::EQUAL, abc));
   const std::uint32_t ne_abc = bound.add(Predicate(0, Op::NOT_EQUAL, abc));
+  const std::uint32_t eq_up = bound.add(Predicate(0, Op::EQUAL, pooled_up));
   Sample s(1);
   s.change_value(0, edited);
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::TRUE_);  // B2: an edit keeps abc's code
-  s.change_value(0, Value::string("ABC"));
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // ABC is not pooled: unseen
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // P6.1, B2: uppercase(abc) is not abc
+  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::TRUE_);
+  CHECK(bound.evaluate(eq_up, s) == PredicateResult::TRUE_);  // P6.1, B2: it is ABC
+  s.change_value(0, edited_unseen);
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_ && bound.evaluate(eq_up, s) == PredicateResult::FALSE_);
+  s.change_value(0, Value::string("never named"));
+  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // a text the pool lacks equals no value
   CHECK(bound.evaluate(ne_abc, s) == PredicateResult::TRUE_);
   s.change_value(0, Value(cpmml::legacy::code_of(abc)));
   CHECK(bound.evaluate(eq_abc, s) == PredicateResult::TRUE_);  // B18: the number of abc's code

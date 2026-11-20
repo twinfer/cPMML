@@ -124,8 +124,9 @@ static void accessors() {
         rule + " (set_double on a string: the number, the text kept)");
   Value st = Value::string("xyz");
   st.set_text("other");
-  CHECK(st.text() == "other" && st.as_double() == code && std::holds_alternative<t::String>(st.typed()),
-        "switch 2: set_text on a string keeps its code (B2)");
+  CHECK(st.text() == "other" && st.as_double() != code && std::holds_alternative<t::String>(st.typed()) &&
+            std::get<t::String>(st.typed()).rep == std::get<t::String>(Value::string("other").typed()).rep,
+        "P6.1 (B2): set_text on a string makes it the string of its new text (its canonical rep and code)");
   CHECK(throws<std::logic_error>([] {
           Value m;
           m.set_double(1.0);
@@ -177,8 +178,10 @@ static void switches() {
             std::holds_alternative<t::Double>(cpmml::pack(t::Float{0.1f}).typed()),
         "switch 1: pack(Float) is the Double of the float");
 
-  // Switch 2: LegacyCompare compares the code (pooled strings by pointer;
-  // every unpooled string -1; an edit keeps its argument's code).
+  // P6.1: two strings compare by text (pooled strings by pointer, any other
+  // pair by its texts); an edit is the string of its new text. Switch 2's
+  // rest: a string against a number compares its code (B18), strings are
+  // ordered by code (P6.3).
   using C = cpmml::legacy::LegacyCompare;
   const Value a = Value::string("abc");
   const Value a2 = Value::string("abc");
@@ -188,8 +191,9 @@ static void switches() {
   CHECK(!C::equal(a, z) && C::not_equal(a, z), "switch 2: two pooled texts differ");
   Value up = a;
   up.uppercase();
-  CHECK(up.text() == "ABC" && C::equal(up, a) && !C::equal(up, Value::string("ABC")),
-        "switch 2 (B2): uppercase keeps its argument's code, so it equals the argument, not \"ABC\"");
+  CHECK(up.text() == "ABC" && !C::equal(up, a) && C::equal(up, Value::string("ABC")) &&
+            up.as_double() == Value::string("ABC").as_double(),
+        "P6.1 (B2): uppercase gives the string ABC (its code), which equals \"ABC\", not its argument");
   CHECK(C::equal(Value(cpmml::legacy::code_of(a)), a), "switch 2 (B18): a string equals the number of its code");
   CHECK(C::less_than(a, z) == (a.as_double() < z.as_double()), "switch 2: strings are ordered by code");
 }
@@ -349,14 +353,16 @@ static void strings(cpmml::DocumentStrings& document, t::ParseContext& ctx) {
             !repacked.has_numeric_text(),
         "numeric_text does not survive pack: documented in core/value.h");
 
-  // B2: uppercase() edits the text and keeps the argument's code; pack of
-  // its text gives the new text's code.
+  // P6.1 (B2): uppercase() gives the string of its new text, the code pack
+  // of that text gives, so the round trip keeps it.
   Value up = Value::string("abc");
   up.uppercase();
   CHECK(cpmml::unpack<t::String>(up, TypeId::String, ctx).text() == "ABC", rule + " (an edited string: its text)");
   CHECK(cpmml::pack(t::String{other.intern("ABC")}).as_double() == static_cast<double>(document.pool.find("ABC")->id),
         "B2 (P6): pack gives the edited text's own code, not the argument's");
-  CHECK(up.as_double() == static_cast<double>(document.pool.find("abc")->id), "B2: the edit keeps the code of abc");
+  CHECK(up.as_double() == static_cast<double>(document.pool.find("ABC")->id) &&
+            cpmml::legacy::LegacyCompare::equal(cpmml::pack(cpmml::unpack<t::Value>(up, TypeId::String, ctx)), up),
+        "P6.1 (B2): the edit has the code of ABC, and pack(unpack) of it is equal to it");
 }
 
 // The document's pool replaces the Indexer's string map: ids are given in
@@ -374,14 +380,20 @@ static void string_scopes() {
     CHECK(cpmml::StringScope::loading() == document, rule + " (the document being loaded)");
     Value edited = Value::string("second");
     edited.uppercase();
-    CHECK(edited.text() == "SECOND" && edited.as_double() == 1.0 && document->pool.find("SECOND") == nullptr,
-          rule + " (an edit at load is not interned: the codes after it are unchanged)");
-    CHECK(Value::string("third").as_double() == 2.0, rule);
+    CHECK(edited.text() == "SECOND" && edited.as_double() == 2.0 && document->pool.find("SECOND") != nullptr,
+          rule + " (P6.1: a string edited at load is the string of its text, interned as Value::string interns it)");
+    Value first_up = Value::string("first");
+    first_up.uppercase();
+    first_up.lowercase();
+    CHECK(first_up.as_double() == 0.0 &&
+              std::get<t::String>(first_up.typed()).rep == std::get<t::String>(Value::string("first").typed()).rep,
+          rule + " (P6.1: an edit back to a pooled text is that pooled string)");
+    CHECK(Value::string("third").as_double() == 4.0, rule + " (FIRST was interned by the edit before it)");
     Value carried(7.0);
     carried.set_text("a text given at load");
     CHECK(carried.text() == "a text given at load" && document->pool.find("a text given at load") == nullptr &&
-              Value::string("fourth").as_double() == 3.0,
-          rule + " (a text set at load is not interned either: the next string's code is unchanged)");
+              Value::string("fourth").as_double() == 5.0,
+          rule + " (a number's text set at load is not interned: the next string's code is unchanged)");
     Value marked = Value::string("5");
     marked.mark_numeric_text();
     marked.trim_blanks();
@@ -399,7 +411,21 @@ static void string_scopes() {
     const Value unseen = Value::string("never named");
     const Value unseen2 = Value::string("another");
     CHECK(seen.as_double() == 1.0 && unseen.as_double() == -1.0 && unseen2.as_double() == -1.0,
-          rule + " (a frozen pool: a text it lacks has the shared unseen code, B1)");
+          rule + " (a frozen pool: a text it lacks has the unseen code -1)");
+    using C = cpmml::legacy::LegacyCompare;
+    CHECK(!C::equal(unseen, unseen2) && C::not_equal(unseen, unseen2) && C::equal(unseen, Value::string("never named")),
+          rule + " (P6.1, B1: two strings the pool lacks are equal iff their texts are)");
+    Value up_seen = Value::string("SECOND");
+    up_seen.lowercase();
+    CHECK(std::get<t::String>(up_seen.typed()).rep == std::get<t::String>(seen.typed()).rep && C::equal(up_seen, seen),
+          rule + " (P6.1, B2: an edit while scoring to a pooled text is the pooled string)");
+    Value up_unseen = Value::string("never named");
+    up_unseen.uppercase();
+    CHECK(up_unseen.as_double() == -1.0 && !C::equal(up_unseen, unseen) &&
+              C::equal(up_unseen, Value::string("NEVER NAMED")) && !C::equal(up_unseen, seen),
+          rule + " (P6.1, B2: an edit to a text the pool lacks is compared by that text)");
+    CHECK(throws<std::logic_error>([&] { C::constant_key(unseen); }) && C::constant_key(seen) == 1.0,
+          rule + " (P6.1: a key is a pooled string, never one with the unseen code -1)");
     CHECK(document->pool.find("never named") == nullptr, rule + " (scoring never interns)");
     first_made = unseen.text().data();
     CHECK(std::get<t::String>(unseen.typed()).rep->id == t::StringRep::kUnpooled && unseen.text() == "never named",

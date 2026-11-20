@@ -51,15 +51,19 @@
  *
  *   (1) legacy::float_value: a float is stored as the Double it was read as
  *       (B4, B5; P6.2 stores a Float).
- *   (2) legacy (LegacyCompare): equality and order compare as_double(), and
- *       a String's as_double() is its legacy code: its pool id (pooled
- *       strings compare by pointer), -1 for every string the pool lacks (the
- *       shared "unseen" id), and, for a string a function edits in place
- *       (uppercase, lowercase, substring, trimBlanks, a text given at load),
- *       the code of the argument it came from (B1, B2, B18; P6.1, P6.3).
+ *   (2) legacy (LegacyCompare): order, and equality but for two strings,
+ *       compare as_double(), and a String's as_double() is its legacy code:
+ *       its rep's pool id, -1 for a string the pool lacks (B18, the order of
+ *       strings; P6.3). Two strings are equal iff their texts are (XSD
+ *       string, §2.3; P6.1 closed B1 and B2): types::string_equal.
  *
- * The code is kept in the Value (code_), not in the rep, so the rep keeps the
- * types library's meaning (id < kUnpooled: pooled) for P6.
+ * A String's rep is canonical (P6.1): a string whose text the pool holds has
+ * the pooled rep, whoever made it (an input, a cast, an edit: uppercase,
+ * lowercase, substring, trimBlanks), so the code of its rep is the code of
+ * its text, and a container keyed by code (MapValues, a SimplePredicate's or
+ * SimpleSetPredicate's value, CategoricalPredictor) finds an edited string
+ * by its text. Only a string whose text the pool lacks has an arena rep, and
+ * none of those is a key (keys are document text, interned at load).
  *
  * Two more fields carry what the old storage carried beside its double and
  * that a typed value has no room for; each is read through the accessors
@@ -74,9 +78,9 @@ namespace cpmml {
 // The strings of one document (§2.3), shared by every model and segment of it.
 struct DocumentStrings {
   types::StringPool pool;
-  // Reps made at load that the pool does not index: a text the load gives a
-  // value (set_text) or an edit of a document constant. They live as long as
-  // the document.
+  // Reps made at load that the pool does not index: the text the load gives
+  // a number (set_text; a string's text is interned, Value::put_text). They
+  // live as long as the document.
   types::RecordArena load_arena;
 };
 
@@ -206,12 +210,10 @@ class Value {
   explicit Value(const cpmml::types::Boolean flag) : v_(flag) {}
 
   // The string `text` in this thread's StringScope: its pooled rep, or one
-  // made for it, with that rep's code (switch 2).
+  // made for it (canonical, see the note).
   static Value string(std::string_view text) {
-    const cpmml::types::StringRep* rep = cpmml::StringScope::active().rep(text);
     Value v;
-    v.v_ = cpmml::types::String{rep};
-    v.code_ = rep->id;
+    v.v_ = cpmml::types::String{cpmml::StringScope::active().rep(text)};
     return v;
   }
 
@@ -257,8 +259,12 @@ class Value {
   // The typed value (for unpack).
   inline const cpmml::types::Value& typed() const { return v_; }
 
-  // The legacy code of a string (switch 2): its pool id, or kUnseen.
-  inline std::uint32_t legacy_code() const { return code_; }
+  // The legacy code of a string (switch 2): its rep's pool id, or kUnseen
+  // (a string the pool lacks, or a value that is no string).
+  inline std::uint32_t legacy_code() const {
+    if (const auto* s = std::get_if<cpmml::types::String>(&v_)) return s->rep->id;
+    return cpmml::legacy::kUnseen;
+  }
 
   // ---- writers
   // The value becomes the number `number`; a text it carries stays (the old
@@ -268,11 +274,11 @@ class Value {
     if (const auto* s = std::get_if<cpmml::types::String>(&v_)) text_ = s->rep;
     v_ = cpmml::types::Double{number};
   }
-  // The value keeps what it is and carries `new_text` (a string's text is
-  // replaced, its code kept: switch 2).
+  // The value keeps what it is and carries `new_text` (a string becomes the
+  // string of that text, with its canonical rep).
   inline void set_text(std::string_view new_text) {
     if (is_missing()) throw std::logic_error("Value::set_text on a missing value");
-    put_text(cpmml::StringScope::active().unindexed(new_text));
+    put_text(new_text);
   }
   inline void mark_numeric_text() { numeric_text_ = true; }
 
@@ -288,8 +294,9 @@ class Value {
                            "\" is not a number or boolean literal");
   }
 
-  // ---- string edits in place (legacy::B2, switch 2): the text changes, the
-  // value keeps its code; the numeric_text mark goes.
+  // ---- string edits in place: a string becomes the string of its new text
+  // (its canonical rep, so it equals that text and not its argument: B2,
+  // closed by P6.1); the numeric_text mark goes.
   inline void lowercase() {
     std::string t(text());
     std::transform(t.begin(), t.end(), t.begin(), ::tolower);
@@ -334,11 +341,16 @@ class Value {
     return text_;
   }
 
-  inline void put_text(const cpmml::types::StringRep* rep) {
+  // A string's new text is the string of that text: its canonical rep
+  // (StringScope::rep, the pooled one when the pool holds the text; at load,
+  // where the pool is open, the text is interned, as Value::string does). A
+  // number's text is no string identity: a rep the pool does not index, so
+  // that it shifts no string code (B18, the order of strings: P6.3).
+  inline void put_text(std::string_view new_text) {
     if (std::holds_alternative<cpmml::types::String>(v_))
-      v_ = cpmml::types::String{rep};
+      v_ = cpmml::types::String{cpmml::StringScope::active().rep(new_text)};
     else
-      text_ = rep;
+      text_ = cpmml::StringScope::active().unindexed(new_text);
   }
 
   // An edit of a value without text leaves it as it is (the old storage
@@ -346,14 +358,13 @@ class Value {
   inline void edit(std::string_view new_text) {
     numeric_text_ = false;
     if (!text_rep()) return;
-    put_text(cpmml::StringScope::active().unindexed(new_text));
+    put_text(new_text);
   }
 
   double as_double_other() const;
 
   cpmml::types::Value v_ = cpmml::types::Missing{};
   const cpmml::types::StringRep* text_ = nullptr;  // a number's text (a String's is its rep)
-  std::uint32_t code_ = cpmml::legacy::kUnseen;    // a String's legacy code (switch 2)
   bool numeric_text_ = false;
 };
 
@@ -367,20 +378,43 @@ namespace cpmml::legacy {
 // was read as, not narrowed (B4, B5).
 inline ::Value float_value(const double read_as_double) { return ::Value(read_as_double); }
 
-// Switch 2 (design P5, LegacyCompare; deleted by P6.1 and P6.3): the double a
-// Value is compared by. A number or boolean is itself; a string is its code
-// (Value::legacy_code), so two strings are equal iff they are one pooled
-// string, or both strings the pool lacks (B1), or an edit of one and the
-// other (B2); a string equals the number of its code (B18); and strings are
-// ordered by their codes.
+// Switch 2 (design P5, LegacyCompare; P6.1 took its string equality, P6.3
+// deletes the rest): the double a Value is compared by. A number or boolean
+// is itself; a string is its code (Value::legacy_code), so a string equals
+// the number of its code (B18) and strings are ordered by their codes.
 inline double code_of(const ::Value& v) {
   return v.legacy_code() == kUnseen ? -1.0 : static_cast<double>(v.legacy_code());
 }
 
 struct LegacyCompare {
   static inline double key(const ::Value& v) { return v.as_double(); }
-  static inline bool equal(const ::Value& a, const ::Value& b) { return key(a) == key(b); }
+  // Two strings: equal iff their texts are (P6.1, B1, B2). XML Schema Part 2
+  // §3.2.1: the value space of string is "the set of finite-length sequences
+  // of characters"; §4.2.1 equal: "if a = b, then a and b cannot be
+  // distinguished (i.e., equality is identity)". types::string_equal: one
+  // rep, or two pooled reps (one pool per document: distinct texts), decide
+  // without reading text; otherwise the texts are compared. Any other pair
+  // compares its keys (switch 2: B18, P6.3).
+  static inline bool equal(const ::Value& a, const ::Value& b) {
+    const auto* sa = std::get_if<cpmml::types::String>(&a.typed());
+    const auto* sb = std::get_if<cpmml::types::String>(&b.typed());
+    if (sa && sb) return cpmml::types::string_equal(*sa, *sb);
+    return key(a) == key(b);
+  }
   static inline bool not_equal(const ::Value& a, const ::Value& b) { return !equal(a, b); }
+  // The key of a document constant that a container compares by key (a
+  // SimplePredicate's value, a set's member, a MapValues or
+  // CategoricalPredictor key). Its string is pooled (document text is
+  // interned at load), so its code is its text's and key equality with a
+  // canonical string is text equality (P6.1). A string the pool lacks would
+  // have the shared code -1 and equal every other string the pool lacks (B1):
+  // a programming error, never a key.
+  static inline double constant_key(const ::Value& v) {
+    if (std::holds_alternative<cpmml::types::String>(v.typed()) && v.legacy_code() == kUnseen)
+      throw std::logic_error("LegacyCompare::constant_key: the string \"" + std::string(v.text()) +
+                             "\" is not in the document's pool");
+    return key(v);
+  }
   static inline bool less_than(const ::Value& a, const ::Value& b) { return key(a) < key(b); }
   static inline bool less_or_equal(const ::Value& a, const ::Value& b) { return key(a) <= key(b); }
   static inline bool greater_than(const ::Value& a, const ::Value& b) { return key(a) > key(b); }
@@ -491,8 +525,7 @@ struct std::formatter<Value, char> {
 // programming error.
 //
 // Round trip: pack(unpack(v, t)) is v, accessor for accessor, for every v
-// the engine builds as a value of t, but for three: a string edited in place
-// (B2) keeps its argument's code and gets its text's; a numeric_text string
+// the engine builds as a value of t, but for two: a numeric_text string
 // loses the mark; and -0 in an integer or boolean slot packs as +0 (XSD
 // integer has one zero).
 namespace cpmml {

@@ -38,9 +38,9 @@ class LegacyKeySet {
   LegacyKeySet(const std::vector<Value>& members, const bool hashed) : hashed_(hashed) {
     for (const Value& m : members) {
       if (hashed)
-        hash_.insert(cpmml::legacy::LegacyCompare::key(m));
+        hash_.insert(cpmml::legacy::LegacyCompare::constant_key(m));
       else
-        ordered_.insert(cpmml::legacy::LegacyCompare::key(m));
+        ordered_.insert(cpmml::legacy::LegacyCompare::constant_key(m));
     }
   }
   inline bool contains(const double key) const { return hashed_ ? hash_.count(key) != 0 : ordered_.count(key) != 0; }
@@ -154,7 +154,7 @@ class Predicate {
         is_empty(false),
         predicatetype(predicatetype),
         value(value),
-        key(cpmml::legacy::LegacyCompare::key(value)) {}
+        key(cpmml::legacy::LegacyCompare::constant_key(value)) {}
 
   // A set of members (SimpleSetPredicate, a DataField's Values): hashed or
   // ordered (PredicateBuilder's SET_THRESHOLD).

@@ -1,0 +1,13 @@
+s,s2,y,pv,unseen_eq,unseen_ne,unseen_in,up_eq,up_eq_arg,up_eq_s2,low_eq,trim_eq,sub_in,up_map,up_nd
+a,zz,0.0,0.0,false,true,false,false,false,false,false,false,false,none,0.0
+abc,yy,0.0,0.0,false,true,false,true,false,false,false,false,true,hit,1.0
+abc,ABC,0.0,0.0,false,true,false,true,false,true,true,false,true,hit,1.0
+ABC,abc,0.0,0.0,false,true,false,true,true,false,true,false,true,hit,1.0
+p,q,0.0,0.0,false,true,false,false,false,false,false,false,false,none,0.0
+p,p,0.0,0.0,true,false,true,false,false,false,false,false,false,none,0.0
+P,p,0.0,0.0,false,true,false,false,true,false,false,false,false,none,0.0
+zz,ww,0.0,0.0,false,true,false,false,false,false,false,false,false,none,0.0
+k,q,0.0,0.0,false,true,true,false,false,false,false,true,false,kay,0.0
+ k ,k,0.0,0.0,false,true,false,false,false,false,false,true,false,none,0.0
+abcd,ABCD,0.0,0.0,false,true,false,false,false,true,false,false,true,none,0.0
+Abc,x,0.0,0.0,false,true,false,true,false,false,false,false,false,hit,1.0
