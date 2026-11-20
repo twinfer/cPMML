@@ -42,7 +42,12 @@ class OutputExpression : public Expression {
 
   inline virtual std::string eval_str(const Sample& sample, const InternalScore& score) const { return ""; };
 
-  inline virtual double eval_double(const Sample& sample, const InternalScore& score) const { return double_min(); };
+  // The number the feature gives for the prediction `score`, or none (no
+  // value). Typed (P6.4): every double, double_min() included, is a value; it
+  // was the marker for none, so a value equal to it had none.
+  inline virtual std::optional<double> eval_double(const Sample& sample, const InternalScore& score) const {
+    return std::nullopt;
+  };
 
   OutputExpression(const OutputExpression&) = default;
 

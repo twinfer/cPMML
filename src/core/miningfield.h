@@ -125,6 +125,20 @@ class MiningField : public DataField {
     return !missing_markers.empty() && missing_markers.find(raw) != missing_markers.cend();
   }
 
+  // True when `parsed`, an input read as a value of the field's type (not
+  // missing, not a string), is one the DataDictionary declared as standing
+  // for a missing value (P6.4, B6): numbers and booleans by the number they
+  // are, in the promoted type (Functions.html: "implicit casts are allowed in
+  // the direction of less restriction"; the integer -999 against an integer
+  // field's marker "-999.0", the double -999, D22), so 0 = −0 and NaN matches
+  // nothing (XML Schema 1.1 Part 2 §3.3.5: "Equality is identity, except that
+  // 0 = −0 ... and NaN ≠ NaN").
+  inline bool is_missing_value(const Value& parsed) const {
+    for (const Value& marker : missing_values)
+      if (parsed.as_double() == marker.as_double()) return true;
+    return false;
+  }
+
   inline bool is_outlier(const Value& value) const {
     // if it doesn't have low or high value it must be treated "asIs"
     // since other treatment methods imply low and high value. If treated "asIs"

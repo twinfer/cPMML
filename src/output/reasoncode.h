@@ -39,8 +39,8 @@ class ReasonCode : public OutputExpression {
 
   // A reason code is a label, so there is no numeric reading of it. Returning
   // the points missed instead would silently answer a different question.
-  inline double eval_double(const Sample& /*sample*/, const InternalScore& /*score*/) const override {
-    return double_min();
+  inline std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& /*score*/) const override {
+    return std::nullopt;
   };
 };
 

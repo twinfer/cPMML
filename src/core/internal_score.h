@@ -7,6 +7,8 @@
 #ifndef CPMML_SCORE_H
 #define CPMML_SCORE_H
 
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 #include "core/value.h"
@@ -40,7 +42,10 @@ class InternalScore {
   // (predictedValue, probability and residual read the class); empty or equal
   // to `score` otherwise. Never the prediction from before the Target.
   std::string raw_score;
-  double double_score = double_min();
+  // The number the prediction is; none (std::nullopt) when it is no number
+  // (a class label) or there is no prediction. Typed, so that no number, the
+  // double_min() it used to be included, stands for "none" (P6.4).
+  std::optional<double> double_score;
   std::unordered_map<std::string, double> probabilities;
   std::unordered_map<std::string, double> num_outputs;
   std::unordered_map<std::string, std::string> str_outputs;
@@ -48,8 +53,9 @@ class InternalScore {
   std::vector<std::string> ranked_entity_ids;  // KNN clustering: neighbor IDs in distance order
   // OutputField feature="confidence" outside association models, where the
   // confidence belongs to the matched rule or node rather than to a rule set.
-  // Populated by RuleSetModel; double_min means the model states none.
-  double confidence = double_min();
+  // Populated by RuleSetModel; none when the model states none (P6.4: it was
+  // the marker double_min()).
+  std::optional<double> confidence;
   // Scorecard: reason codes ranked by accumulated points missed, largest first.
   // OutputField feature="reasonCode" rank="N" names a position in this list.
   std::vector<std::string> ranked_reason_codes;
@@ -73,12 +79,21 @@ class InternalScore {
   InternalScore(const std::string& score, const std::unordered_map<std::string, double>& probabilities)
       : empty(false), score(score), double_score(value_of(score)), probabilities(probabilities) {}
 
-  // The number a prediction's text stands for, or double_min() when it is
-  // not one (a class label). The text is cPMML's own (java_format.h) or the
+  // The number a prediction's text stands for, or none when it is not one
+  // (a class label). The text is cPMML's own (java_format.h) or the
   // document's, so java::parse, which also reads "Infinity".
-  static double value_of(const std::string& text) {
+  static std::optional<double> value_of(const std::string& text) {
     double parsed = 0;
-    return java::parse(text, parsed) ? parsed : double_min();
+    if (java::parse(text, parsed)) return parsed;
+    return std::nullopt;
+  }
+
+  // The number of a prediction that is one (a regression's, a segment's in a
+  // numeric ensemble). Where there is none the caller is wrong: no silent
+  // stand-in (P6.4; it read the marker double_min() as a number).
+  double number() const {
+    if (!double_score) throw std::logic_error("InternalScore: the prediction \"" + score + "\" is no number");
+    return *double_score;
   }
 
   InternalScore(const InternalScore&) = default;

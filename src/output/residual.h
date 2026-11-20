@@ -61,10 +61,10 @@ class Residual : public OutputExpression {
     if (has_target_value) target_class = read_class(target_value);
   }
 
-  inline virtual double eval_double(const Sample& sample, const InternalScore& score) const override {
-    if (target_index == std::numeric_limits<size_t>::max()) return double_min();
+  inline virtual std::optional<double> eval_double(const Sample& sample, const InternalScore& score) const override {
+    if (target_index == std::numeric_limits<size_t>::max()) return std::nullopt;
     const Value& actual_val = sample[target_index].value;
-    if (actual_val.is_missing()) return double_min();
+    if (actual_val.is_missing()) return std::nullopt;
 
     // Classification: the model gave a probability distribution. Anything
     // else is a numeric prediction.
@@ -80,8 +80,8 @@ class Residual : public OutputExpression {
     }
 
     // Regression: actual_value - predicted_value
-    if (is_double_min(score.double_score)) return double_min();
-    return actual_val.as_double() - score.double_score;
+    if (!score.double_score) return std::nullopt;
+    return actual_val.as_double() - *score.double_score;
   }
 
  private:

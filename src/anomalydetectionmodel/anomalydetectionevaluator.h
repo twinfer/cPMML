@@ -211,6 +211,12 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
           break;
       }
 
+      // A value equal to a typed marker is missing (P6.4, B6), as in
+      // MiningSchema::prepare.
+      if (field.is_missing_value(value)) {
+        put(field.handle_missing());
+        continue;
+      }
       if (field.is_invalid(value))
         treat_invalid(value);
       else if (field.is_outlier(value))

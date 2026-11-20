@@ -27,13 +27,13 @@ class Confidence : public OutputExpression {
   Confidence(const std::shared_ptr<Indexer>& indexer, const size_t& output_index, const DataType& output_type)
       : OutputExpression(output_index, output_type, indexer) {}
 
-  inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+  inline std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
     return score.confidence;
   };
 
   inline std::string eval_str(const Sample& sample, const InternalScore& score) const override {
-    const double value = eval_double(sample, score);
-    return is_double_min(value) ? "" : java::double_text(value);
+    const std::optional<double> value = eval_double(sample, score);
+    return value ? java::double_text(*value) : "";
   };
 };
 

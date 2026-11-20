@@ -97,9 +97,9 @@ class TransformedValue : public OutputExpression {
     return std::string(expression->eval(sample).text());
   };
 
-  inline double eval_double(const Sample& sample, const InternalScore& /*score*/) const override {
+  inline std::optional<double> eval_double(const Sample& sample, const InternalScore& /*score*/) const override {
     const Value v = expression->eval(sample);
-    if (v.is_missing()) return double_min();
+    if (v.is_missing()) return std::nullopt;
     // A number or boolean constant held as a string slot's text (Value::
     // numeric_text): a numeric OutputField reads its number.
     return v.has_numeric_text() ? v.text_number() : v.as_double();

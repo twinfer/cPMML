@@ -128,15 +128,15 @@ class AssociationOutput : public OutputExpression {
     return extract_feature(sorted[idx]);
   }
 
-  inline virtual double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+  inline virtual std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
     auto it = score.matched_rules_by_algorithm.find(algorithm_key);
-    if (it == score.matched_rules_by_algorithm.end() || it->second.empty()) return double_min();
+    if (it == score.matched_rules_by_algorithm.end() || it->second.empty()) return std::nullopt;
 
     auto sorted = it->second;
     sort_rules(sorted);
 
     const int idx = (rank == 0 || multi_valued) ? 0 : rank - 1;
-    if (idx >= static_cast<int>(sorted.size())) return double_min();
+    if (idx >= static_cast<int>(sorted.size())) return std::nullopt;
 
     const auto& mr = sorted[idx];
     switch (rule_feature) {
@@ -147,7 +147,7 @@ class AssociationOutput : public OutputExpression {
       case RuleFeature::LIFT:
         return mr.lift;
       default:
-        return double_min();
+        return std::nullopt;
     }
   }
 

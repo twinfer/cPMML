@@ -651,7 +651,7 @@ class MultipleModelMethod {
     entries.reserve(usable.results.size());
     double total = 0;
     for (const auto& r : usable.results) {
-      entries.push_back({r.result->double_score, r.segment->weight});
+      entries.push_back({r.result->number(), r.segment->weight});
       total += r.segment->weight;
     }
     if (!(total > 0)) return std::make_unique<InternalScore>();
@@ -758,7 +758,7 @@ class MultipleModelMethod {
     if (usable.missing) return std::make_unique<InternalScore>();
 
     double score = 0;
-    for (const auto& r : usable.results) score += r.result->double_score;
+    for (const auto& r : usable.results) score += r.result->number();
     return std::make_unique<InternalScore>(score);
   }
 
@@ -774,7 +774,7 @@ class MultipleModelMethod {
     if (usable.missing) return std::make_unique<InternalScore>();
 
     double score = 0;
-    for (const auto& r : usable.results) score += r.segment->weight * r.result->double_score;
+    for (const auto& r : usable.results) score += r.segment->weight * r.result->number();
     return std::make_unique<InternalScore>(score);
   }
 

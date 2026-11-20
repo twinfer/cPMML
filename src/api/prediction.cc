@@ -20,7 +20,9 @@ Result::Result(const std::shared_ptr<InternalScore>& score) : score_(score) {}
 
 std::string Result::as_string() const { return score_ ? score_->score : std::string(); }
 
-double Result::as_double() const { return score_ ? score_->double_score : double_min(); }
+// The public contract (design §5.5): double_min() when the prediction is no
+// number. Inside the library "no number" is typed (InternalScore::double_score).
+double Result::as_double() const { return score_ && score_->double_score ? *score_->double_score : double_min(); }
 
 std::unordered_map<std::string, double> Result::distribution() const {
   return score_ ? score_->probabilities : std::unordered_map<std::string, double>();

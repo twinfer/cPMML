@@ -166,9 +166,9 @@ class InternalModel {
   inline void present(InternalScore& score) const {
     if (shown == Shown::AS_IS || score.empty) return;
     if (shown == Shown::NUMBER) {
-      if (is_double_min(score.double_score)) return;  // not a number: nothing to rewrite
-      cast_target(score.double_score);
-      score.score = java::text({score.double_score, shown_kind});
+      if (!score.double_score) return;  // not a number: nothing to rewrite
+      cast_target(*score.double_score);
+      score.score = java::text({*score.double_score, shown_kind});
       return;
     }
     if (score.raw_score.empty() || score.raw_score == score.score) {
@@ -392,9 +392,9 @@ class InternalModel {
     // which the document reader refuses.
     const bool numeric = target_field.datatype.value != DataType::DataTypeValue::STRING &&
                          target_field.datatype.value != DataType::DataTypeValue::BOOLEAN &&
-                         !is_double_min(score->double_score);
+                         score->double_score.has_value();
     sample.change_value(indexer->get_index(target_field.name),
-                        numeric ? Value(score->double_score) : Value::document(score->score, target_field.datatype));
+                        numeric ? Value(*score->double_score) : Value::document(score->score, target_field.datatype));
     _write_outputs_to_sample(sample, *score);
     return true;
   };
@@ -447,8 +447,8 @@ class InternalModel {
         // (JPMML 1.7.7), not the raw class in the target slot.
         if (of.datatype.value == DataType::DataTypeValue::STRING)
           sample.change_value_if_missing(of.index, Value::document(shown->score, of.datatype));
-        else if (!is_double_min(shown->double_score))
-          sample.change_value(of.index, Value(shown->double_score));
+        else if (shown->double_score)
+          sample.change_value(of.index, Value(*shown->double_score));
         continue;
       }
       if (of.datatype.value == DataType::DataTypeValue::STRING) {
@@ -461,8 +461,8 @@ class InternalModel {
         if (!sv.is_missing()) {
           sample.change_value(of.index, sv);
         } else {
-          const double v = of.expression->eval_double(sample, score);
-          if (!is_double_min(v)) sample.change_value(of.index, Value(v));
+          if (const std::optional<double> v = of.expression->eval_double(sample, score))
+            sample.change_value(of.index, Value(*v));
         }
       }
     }

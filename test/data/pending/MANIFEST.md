@@ -96,7 +96,7 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_builtin_text_concat | **registered by P4.6** (moved to `test/data/`, as are its files) | **done: every double and float cell re-derived** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23); with the re-derived cells, on P4.6's base 73cf6ea: the same line (row 1) | rows 1-5, 7-9 agree on every cell (the re-derived Java text); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`), spec-derived |
 | fix_builtin_text_formatnumber | **registered by P4.9** (moved to `test/data/`, as are its files) | **done: the float-narrowing columns added** (`f_flt` %.10f, `f_flt_g` %.9g, `f_flt_d` %d of a float field `f`: 0.1 is `[0.1000000015]` and `[0.100000001]`, 16777217 is `[16777216]`), with `f_fix2` (%.2f), `f_hexf` (%a), `f_field` (the pattern read from a field `pat`, per record) and a row 10 (x = 1.005, a binary value below the decimal tie); every cell from an independent C program calling snprintf (the existing cells unchanged, which it reproduces) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`); the same line on P4.9's base 9bd050f, its list ending `, and, or` | scored column by column and row by row: every cell agrees but those the header lists (Java's Formatter: %d/%i of a double or a float, %#g and %.2f of an integer refused; %g keeps trailing zeros; half-up rounding of the decimal; %a `0x1.0p-1`; 32-bit two's complement for %x/%o of a negative; `0x0`; -0.0 read as 0.0, D18) and row 7 (a missing input, refused, D24): spec-derived throughout (POSIX printf) |
 | fix_segment_outer_localtrans_derived | P7b.3 | no (note 10) | FAIL `predicted:   expected: 1553.0` (base 9123c4f, row 1) | all 3 rows agree |
-| fix_scorecard_complex_score_missing | a fix item before P5, P8.9 at the latest (note 11) | no | FAIL `predicted: 29.0  expected: no prediction` (base 28fbb83, row 2) | row 1 agrees; rows 2-3 refused (UndefinedResultException `Undefined result`), N/A here |
+| fix_scorecard_complex_score_missing | **registered by P6.4** (planned before P5, P8.9 at the latest; moved to `test/data/`, as are its files; base 5df13d6 FAIL `predicted: 29.0  expected: no prediction`, rows 2-3; note 11) | no | FAIL `predicted: 29.0  expected: no prediction` (base 28fbb83, row 2) | row 1 agrees; rows 2-3 refused (UndefinedResultException `Undefined result`), N/A here |
 | fix_scorecard_reasoncode_negative | **registered by P4.3b** (planned P8.9; B50 decided not a bug, D35; moved to `test/data/`, as are its files) | **yes: every reason-code cell, re-derived from Scorecard.html's routine** (note 12) | FAIL `output 'rc3': predicted: RC_INCOME  expected: no value` (base 28fbb83, row 1, the old JPMML cells); with the spec cells, PASS on P4.3b's base cc0f81e | row 3 agrees; rows 1, 2, 4, 5 differ (JPMML drops totals below 0, D35) |
 | fix_grm_offset_general_linear | P8.3 (note 13) | no | FAIL `predicted: 1.9  expected: 0.9` (base 28fbb83, row 2) | all 7 rows agree |
 | fix_grm_offset_multinomial | P8.3 (note 15) | no | FAIL `predicted: c  expected: a` (base cc0f81e, row 1: x = 0, off = -2, cPMML pa 0.17095 for 0.50648) | all 6 rows agree (within 1e-15) |
@@ -283,7 +283,11 @@ JPMML gives up on the whole file at the first row it refuses.
    cPMML adds `as_double()` of the missing Value, 0, and scores 29.0. The
    fix belongs before P5, because P5 changes what a missing Value holds
    under `as_double()`, and a behaviour-preserving swap would have to keep
-   this 0 on purpose.
+   this 0 on purpose. P5 kept it (as `as_double()` of a missing Value,
+   `double_min()`, which is about 0); P6.4 (base 5df13d6) closes B49: a
+   missing ComplexPartialScore leaves the scorecard without a value, as a
+   Characteristic that matches no Attribute does, and registers the fixture
+   with its cells unchanged.
 12. **fix_scorecard_reasoncode_negative** (P3.4b, base 28fbb83; B50,
    registered by P4.3b, base cc0f81e). The model is
    `fix_scorecard_complex_partial_score`'s. P3.4b staged it with JPMML

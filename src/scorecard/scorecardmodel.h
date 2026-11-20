@@ -141,7 +141,7 @@ class ScorecardModel : public InternalModel {
   }
 
   struct Scored {
-    bool valid = false;  // false when some Characteristic matched no Attribute
+    bool valid = false;  // false when some Characteristic matched no Attribute or a ComplexPartialScore is missing
     double total = 0.0;
     std::vector<std::pair<std::string, double>> reason_codes;  // highest points-missed first
   };
@@ -172,7 +172,21 @@ class ScorecardModel : public InternalModel {
       for (const auto& attr : ch.attributes) {
         if (attr.predicate.is_empty || attr.predicate(sample)) {
           matched = true;
-          const double ps = attr.complex_score ? attr.complex_score->eval(sample).as_double() : attr.partial_score;
+          double ps = attr.partial_score;
+          if (attr.complex_score) {
+            // Scorecard.html: "Whenever element ComplexPartialScore is used,
+            // the actual partial score is the value returned by the
+            // EXPRESSION". A missing value is no number, and the page gives
+            // no replacement, so the score has no value (P6.4, B49; JPMML
+            // 1.7.7: UndefinedResultException). It added as_double() of the
+            // missing Value, the marker double_min(), as if it were 0.
+            const Value v = attr.complex_score->eval(sample);
+            if (v.is_missing()) {
+              result.valid = false;
+              return result;
+            }
+            ps = v.as_double();
+          }
           result.total += ps;
 
           if (use_reason_codes) {

@@ -275,10 +275,10 @@ class Target {
           score.empty = false;
           score.double_score = transform(*default_value->default_value);
         } else {
-          score.double_score = transform(score.double_score);
+          score.double_score = transform(score.number());
         }
         // score string representation must be updated accordingly
-        score.score = java::double_text(score.double_score);
+        score.score = java::double_text(*score.double_score);
         // A number has no raw value apart from its displayed one: the
         // predictedValue of a regression is the value after min/max,
         // rescaleFactor, rescaleConstant and castInteger, whatever its

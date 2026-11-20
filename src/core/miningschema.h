@@ -117,6 +117,15 @@ class MiningSchema {
           case MiningField::InputStatus::VALID:
             break;
         }
+        // A value equal to a marker read in the field's type is missing too
+        // (P6.4, B6: on a double field "-999.0" is the marker -999), before
+        // validity: DataDictionary.html "any data that is outside the
+        // intervals will be considered invalid (except for discrete Values
+        // whose property attribute identify them as missing)".
+        if (miningfield.is_missing_value(slot)) {
+          sample.change_value(miningfield.index, miningfield.handle_missing());
+          continue;
+        }
         if (miningfield.hasInvalidTreatment || miningfield.hasOutlierTreatment) {
           Value tmp_value = sample.operator[](miningfield.index).value;
           if (miningfield.hasInvalidTreatment)

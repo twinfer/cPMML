@@ -159,8 +159,8 @@ class OutputField {
         // transformedValue over a numeric expression): the number as JPMML
         // writes its type.
         if (sv.empty() && expression->value_kind) {
-          const double v = expression->eval_double(sample, from);
-          if (!is_double_min(v)) sv = java::text({v, *expression->value_kind});
+          if (const std::optional<double> v = expression->eval_double(sample, from))
+            sv = java::text({*v, *expression->value_kind});
         }
         if (sv.empty()) return Value();
         into.str_outputs[name] = sv;
@@ -169,15 +169,17 @@ class OutputField {
       default: {
         double v = 0;
         switch (source) {
-          case Source::Number:
-            v = expression->eval_double(sample, from);
-            if (is_double_min(v)) return Value();
+          case Source::Number: {
+            const std::optional<double> number = expression->eval_double(sample, from);
+            if (!number) return Value();
+            v = *number;
             // Q2 (decided (b)): a narrowing cast that fails is an invalid
             // result for the record; JPMML 1.7.7: TypeCheckException
             // "Expected integer value, got double value" ("... boolean
             // value, got integer value").
             if (cast.op != cpmml::fn::DeclaredCast::Op::None && !cast.apply_number(v)) raise_invalid(cast.failure(v));
             break;
+          }
           case Source::Value: {
             Value value = expression->eval(sample);
             if (value.is_missing()) return Value();

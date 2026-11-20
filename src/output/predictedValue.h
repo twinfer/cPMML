@@ -68,21 +68,22 @@ class PredictedValue : public OutputExpression {
   // These used to read the text as a number only, and "true" is none: a
   // boolean prediction had no value as a boolean, integer or double
   // OutputField, nor did a transformedValue reading it.
-  inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+  inline std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
     const std::string& value = score.raw_score.empty() ? score.score : score.raw_score;
     if (target_type.value == DataType::DataTypeValue::BOOLEAN) return boolean_of(value);
-    const double number = score.raw_score.empty() || score.raw_score == score.score
-                              ? score.double_score
-                              : InternalScore::value_of(score.raw_score);
-    if (is_double_min(number) && output_type.value == DataType::DataTypeValue::BOOLEAN) return boolean_of(value);
+    const std::optional<double> number = score.raw_score.empty() || score.raw_score == score.score
+                                             ? score.double_score
+                                             : InternalScore::value_of(score.raw_score);
+    if (!number && output_type.value == DataType::DataTypeValue::BOOLEAN) return boolean_of(value);
     return number;
   };
 
  private:
   // 1 or 0 for an XSD boolean literal (true, false, 1, 0), else no value.
-  static double boolean_of(const std::string& text) {
+  static std::optional<double> boolean_of(const std::string& text) {
     bool parsed = false;
-    return lexical::parse_boolean(text, parsed) ? (parsed ? 1 : 0) : double_min();
+    if (lexical::parse_boolean(text, parsed)) return parsed ? 1.0 : 0.0;
+    return std::nullopt;
   }
 };
 
@@ -110,7 +111,7 @@ class PredictedDisplayValue : public OutputExpression {
     return score.score;
   };
 
-  inline double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+  inline std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
     return score.double_score;
   };
 };

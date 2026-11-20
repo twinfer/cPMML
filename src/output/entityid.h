@@ -51,9 +51,9 @@ class EntityId : public OutputExpression {
   // step writes for the next segments (InternalModel::
   // _write_outputs_to_sample). It used to catch the ParsingException and
   // give no value, silently (design commit P4.7).
-  inline double eval_double(const Sample& sample, const InternalScore& score) const override {
+  inline std::optional<double> eval_double(const Sample& sample, const InternalScore& score) const override {
     const std::string id = eval_str(sample, score);
-    if (id.empty()) return double_min();
+    if (id.empty()) return std::nullopt;
     const cpmml::fn::DeclaredCast cast(cpmml::bind::TypeId::String, numeric_type());
     double d = 0;
     if (!cast.parse_text(id, d))

@@ -45,8 +45,8 @@ class Probability : public OutputExpression {
         target_value(node.get_attribute("value", "")),
         category(target_type) {}
 
-  inline virtual double eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
-    if (score.empty || score.probabilities.empty()) return double_min();
+  inline virtual std::optional<double> eval_double(const Sample& /*sample*/, const InternalScore& score) const override {
+    if (score.empty || score.probabilities.empty()) return std::nullopt;
 
     // Without a value attribute: the predicted class, as the model named it
     // before Targets turned it into its displayValue.

@@ -7,8 +7,10 @@
 #ifndef CPMML_DATAFIELD_H
 #define CPMML_DATAFIELD_H
 
+#include <cmath>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "closure.h"
 #include "datatype.h"
@@ -39,12 +41,27 @@ class DataField {
   DataType datatype;
   size_t index = std::numeric_limits<size_t>::max();
   OpType optype;
-  // <Value property="missing"> declares which raw input tokens *stand for* a
-  // missing value — "?", "NA", "-999". They are markers, not a replacement, so
-  // they are kept as the literal strings the document wrote and matched before
-  // any conversion: "-999" parses perfectly well as a double and would sail
-  // through as data otherwise. This used to be a single Value that nothing read.
+  // <Value property="missing"> declares the values that *stand for* a missing
+  // value: "?", "NA", "-999" (DataDictionary.html: "It is possible to
+  // explicitly define values which are interpreted as missing values"). They
+  // are markers, not a replacement, and an input matches one in two ways
+  // (§2.8, P6.4, B6):
+  //   * by its raw text, before any conversion (a marker such as "?" on a
+  //     double field is no value of the field, so text is all it can match);
+  //   * by value, for a field that is not a string: the marker read in the
+  //     field's type (Value::document, the K1 rule: an integer field's "-999.0"
+  //     is the double -999, D22) against the input read in it, so on a double
+  //     field "-999.0" and "-9.99e2" are the marker -999. DataDictionary.html:
+  //     "The dataType reuses names and semantics of atomic types in XML
+  //     Schema"; XML Schema 1.1 Part 2 §3.3.5 (double; §3.3.4 float alike):
+  //     "Equality is identity, except that 0 = −0 (although they are not
+  //     identical) and NaN ≠ NaN ... 0 and −0 are thus equivalent for
+  //     purposes of enumerations".
   std::set<std::string> missing_markers;
+  // The markers that are values of the field's (non-string) type, read in it;
+  // a marker that is not one ("?" on a double field) is matched as text only.
+  // NaN is never one: NaN ≠ NaN.
+  std::vector<Value> missing_values;
   // The <Value property="valid"> categories in document order. The constraint
   // predicate below holds the same set, but as a set and behind a Predicate, so
   // it answers "is this allowed" and not "which categories are there" -- and
@@ -72,7 +89,8 @@ class DataField {
     // Value@value is a value of the field, read by the K1 rule, which
     // Value::document(text, datatype) is in the engine's storage (bind/load_scope.h:
     // an integer field's "4.0" is the double 4, rule 2); a missing marker is
-    // matched as raw text first (§2.8), so it may be anything. Interval
+    // matched as raw text first (§2.8), so it may be anything, and then, when
+    // it is a value of the field's type, by that value (P6.4). Interval
     // margins are NUMBER (xs:double), whatever the field's type.
     for (const auto& value : values) {
       auto property = Property(value);
@@ -81,9 +99,20 @@ class DataField {
           allowed_values.push_back(Value::document(value.required_attribute("value"), datatype));
           valid_values.push_back(value.required_attribute("value"));
           break;
-        case Property::PropertyValue::MISSING:
-          missing_markers.insert(value.required_attribute("value"));
+        case Property::PropertyValue::MISSING: {
+          const std::string text = value.required_attribute("value");
+          missing_markers.insert(text);
+          if (datatype.value != DataType::DataTypeValue::STRING) {
+            // Not a silent fallback: a marker outside the field's lexical
+            // space is still a marker, of text (§2.8), as it always was.
+            try {
+              Value marker = Value::document(text, datatype);
+              if (!std::isnan(marker.as_double())) missing_values.push_back(std::move(marker));
+            } catch (const cpmml::ParsingException&) {
+            }
+          }
           break;
+        }
         case Property::PropertyValue::INVALID:
           forbidden_values.push_back(Value::document(value.required_attribute("value"), datatype));
           break;
