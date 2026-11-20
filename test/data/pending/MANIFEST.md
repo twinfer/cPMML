@@ -62,6 +62,9 @@ P6.7 may add them back. Their expected values would then come from the spec:
 `round` returns an integer (BuiltinFunctions, quoted in design §4.2:
 "Functions floor, ceil, and round return an integer"), and `+` of two integers is an integer (§2.5). Under Q1 their text
 is Java text, so `rs` is `3` and `ps` is `6`.
+**Done in P6.7** (note 17): `rs`, `ps` and the bits c9-c11 are back,
+`equal(ds, "3")` is bit 4096 again, and a row 8 (d = 2.5, round half up to
+3, B54) is added; every cell from those rules, and JPMML 1.7.7 agrees.
 
 ## Fixtures
 
@@ -83,9 +86,9 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_binsim_clustering_string | **registered by P6.5** (moved to `test/data/`, as are its files; base de332ca FAIL `predicted:   expected: K2`, rows 1-4, 6, 8, 9; rows 8-11 added; header rewritten) | **done: row 6 K2** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |
 | fix_binsim_clustering_string_declared | **registered by P6.5** (moved to `test/data/`, as are its files; a guard, PASS on base de332ca; header rewritten) | **checked: no change** (note 5) | **PASS** (a guard, not a sentinel) | every row refused (`Expected false or true, got "n"`) |
 | fix_binsim_knn_string | **registered by P6.5** (moved to `test/data/`, as are its files; base de332ca FAIL `predicted:   expected: 1.5`, row 4; rows 5-7 added; header rewritten) | **done: every row** (note 5; equal to JPMML 1.7.7's on the document spelled true/false) | FAIL `predicted: 12.0  expected: no prediction` | every row refused (`Expected false or true, got "0"`) |
-| fix_string_derived_set | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree |
-| fix_string_typed_values | P6.7 | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree; **passes since P6.3** (its `e2` rows 1, 3, equal of a double DerivedField with the string `3.0`, by text, D2) |
-| fix_typed_derived_conversions | P6.7 | **yes: `e_d_s3` row 1** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree; since P6.3 only `e_d_s3` row 1 fails (`predicted: false  expected: true`, the D2 re-derivation left to P6.7; P6.3 moved `e_s_c3`, `e_s_c30`, `e_isin` rows 2-4 to the fixture's cells) |
+| fix_string_derived_set | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16); **`rs`, `ps` added back by P6.7** (bits 512, 1024, 2048, row 8; a guard, PASS on base 8b8a974; note 17) | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree (the 8 rows of P6.7's version too) |
+| fix_string_typed_values | **registered by P6.7** (moved to `test/data/`, as are its files; a guard, PASS on base 8b8a974 since P6.3; header rewritten; note 17) | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree; **passes since P6.3** (its `e2` rows 1, 3, equal of a double DerivedField with the string `3.0`, by text, D2) |
+| fix_typed_derived_conversions | **registered by P6.7** (moved to `test/data/`, as are its files; the pending copy FAIL on base 8b8a974 `output 'e_d_s3': predicted: false  expected: true`, row 1; with the re-derived cell PASS there; header rewritten; note 17) | **done: `e_d_s3` row 1 false** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree but `e_d_s3` row 1 (D2; re-checked on 8b8a974); since P6.3 only `e_d_s3` row 1 failed (`predicted: false  expected: true`, the D2 re-derivation left to P6.7; P6.3 moved `e_s_c3`, `e_s_c30`, `e_isin` rows 2-4 to the fixture's cells) |
 | fix_string_sum_avg | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no; **header written by P4.7** (note 2) | FAIL `predicted: 0.0  expected: 6` (the `o_sii` column) | all 7 rows agree |
 | fix_derived_cast_novalue | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 3-6 are invalid records** (notes 6, 16) | FAIL `output 'o_tsd': predicted: 1  expected: 1.0` | rows 1-2 agree; rows 3-6 refused (TypeCheckException) |
 | fix_output_integer_nonintegral | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 4-6, 8 are invalid records** (notes 6, 16) | FAIL `predicted: 3.5  expected: INVALID` (row 4; before P4.7's INVALID marker the pending row read `output 'ti': predicted: 3.5  expected: no value`) | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
@@ -402,7 +405,29 @@ JPMML gives up on the whole file at the first row it refuses.
    `OutputField::add_output` and so not through its cast; P7b.4 also has to
    write rows 2 and 5 as `INVALID` (Q2) rather than N/A.
    `fix_typed_derived_conversions` (P6.7) still fails on `e_d_s3` (note 3,
-   D2: equal(d, "3") compares the double's text), although P4.7 gave its
+   D2: equal(d, "3") compares the double's text; re-derived and registered
+   by P6.7, note 17), although P4.7 gave its
    string DerivedFields their text (`o_ds` N/A -> 3.0 ...); and
    `fix_float_set_narrow` (P6.2) on the float narrowing of inputs (B4)
    (its `o_fpd` cells changed from N/A to the expected values).
+17. **Design item P6.7 (base 8b8a974)** registered the last two fixtures of
+   the failed patches it owns, and finished the third. No library code
+   changed: P4.7's casts and P6.3's comparisons already give every cell.
+   - `fix_typed_derived_conversions`: `e_d_s3` = `equal(d, "3")` row 1 is
+     re-derived from `true` to `false` (note 3, D2). Functions: "When the
+     input parameters have multiple dataTypes, the least restrictive
+     dataType will be inherited by default ... string, double, float,
+     integer", so d = 3 meets the string as its Java text `3.0` (Q1), which
+     is not `3`. JPMML 1.7.7 parses the string when the number is on the
+     left and gives `true`; it agrees with every other cell. The pending
+     copy fails on 8b8a974 with `output 'e_d_s3': predicted: false
+     expected: true` (row 1), and the re-derived copy passes there.
+   - `fix_string_typed_values` passes on 8b8a974 (since P6.3, e2 rows 1, 3)
+     and is registered as a guard; JPMML 1.7.7 agrees with every cell.
+   - `fix_string_derived_set` gets back the `rs` and `ps` DerivedFields of
+     the `type_value_tag` copy (Provenance above), with `equal(ds, "3")` at
+     bit 4096 as there, and a row 8 (d = 2.5: `round` sends a half up, B54,
+     so `rs` is `3`). It is a guard, passing on 8b8a974; JPMML 1.7.7 agrees
+     with all 8 rows.
+   The three headers are rewritten to quote the spec. Every fixture this
+   directory held for P6.7 is now in `test/data/`.
