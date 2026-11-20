@@ -23,11 +23,28 @@
 #include <utility>
 #include <vector>
 
+#include "core/compare.h"
 #include "core/types/string_pool.h"
 #include "core/value.h"
 
 namespace t = cpmml::types;
 using t::TypeId;
+
+// The engine's typed comparisons (core/compare.h, P6.3) over two values as
+// they are stored.
+struct TypedCompare {
+  static t::Tri rel(t::Relation r, const Value& a, const Value& b) {
+    const auto x = cpmml::compare::relate(r, a.typed(), b.typed(), nullptr);
+    if (!x) throw std::logic_error("TypedCompare: no common type");
+    return *x;
+  }
+  static bool equal(const Value& a, const Value& b) { return rel(t::Relation::Equal, a, b) == t::Tri::True; }
+  static bool not_equal(const Value& a, const Value& b) { return rel(t::Relation::NotEqual, a, b) == t::Tri::True; }
+  static bool less_than(const Value& a, const Value& b) { return rel(t::Relation::Less, a, b) == t::Tri::True; }
+  static bool less_or_equal(const Value& a, const Value& b) {
+    return rel(t::Relation::LessOrEqual, a, b) == t::Tri::True;
+  }
+};
 
 static int failures = 0;
 static int checks = 0;
@@ -200,10 +217,11 @@ static void switches() {
   CHECK(::java_text(Value(t::Float{0.1f})) == "0.1", "P6.2: a Float is written as Float.toString writes it");
 
   // P6.1: two strings compare by text (pooled strings by pointer, any other
-  // pair by its texts); an edit is the string of its new text. Switch 2's
-  // rest: a string against a number compares its code (B18), strings are
-  // ordered by code (P6.3).
-  using C = cpmml::legacy::LegacyCompare;
+  // pair by its texts); an edit is the string of its new text. P6.3 deleted
+  // LegacyCompare: a string against a number compares the number's Java text
+  // (D2), never the string's code (B18), and strings are ordered by their
+  // code units (core/compare.h).
+  using C = TypedCompare;
   const Value a = Value::string("abc");
   const Value a2 = Value::string("abc");
   const Value z = Value::string("zzz");
@@ -215,8 +233,14 @@ static void switches() {
   CHECK(up.text() == "ABC" && !C::equal(up, a) && C::equal(up, Value::string("ABC")) &&
             up.as_double() == Value::string("ABC").as_double(),
         "P6.1 (B2): uppercase gives the string ABC (its code), which equals \"ABC\", not its argument");
-  CHECK(C::equal(Value(cpmml::legacy::code_of(a)), a), "switch 2 (B18): a string equals the number of its code");
-  CHECK(C::less_than(a, z) == (a.as_double() < z.as_double()), "switch 2: strings are ordered by code");
+  CHECK(!C::equal(Value(cpmml::legacy::code_of(a)), a) && C::not_equal(Value(cpmml::legacy::code_of(a)), a),
+        "P6.3 (B18): a string is not the number of its code");
+  CHECK(C::equal(Value(2.5), Value::string("2.5")) && C::equal(Value::string("2.5"), Value(2.5)) &&
+            !C::equal(Value(3.0), Value::string("3")) && C::equal(Value(t::Integer{3}), Value::string("3")),
+        "P6.3 (D2): a number against a string is its Java text, in either order");
+  const Value b0 = Value::string("aab, after zzz");  // pooled after zzz: a larger code, a smaller text
+  CHECK(C::less_than(b0, z) && !C::less_than(z, b0) && b0.as_double() > z.as_double(),
+        "P6.3: strings are ordered by their code units, not by code");
 }
 
 static void missing_values(t::ParseContext& ctx) {
@@ -370,7 +394,7 @@ static void strings(cpmml::DocumentStrings& document, t::ParseContext& ctx) {
   marked.mark_numeric_text();
   CHECK(cpmml::unpack<t::String>(marked, TypeId::String, ctx).text() == "5", rule + " (numeric_text: the text)");
   const Value repacked = cpmml::pack(cpmml::unpack<t::Value>(marked, TypeId::String, ctx));
-  CHECK(cpmml::legacy::LegacyCompare::equal(repacked, marked) && repacked.text() == "5" &&
+  CHECK(TypedCompare::equal(repacked, marked) && repacked.text() == "5" &&
             !repacked.has_numeric_text(),
         "numeric_text does not survive pack: documented in core/value.h");
 
@@ -382,7 +406,7 @@ static void strings(cpmml::DocumentStrings& document, t::ParseContext& ctx) {
   CHECK(cpmml::pack(t::String{other.intern("ABC")}).as_double() == static_cast<double>(document.pool.find("ABC")->id),
         "B2 (P6): pack gives the edited text's own code, not the argument's");
   CHECK(up.as_double() == static_cast<double>(document.pool.find("ABC")->id) &&
-            cpmml::legacy::LegacyCompare::equal(cpmml::pack(cpmml::unpack<t::Value>(up, TypeId::String, ctx)), up),
+            TypedCompare::equal(cpmml::pack(cpmml::unpack<t::Value>(up, TypeId::String, ctx)), up),
         "P6.1 (B2): the edit has the code of ABC, and pack(unpack) of it is equal to it");
 }
 
@@ -433,7 +457,7 @@ static void string_scopes() {
     const Value unseen2 = Value::string("another");
     CHECK(seen.as_double() == 1.0 && unseen.as_double() == -1.0 && unseen2.as_double() == -1.0,
           rule + " (a frozen pool: a text it lacks has the unseen code -1)");
-    using C = cpmml::legacy::LegacyCompare;
+    using C = TypedCompare;
     CHECK(!C::equal(unseen, unseen2) && C::not_equal(unseen, unseen2) && C::equal(unseen, Value::string("never named")),
           rule + " (P6.1, B1: two strings the pool lacks are equal iff their texts are)");
     Value up_seen = Value::string("SECOND");
@@ -445,8 +469,12 @@ static void string_scopes() {
     CHECK(up_unseen.as_double() == -1.0 && !C::equal(up_unseen, unseen) &&
               C::equal(up_unseen, Value::string("NEVER NAMED")) && !C::equal(up_unseen, seen),
           rule + " (P6.1, B2: an edit to a text the pool lacks is compared by that text)");
-    CHECK(throws<std::logic_error>([&] { C::constant_key(unseen); }) && C::constant_key(seen) == 1.0,
+    CHECK(throws<std::logic_error>([&] { cpmml::ContainerKey::of_constant(unseen); }) &&
+              cpmml::ContainerKey::of_constant(seen) == 1.0,
           rule + " (P6.1: a key is a pooled string, never one with the unseen code -1)");
+    CHECK(!C::less_than(unseen, unseen2) && C::less_than(unseen2, unseen) && !C::less_than(unseen, unseen) &&
+              C::less_or_equal(unseen, Value::string("never named")),
+          rule + " (P6.3, L4: two strings the pool lacks are ordered by their texts, as they are compared)");
     CHECK(document->pool.find("never named") == nullptr, rule + " (scoring never interns)");
     first_made = unseen.text().data();
     CHECK(std::get<t::String>(unseen.typed()).rep->id == t::StringRep::kUnpooled && unseen.text() == "never named",

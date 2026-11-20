@@ -210,6 +210,35 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
   return ResolvedField{indexer.get_or_set(name), engine_type(*b->type.type)};
 }
 
+// The declared order of `name` seen from `from` (design item P6.3, §2.7): the
+// texts of its declaration's valid Value elements, in document order, when
+// the field is an ordinal string field that has them, else nullopt. The
+// optype is the binding's in the model's scope, so a MiningField's counts
+// (MiningSchema.html, optype: "The attribute value overrides the
+// corresponding value in the DataField"; the load-mode binder keeps a
+// MiningField of another optype as its own binding). DataDictionary.html: "For ordinal
+// fields, if a sequence of Value elements is given, the sequence defines the
+// ascending order".
+inline std::optional<std::vector<std::string>> ordinal_values(const XmlNode& from, const std::string& name) {
+  const LoadScope* scope = LoadScope::current();
+  if (!scope) return std::nullopt;
+  const Binding* b = scope->binder().lookup(from.xml(), name);
+  if (!b || b->type.type != TypeId::String || b->type.optype != OpType::Ordinal) return std::nullopt;
+  const Binding* root = b;
+  while (root->source) root = root->source;
+  // The declaration's Value elements are read here: in load mode the binder
+  // does not bind a DataField's Values (has_values is report mode's).
+  if (!root->declaration) return std::nullopt;
+  std::vector<std::string> values;
+  for (pugi::xml_node v : root->declaration.children("Value")) {
+    const pugi::xml_attribute property = v.attribute("property");
+    if (property && std::string_view(property.value()) != "valid") continue;
+    values.emplace_back(v.attribute("value").value());
+  }
+  if (values.empty()) return std::nullopt;
+  return values;
+}
+
 // ---------------------------------------------------------------- document text (P2.2)
 //
 // Design commit P2.2 (§3.4): every attribute is read with its XSD type from

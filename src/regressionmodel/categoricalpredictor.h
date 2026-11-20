@@ -7,6 +7,7 @@
 #ifndef CPMML_CATEGORICALPREDICTOR_H
 #define CPMML_CATEGORICALPREDICTOR_H
 
+#include "core/compare.h"
 #include "bind/load_scope.h"
 #include "core/datatype.h"
 #include "core/sample.h"
@@ -29,8 +30,8 @@ class CategoricalPredictor {
   std::string name;
   size_t index = std::numeric_limits<size_t>::max();
   DataType datatype;
-  // Keyed by the LegacyCompare key of each value (switch 2, core/value.h):
-  // a number itself, a string its code.
+  // Keyed by the ContainerKey of each value (core/compare.h): a number
+  // itself, a string its pool id (the value is read in the field's type).
   std::unordered_map<double, double> coefficients;
 
   CategoricalPredictor() = default;
@@ -46,7 +47,7 @@ class CategoricalPredictor {
   inline double get_term(const Sample& sample) const {
     const Value& value = sample[index].value;
     if (value.is_missing()) return 0;
-    const auto it = coefficients.find(cpmml::legacy::LegacyCompare::key(value));
+    const auto it = coefficients.find(cpmml::ContainerKey::of(value));
     return it == coefficients.cend() ? 0 : it->second;
   }
 
@@ -55,7 +56,7 @@ class CategoricalPredictor {
     std::unordered_map<double, double> result;
     for (const auto& node : nodes) {
       const double key =
-          cpmml::legacy::LegacyCompare::constant_key(Value::document(node.required_attribute("value"), datatype));
+          cpmml::ContainerKey::of_constant(Value::document(node.required_attribute("value"), datatype));
       result[key] = node.required_double_attribute("coefficient");
     }
 

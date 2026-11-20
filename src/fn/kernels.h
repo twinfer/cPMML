@@ -48,10 +48,10 @@
  * reads it (§2.6; P4.7's casts keep integer slots integral, B17, and the
  * binder types a slot that a MiningField widens as double, also from the
  * TransformationDictionary; see integer_operand).
- * Comparisons delegate
- * to `LegacyCompare`, switch 2 of core/value.h (two strings by their text
- * since P6.1; otherwise the double: a number, a boolean's 1 or 0, a
- * string's legacy code), until P6.3. The string edits (uppercase, lowercase,
+ * Comparisons are
+ * typed (P6.3, core/compare.h, §2.7): each operand read as its static type
+ * (Bound::argument_type), compared in the common type, symmetric (D1, D2),
+ * ±INF against itself and NaN indeterminate (D9, B44). The string edits (uppercase, lowercase,
  * substring, trimBlanks) delegate to `StringEdit`, the Value's own
  * in-place edit, which gives the result the string of its new text (P6.1
  * closed B2, where it kept its argument's string code) and keeps the rest of
@@ -74,6 +74,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/compare.h"
 #include "core/types/arithmetic.h"
 #include "core/types/java_text.h"
 #include "core/types/value.h"
@@ -87,14 +88,9 @@ namespace cpmml::fn {
 // removed by the commit named (design §7 P4, §1.2). The behaviour a switch
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
-namespace legacy {
-// B18, B44 (P6.3): comparisons but the equality of two strings compare the
-// double each Value holds (LegacyCompare). P6.1 removed B1 and B2 (strings
-// compare by text; an edit is the string of its new text).
-inline constexpr bool LegacyCompare = true;
-
-static_assert(LegacyCompare, "P6.3 removes this switch together with the code it keeps");
-}  // namespace legacy
+// None is left: P6.3 removed the last, LegacyCompare (B18, B44: comparisons
+// by the double each Value holds), for the typed comparisons of
+// core/compare.h.
 
 namespace scalar {
 struct NumberPattern;  // formatNumber's pattern, below
@@ -121,6 +117,10 @@ struct Bound {
   // (null otherwise: parsed per record). argument_type holds the input's and
   // the pattern's static types.
   std::shared_ptr<const scalar::NumberPattern> number_pattern;
+  // The comparisons (P6.3) read argument_type too, one static type per
+  // argument (TypeId::Missing: unknown). An ordering of strings one of which
+  // is an ordinal field with Values follows that field's declared order.
+  std::shared_ptr<const compare::OrdinalOrder> ordinal;
 };
 
 enum class Status : std::uint8_t { Ok, Invalid };
@@ -646,12 +646,7 @@ inline bool format_number(const NumberPattern& pattern, double v, std::string& o
 }
 }  // namespace scalar
 
-// ---------------------------------------------------------------- legacy delegates
-// Comparisons as today (legacy::LegacyCompare): the engine's one
-// LegacyCompare, switch 2 of core/value.h (the double each Value is compared
-// by).
-using LegacyCompare = ::cpmml::legacy::LegacyCompare;
-
+// ---------------------------------------------------------------- delegates
 // The string edits: the argument's Value, edited in place; a string result
 // is the string of its new text (Value::uppercase and friends, P6.1).
 struct StringEdit {
@@ -958,34 +953,54 @@ inline Status if_then_else_text(const Bound& bound, const ::Value* args, std::si
   return Status::Ok;
 }
 
-// The comparisons (legacy::LegacyCompare), over arguments narrowed as the
-// numeric functions' are.
-inline ::Value compared(const Bound& b, const ::Value* args, std::size_t i) {
-  ::Value v = args[i];
-  if (b.float_argument[i]) v.set_double(static_cast<double>(types::narrow_to_float(v.as_double())));
-  return v;
+// The comparisons (§2.7, P6.3; core/compare.h): each operand read as its
+// static type (Bound::argument_type, the binder's type fixed at load),
+// compared in the common type, in either order (D1, D2). Indeterminate (±INF
+// against the same infinity, NaN: D9, B44; a string outside an ordinal
+// field's Values) is a missing result: BuiltinFunctions.html (lessThan ...):
+// "any attempt to either with itself is indeterminate and will result in a
+// missing value being returned". Operands of no common type, which the
+// static types did not exclude at load, are an invalid result (§2.6:
+// "Invalid(NoCast) otherwise").
+inline types::TypeId static_type(const Bound& b, std::size_t i) {
+  return i < b.argument_type.size() ? b.argument_type[i] : types::TypeId::Missing;
 }
-template <bool (*C)(const ::Value&, const ::Value&)>
+template <types::Relation R>
 Status compare(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
-  if (!b.narrow_arguments) return boolean(C(args[0], args[1]), out);
-  return boolean(C(compared(b, args, 0), compared(b, args, 1)), out);
+  const auto t = cpmml::compare::relate(R, cpmml::compare::operand(args[0], static_type(b, 0), 0),
+                                        cpmml::compare::operand(args[1], static_type(b, 1), 1), b.ordinal.get());
+  if (!t) return Status::Invalid;
+  if (*t == types::Tri::Unknown) return Status::Ok;
+  return boolean(*t == types::Tri::True, out);
 }
-inline bool is_in_values(const Bound& b, const ::Value* args, std::size_t n) {
-  if (!b.narrow_arguments) {
-    for (std::size_t i = 1; i < n; i++)
-      if (LegacyCompare::equal(args[i], args[0])) return true;
-    return false;
+// isIn: "Evaluates if a field value is contained in a given list of values.
+// isIn: True if the field value is contained in list of values."
+// (BuiltinFunctions.html). Contained means equal to a member, so isIn is the
+// three-valued or of the equalities: true if one holds, else missing if one
+// is indeterminate, else false.
+inline std::optional<types::Tri> is_in_values(const Bound& b, const ::Value* args, std::size_t n) {
+  const types::Value x = cpmml::compare::operand(args[0], static_type(b, 0), 0);
+  bool unknown = false;
+  for (std::size_t i = 1; i < n; i++) {
+    const auto t = cpmml::compare::relate(types::Relation::Equal, x,
+                                          cpmml::compare::operand(args[i], static_type(b, i), 1), nullptr);
+    if (!t) return std::nullopt;
+    if (*t == types::Tri::True) return types::Tri::True;
+    unknown |= *t == types::Tri::Unknown;
   }
-  const ::Value x = compared(b, args, 0);
-  for (std::size_t i = 1; i < n; i++)
-    if (LegacyCompare::equal(compared(b, args, i), x)) return true;
-  return false;
+  return unknown ? types::Tri::Unknown : types::Tri::False;
 }
 inline Status is_in(const Bound& b, const ::Value* args, std::size_t n, ::Value& out) {
-  return boolean(is_in_values(b, args, n), out);
+  const auto t = is_in_values(b, args, n);
+  if (!t) return Status::Invalid;
+  if (*t == types::Tri::Unknown) return Status::Ok;
+  return boolean(*t == types::Tri::True, out);
 }
 inline Status is_not_in(const Bound& b, const ::Value* args, std::size_t n, ::Value& out) {
-  return boolean(!is_in_values(b, args, n), out);
+  const auto t = is_in_values(b, args, n);
+  if (!t) return Status::Invalid;
+  if (*t == types::Tri::Unknown) return Status::Ok;
+  return boolean(*t == types::Tri::False, out);
 }
 // not: "Negates input boolean value" (BuiltinFunctions.html, not). The
 // argument is a boolean (`<ParameterField name="x" dataType="boolean"/>`;
@@ -1217,12 +1232,12 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
     case Op::If: return a::if_then_else;  // inputs: MissingRule::LazyIf (if_taken)
     case Op::IsMissing: return a::is_missing;
     case Op::IsNotMissing: return a::is_not_missing;
-    case Op::Equal: return a::compare<LegacyCompare::equal>;
-    case Op::NotEqual: return a::compare<LegacyCompare::not_equal>;
-    case Op::LessThan: return a::compare<LegacyCompare::less_than>;
-    case Op::LessOrEqual: return a::compare<LegacyCompare::less_or_equal>;
-    case Op::GreaterThan: return a::compare<LegacyCompare::greater_than>;
-    case Op::GreaterOrEqual: return a::compare<LegacyCompare::greater_or_equal>;
+    case Op::Equal: return a::compare<types::Relation::Equal>;
+    case Op::NotEqual: return a::compare<types::Relation::NotEqual>;
+    case Op::LessThan: return a::compare<types::Relation::Less>;
+    case Op::LessOrEqual: return a::compare<types::Relation::LessOrEqual>;
+    case Op::GreaterThan: return a::compare<types::Relation::Greater>;
+    case Op::GreaterOrEqual: return a::compare<types::Relation::GreaterOrEqual>;
     case Op::IsIn: return a::is_in;
     case Op::IsNotIn: return a::is_not_in;
     case Op::Replace: return a::replace;

@@ -98,7 +98,7 @@ class NormContinuous : public Expression {
     const Value& value = sample[index].value;
 
     if (value.is_missing()) return mapmissing_to;  // missing when no mapMissingTo is given
-    const double input = cpmml::legacy::LegacyCompare::key(value);
+    const double input = value.as_double();  // LinearNorm points are NUMBER
 
     if (input < orig.front() || input > orig.back()) {  // outlier
       switch (outliertreatment_method.value) {

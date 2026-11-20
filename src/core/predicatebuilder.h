@@ -73,8 +73,17 @@ class PredicateBuilder {
         // declared after this predicate's model element builds it (B12).
         const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
         if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(index, op, Value());
-        // Every other operator compares with value (Predicates.html).
-        return Predicate(index, op, Value::document(node.required_attribute("value"), datatype));
+        // Every other operator compares with value (Predicates.html), typed
+        // (P6.3, §2.7). An ordering of an ordinal string field with Values
+        // follows their order (DataDictionary.html: "For ordinal fields, if
+        // a sequence of Value elements is given, the sequence defines the
+        // ascending order").
+        std::shared_ptr<const cpmml::compare::OrdinalOrder> ordinal;
+        if (datatype.value == DataType::DataTypeValue::STRING && op != Op::EQUAL && op != Op::NOT_EQUAL)
+          if (auto values = cpmml::bind::ordinal_values(node, node.required_attribute("field")))
+            ordinal = std::make_shared<const cpmml::compare::OrdinalOrder>(*values);
+        return Predicate::simple(index, op, Value::document(node.required_attribute("value"), datatype),
+                                 std::move(ordinal));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);
@@ -91,7 +100,7 @@ class PredicateBuilder {
         std::vector<Value> members;
         members.reserve(values.size());
         for (const auto& v : values) members.push_back(Value::document(v, datatype));
-        return Predicate(index, op, members, values.size() > SET_THRESHOLD);
+        return Predicate::simple_set(index, op, members, values.size() > SET_THRESHOLD);
       }
       case PredicateType::PredicateTypeValue::COMPOUND: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::COMPOUND_OPERATOR_TABLE);

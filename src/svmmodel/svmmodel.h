@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/compare.h"
 #include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/internal_model.h"
@@ -304,7 +305,7 @@ class SupportVectorMachineModel : public InternalModel {
       const Value& v = sample[f.index].value;
       if (f.is_indicator) {
         x[static_cast<Eigen::Index>(i)] =
-            !v.is_missing() && cpmml::legacy::LegacyCompare::equal(v, f.category) ? 1.0 : 0.0;
+            !v.is_missing() && cpmml::compare::same_value(v, f.category) ? 1.0 : 0.0;
         continue;
       }
       if (v.is_missing()) throw cpmml::MissingValueException("missing value for SVM vector field");

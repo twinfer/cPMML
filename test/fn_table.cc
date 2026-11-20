@@ -200,8 +200,15 @@ static void kernels() {
   floats.float_argument = {1, 0, 0};
   floats.float_result = true;
   CHECK(number("+", nums({0.1, 0.0}), floats) == static_cast<double>(0.1f), "float 0.1 + 0 is the float 0.1");
-  CHECK(number("equal", nums({0.1, 0.1}), floats) == 0, "equal(float 0.1, double 0.1) is false");
-  CHECK(number("isIn", nums({0.1, 0.2, 0.1}), floats) == 0, "isIn(float 0.1, {0.2, 0.1}) is false");
+  // The comparisons read each operand as its static type (P6.3,
+  // Bound::argument_type): a float one is the float, compared in double (D1).
+  fn::Bound float_compare;
+  float_compare.argument_type = {cpmml::types::TypeId::Float, cpmml::types::TypeId::Double,
+                                 cpmml::types::TypeId::Double};
+  CHECK(number("equal", nums({0.1, 0.1}), float_compare) == 0, "equal(float 0.1, double 0.1) is false");
+  CHECK(number("isIn", nums({0.1, 0.2, 0.1}), float_compare) == 0, "isIn(float 0.1, {0.2, 0.1}) is false");
+  CHECK(number("equal", nums({0.1, static_cast<double>(0.1f)}), float_compare) == 1,
+        "equal(float 0.1, double 0.10000000149011612) is true");
   fn::Bound float_sum;
   float_sum.narrow_arguments = true;
   float_sum.float_argument = {1, 1};
@@ -225,6 +232,51 @@ static void kernels() {
   CHECK(number("isIn", nums({2, 1, 2})) == 1 && number("isNotIn", nums({2, 1, 2})) == 0 &&
             number("isIn", nums({2, 1, 3})) == 0 && number("isNotIn", nums({2, 1, 3})) == 1,
         "isIn, isNotIn");
+  // P6.3 (§2.7, D9, B44): ±INF against the same infinity and NaN against
+  // anything are indeterminate, a missing result ("any attempt to either with
+  // itself is indeterminate and will result in a missing value being
+  // returned"); INF against a finite number or -INF is ordered.
+  {
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto missing = [](const char* name, const std::vector<Value>& args, const fn::Bound& bound = {}) {
+      Value out;
+      return call(name, args, out, bound) == fn::Status::Ok && out.is_missing();
+    };
+    for (const char* f : {"equal", "notEqual", "lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"}) {
+      CHECK(missing(f, nums({inf, inf})) && missing(f, nums({-inf, -inf})), std::string(f) + "(INF, INF) is missing");
+      CHECK(missing(f, nums({nan, 1})) && missing(f, nums({1, nan})) && missing(f, nums({nan, nan})),
+            std::string(f) + " with NaN is missing");
+    }
+    CHECK(number("lessThan", nums({-inf, inf})) == 1 && number("greaterThan", nums({inf, 1e308})) == 1 &&
+              number("equal", nums({inf, -inf})) == 0,
+          "INF against -INF or a finite number is ordered");
+    CHECK(missing("isIn", nums({inf, inf, 1})) && missing("isNotIn", nums({inf, inf, 1})),
+          "isIn(INF, INF, 1) is missing (the or of an indeterminate and a false)");
+    CHECK(missing("isIn", nums({inf, 1, inf})), "isIn(INF, 1, INF) is missing");
+    CHECK(number("isIn", nums({inf, 1, 2})) == 0 && number("isNotIn", nums({inf, 1, 2})) == 1,
+          "isIn(INF, 1, 2) is false");
+    CHECK(number("isIn", nums({1, inf, 1})) == 1, "isIn(1, INF, 1) is true: one equality holds");
+    CHECK(missing("isIn", nums({nan, 1, 2})), "isIn(NaN, 1, 2) is missing");
+    // D1: integer x float compares in float, either order.
+    fn::Bound int_float;
+    int_float.argument_type = {cpmml::types::TypeId::Integer, cpmml::types::TypeId::Float};
+    const std::vector<Value> big = {Value(cpmml::types::Integer{16777217}), Value(cpmml::types::Float{16777216.0f})};
+    CHECK(number("equal", big, int_float) == 1, "equal(integer 16777217, float 16777216) is true (in float)");
+    fn::Bound float_int;
+    float_int.argument_type = {cpmml::types::TypeId::Float, cpmml::types::TypeId::Integer};
+    CHECK(number("equal", {big[1], big[0]}, float_int) == 1, "and in the other order");
+    // A boolean operand is read as its static type: a boolean result held as
+    // the Double 1 or 0 is that boolean.
+    fn::Bound booleans;
+    booleans.argument_type = {cpmml::types::TypeId::Boolean, cpmml::types::TypeId::Boolean};
+    CHECK(number("equal", {Value(1.0), Value(cpmml::types::Boolean{true})}, booleans) == 1 &&
+              number("lessThan", {Value(0.0), Value(cpmml::types::Boolean{true})}, booleans) == 1,
+          "false < true; a boolean result 1 is true");
+    // No common type at evaluation (static types unknown) is an invalid result.
+    CHECK(invalid("equal", {Value(1.0), Value(cpmml::types::Boolean{true})}),
+          "a number against a boolean, types unknown: invalid (§2.6 Invalid(NoCast))");
+  }
   // and, or (P4.8): "and: true only if all input values are true, false
   // otherwise. or: true if a single input value is true, false only if all
   // input values are false"; not: "Negates input boolean value". Every

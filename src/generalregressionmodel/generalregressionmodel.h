@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/compare.h"
 #include "bind/load_scope.h"
 #include "core/datadictionary.h"
 #include "core/enum_parser.h"
@@ -391,7 +392,7 @@ class GeneralRegressionModel : public InternalModel {
         // factor never matched, and since the pool is frozen once the model
         // is loaded, a level first read here got the code of every unseen
         // string, so h="zz" matched level "a".
-        if (cpmml::legacy::LegacyCompare::not_equal(xv, cell.level)) return 0.0;  // short-circuit
+        if (!cpmml::compare::same_value(xv, cell.level)) return 0.0;  // short-circuit
       } else {
         // Continuous covariate: x^exponent
         result *= std::pow(x, cell.exponent);

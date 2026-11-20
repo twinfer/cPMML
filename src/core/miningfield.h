@@ -130,9 +130,10 @@ class MiningField : public DataField {
     // since other treatment methods imply low and high value. If treated "asIs"
     // then it's not considered an outlier
 
-    using Compare = cpmml::legacy::LegacyCompare;
+    // lowValue, highValue: pmml-4-4.xsd NUMBER, compared as the doubles they
+    // are (a number field's value widened to double: exact).
     return hasOutlierTreatment && hasLowValue && hasHighValue &&
-           (Compare::less_than(value, low_value) || Compare::greater_than(value, high_value));
+           (value.as_double() < low_value.as_double() || value.as_double() > high_value.as_double());
   }
 
   inline Value handle_outlier(const Value& value) const {
@@ -140,7 +141,7 @@ class MiningField : public DataField {
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
         return handle_missing();
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-        if (cpmml::legacy::LegacyCompare::less_than(value, low_value)) return extreme(low_value);
+        if (value.as_double() < low_value.as_double()) return extreme(low_value);
         return extreme(high_value);
       default:
         return value;  // "asIs" treatment

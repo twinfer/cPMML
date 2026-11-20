@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <utility>
 
+#include "core/compare.h"
 #include "bind/load_scope.h"
 #include "expression.h"
 
@@ -54,7 +55,7 @@ class NormDiscrete : public Expression {
   inline Value eval(const Sample& sample) const override {
     const Value& input = sample[index].value;
     if (input.is_missing()) return mapmissing_to;
-    if (cpmml::legacy::LegacyCompare::equal(input, value)) return Value(1.0);
+    if (cpmml::compare::same_value(input, value)) return Value(1.0);
 
     return Value(0.0);
   }

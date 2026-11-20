@@ -1828,9 +1828,9 @@ static void surrogate_errors() {
   // Compiled from Predicate: a missing input is UNKNOWN, not an error.
   Sample two(2);
   two.change_value(1, Value(3.0));
-  const Predicate lt0(0, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
-  const Predicate lt1(1, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
-  const Predicate gt1(1, PredicateOpType::PredicateOpTypeValue::GREATER_THAN, Value(5.0));
+  const Predicate lt0 = Predicate::simple(0, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
+  const Predicate lt1 = Predicate::simple(1, PredicateOpType::PredicateOpTypeValue::LESS_THAN, Value(5.0));
+  const Predicate gt1 = Predicate::simple(1, PredicateOpType::PredicateOpTypeValue::GREATER_THAN, Value(5.0));
   BoundPredicates bound;
   const std::uint32_t fast = bound.add(Predicate({lt0, gt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
   const std::uint32_t lt0_lt1 = bound.add(Predicate({lt0, lt1}, PredicateOpType::PredicateOpTypeValue::SURROGATE));
@@ -1842,86 +1842,273 @@ static void surrogate_errors() {
   CHECK(bound.evaluate(fast, two) == R::TRUE_);
 }
 
-// Design item P5: a tree's BoundPredicates answer exactly what the Predicate
-// they are compiled from answers (cpmml::predicate::compare over
-// LegacyCompare keys, switch 2), for every operator and every kind of
-// operand: a pooled string, one the pool lacks (the unseen code -1), an edit
-// of a pooled string (the string of its new text since P6.1: pooled ABC, or
-// unseen ABCD), a number equal to a string's code (B18), a number, missing.
-// equal and notEqual with a string value compare a string operand's code as
-// an integer (the op x type case); the answers must not change.
+// Design items P5, P6.3: a tree's BoundPredicates answer exactly what the
+// Predicate they are compiled from answers (Predicate::evaluate_typed), for
+// every operator and every kind of operand and value: a pooled string, one
+// the pool lacks, an edit of a pooled string (the string of its new text since
+// P6.1: pooled ABC, or unseen ABCD), numbers (a number equal to a string's
+// pool code included), ±INF and NaN, a boolean and a boolean result held as
+// the Double 1 or 0, missing; a pair of no common type (a string ordered
+// against a number, a boolean against a number) throws on both paths (the
+// binder reads a predicate's value in its field's type, so it is a bug). Then
+// the typed rules themselves (§2.7, P6.3): a number against a string by its
+// Java text (D2), never by the string's code (B18); integer x float in float
+// (D1); ±INF against the same infinity and NaN UNKNOWN (D9, B44); an ordinal
+// string's declared order.
 static void bound_predicates() {
   using Op = PredicateOpType::PredicateOpTypeValue;
+  using R = PredicateResult;
   auto document = std::make_shared<cpmml::DocumentStrings>();
   const cpmml::StringScope load(cpmml::StringScope::Loading{}, document);
   const Value abc = Value::string("abc");
   const Value xyz = Value::string("xyz");
   const Value pooled_up = Value::string("ABC");
+  const Value text25 = Value::string("2.5");
+  const Value low = Value::string("low");
+  const Value mid = Value::string("mid");
+  const Value high = Value::string("high");
+  const auto order = std::make_shared<const cpmml::compare::OrdinalOrder>(std::vector<std::string>{"low", "mid", "high"});
   document->pool.freeze();
   const cpmml::StringScope score(cpmml::StringScope::Scoring{}, *document);
   Value edited = abc;
   edited.uppercase();
   Value edited_unseen = Value::string("abcd");
   edited_unseen.uppercase();
-  const std::vector<Value> operands = {abc,           xyz,
-                                       Value::string("never named"), Value::string("another"),
-                                       edited,        edited_unseen,
-                                       Value(cpmml::legacy::code_of(abc)), Value(-1.0),
-                                       Value(2.5),    Value()};
-  const std::vector<Value> constants = {abc, xyz, Value(cpmml::legacy::code_of(xyz)), Value(-1.0), Value(2.5)};
-  int compared = 0;
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<Value> operands = {abc,
+                                       xyz,
+                                       Value::string("never named"),
+                                       Value::string("another"),
+                                       edited,
+                                       edited_unseen,
+                                       Value(cpmml::legacy::code_of(abc)),
+                                       Value(-1.0),
+                                       Value(2.5),
+                                       Value(cpmml::types::Integer{3}),
+                                       Value(cpmml::types::Float{2.5f}),
+                                       Value(inf),
+                                       Value(-inf),
+                                       Value(nan),
+                                       Value(cpmml::types::Boolean{true}),
+                                       Value(1.0),
+                                       Value()};
+  const std::vector<Value> constants = {abc,      xyz,        text25, Value(cpmml::legacy::code_of(xyz)), Value(-1.0),
+                                        Value(2.5), Value(inf), Value(nan), Value(cpmml::types::Integer{3}),
+                                        Value(cpmml::types::Float{2.5f}), Value(cpmml::types::Boolean{true})};
+  // The answer, or 3 for a throw (no common type).
+  const auto answer = [](const auto& f) -> int {
+    try {
+      return static_cast<int>(f());
+    } catch (const std::logic_error&) {
+      return 3;
+    }
+  };
+  int compared = 0, thrown = 0;
   for (const Op op : {Op::EQUAL, Op::NOT_EQUAL, Op::LESS_THAN, Op::LESS_OR_EQUAL, Op::GREATER_THAN,
                       Op::GREATER_OR_EQUAL}) {
     for (const Value& c : constants) {
       BoundPredicates bound;
-      const Predicate tree(0, op, c);
+      const Predicate tree = Predicate::simple(0, op, c);
       const std::uint32_t i = bound.add(tree);
       for (const Value& x : operands) {
         Sample sample(1);
         sample.change_value(0, x);
-        CHECK(bound.evaluate(i, sample) == tree.evaluate(sample));
+        const int a = answer([&] { return bound.evaluate(i, sample); });
+        CHECK(a == answer([&] { return tree.evaluate(sample); }));
+        thrown += a == 3;
         compared++;
       }
     }
   }
-  CHECK(compared == 6 * 5 * 10);
+  CHECK(compared == 6 * 11 * 17 && thrown > 0);
   // The expected answers of the rules themselves.
   BoundPredicates bound;
-  const std::uint32_t eq_abc = bound.add(Predicate(0, Op::EQUAL, abc));
-  const std::uint32_t ne_abc = bound.add(Predicate(0, Op::NOT_EQUAL, abc));
-  const std::uint32_t eq_up = bound.add(Predicate(0, Op::EQUAL, pooled_up));
+  const std::uint32_t eq_abc = bound.add(Predicate::simple(0, Op::EQUAL, abc));
+  const std::uint32_t ne_abc = bound.add(Predicate::simple(0, Op::NOT_EQUAL, abc));
+  const std::uint32_t eq_up = bound.add(Predicate::simple(0, Op::EQUAL, pooled_up));
+  const std::uint32_t eq_t25 = bound.add(Predicate::simple(0, Op::EQUAL, text25));
+  const std::uint32_t eq_inf = bound.add(Predicate::simple(0, Op::EQUAL, Value(inf)));
+  const std::uint32_t le_inf = bound.add(Predicate::simple(0, Op::LESS_OR_EQUAL, Value(inf)));
+  const std::uint32_t lt_inf = bound.add(Predicate::simple(0, Op::LESS_THAN, Value(inf)));
+  const std::uint32_t gt_1 = bound.add(Predicate::simple(0, Op::GREATER_THAN, Value(1.0)));
+  const std::uint32_t ne_1 = bound.add(Predicate::simple(0, Op::NOT_EQUAL, Value(1.0)));
+  const std::uint32_t eq_f = bound.add(Predicate::simple(0, Op::EQUAL, Value(cpmml::types::Float{16777216.0f})));
+  const std::uint32_t eq_true = bound.add(Predicate::simple(0, Op::EQUAL, Value(cpmml::types::Boolean{true})));
+  const std::uint32_t lt_mid = bound.add(Predicate::simple(0, Op::LESS_THAN, mid, order));
+  const std::uint32_t ge_mid = bound.add(Predicate::simple(0, Op::GREATER_OR_EQUAL, mid, order));
+  const std::uint32_t lt_mid_units = bound.add(Predicate::simple(0, Op::LESS_THAN, mid));
   Sample s(1);
-  s.change_value(0, edited);
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // P6.1, B2: uppercase(abc) is not abc
-  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::TRUE_);
-  CHECK(bound.evaluate(eq_up, s) == PredicateResult::TRUE_);  // P6.1, B2: it is ABC
-  s.change_value(0, edited_unseen);
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_ && bound.evaluate(eq_up, s) == PredicateResult::FALSE_);
-  s.change_value(0, Value::string("never named"));
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::FALSE_);  // a text the pool lacks equals no value
-  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::TRUE_);
-  s.change_value(0, Value(cpmml::legacy::code_of(abc)));
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::TRUE_);  // B18: the number of abc's code
-  s.change_value(0, Value());
-  CHECK(bound.evaluate(eq_abc, s) == PredicateResult::UNKNOWN);
-  CHECK(bound.evaluate(ne_abc, s) == PredicateResult::UNKNOWN);
+  const auto at = [&](const Value& v, std::uint32_t i) {
+    s.change_value(0, v);
+    return bound.evaluate(i, s);
+  };
+  CHECK(at(edited, eq_abc) == R::FALSE_);  // P6.1, B2: uppercase(abc) is not abc
+  CHECK(at(edited, ne_abc) == R::TRUE_);
+  CHECK(at(edited, eq_up) == R::TRUE_);  // P6.1, B2: it is ABC
+  CHECK(at(edited_unseen, eq_abc) == R::FALSE_ && at(edited_unseen, eq_up) == R::FALSE_);
+  CHECK(at(Value::string("never named"), eq_abc) == R::FALSE_);  // a text the pool lacks equals no value
+  CHECK(at(Value::string("never named"), ne_abc) == R::TRUE_);
+  // B18 (P6.3): the number of abc's code is not abc; a number is its Java text (D2).
+  CHECK(at(Value(cpmml::legacy::code_of(abc)), eq_abc) == R::FALSE_);
+  CHECK(at(Value(cpmml::legacy::code_of(abc)), ne_abc) == R::TRUE_);
+  CHECK(at(Value(2.5), eq_t25) == R::TRUE_ && at(Value(cpmml::types::Float{2.5f}), eq_t25) == R::TRUE_);
+  CHECK(at(Value(cpmml::types::Integer{2}), eq_t25) == R::FALSE_);
+  // D9, B44: INF against INF and NaN against anything are UNKNOWN.
+  CHECK(at(Value(inf), eq_inf) == R::UNKNOWN && at(Value(inf), le_inf) == R::UNKNOWN &&
+        at(Value(inf), lt_inf) == R::UNKNOWN);
+  CHECK(at(Value(-inf), eq_inf) == R::FALSE_ && at(Value(-inf), lt_inf) == R::TRUE_ && at(Value(5.0), le_inf) == R::TRUE_);
+  CHECK(at(Value(inf), gt_1) == R::TRUE_ && at(Value(-inf), gt_1) == R::FALSE_);
+  CHECK(at(Value(nan), gt_1) == R::UNKNOWN && at(Value(nan), ne_1) == R::UNKNOWN && at(Value(nan), eq_inf) == R::UNKNOWN);
+  CHECK(at(Value(cpmml::types::Float{std::numeric_limits<float>::infinity()}), eq_inf) == R::UNKNOWN);
+  // D1: integer x float compares in float (16777217 is the float 16777216).
+  CHECK(at(Value(cpmml::types::Integer{16777217}), eq_f) == R::TRUE_);
+  CHECK(at(Value(cpmml::types::Integer{16777218}), eq_f) == R::FALSE_);
+  // Two integers compare exactly, beyond 2^53 too (not in double).
+  {
+    BoundPredicates b3;
+    const std::uint32_t eq_big = b3.add(Predicate::simple(0, Op::EQUAL, Value(cpmml::types::Integer{9007199254740992})));
+    const std::uint32_t lt_big = b3.add(Predicate::simple(0, Op::LESS_THAN, Value(cpmml::types::Integer{9007199254740993})));
+    Sample t(1);
+    t.change_value(0, Value(cpmml::types::Integer{9007199254740993}));
+    CHECK(b3.evaluate(eq_big, t) == R::FALSE_ && b3.evaluate(lt_big, t) == R::FALSE_);
+    t.change_value(0, Value(cpmml::types::Integer{9007199254740992}));
+    CHECK(b3.evaluate(eq_big, t) == R::TRUE_ && b3.evaluate(lt_big, t) == R::TRUE_);
+  }
+  // A boolean, and a boolean result held as the Double 1 or 0.
+  CHECK(at(Value(cpmml::types::Boolean{true}), eq_true) == R::TRUE_ && at(Value(1.0), eq_true) == R::TRUE_ &&
+        at(Value(0.0), eq_true) == R::FALSE_);
+  CHECK(throws<std::logic_error>([&] { at(Value(2.0), eq_true); }));  // no boolean: no common type
+  // §2.7: an ordinal string's declared order; without one, code units.
+  CHECK(at(low, lt_mid) == R::TRUE_ && at(high, lt_mid) == R::FALSE_ && at(mid, lt_mid) == R::FALSE_);
+  CHECK(at(high, ge_mid) == R::TRUE_ && at(low, ge_mid) == R::FALSE_);
+  CHECK(at(Value::string("never named"), lt_mid) == R::UNKNOWN);  // outside the Values: no place in the order
+  CHECK(at(high, lt_mid_units) == R::TRUE_ && at(xyz, lt_mid_units) == R::FALSE_);
+  // L4: two strings the pool lacks are not equal and not ordered equal.
+  {
+    BoundPredicates b2;
+    const Value a1 = Value::string("aaa unseen");
+    const std::uint32_t le = b2.add(Predicate::simple(0, Op::LESS_OR_EQUAL, abc));
+    const std::uint32_t ge = b2.add(Predicate::simple(0, Op::GREATER_OR_EQUAL, abc));
+    Sample t(1);
+    t.change_value(0, a1);
+    CHECK(b2.evaluate(le, t) == R::TRUE_ && b2.evaluate(ge, t) == R::FALSE_);
+  }
+  CHECK(at(Value(), eq_abc) == R::UNKNOWN && at(Value(), ne_abc) == R::UNKNOWN && at(Value(), eq_inf) == R::UNKNOWN);
+  // The untyped Predicate (an Interval's margins) stays IEEE: INF <= INF.
+  CHECK(Predicate(0, Op::LESS_OR_EQUAL, Value(inf)).evaluate(Value(inf)) == R::TRUE_);
+  CHECK(throws<std::logic_error>([&] { BoundPredicates().add(Predicate(0, Op::EQUAL, Value(1.0))); }));
   // Sets, both containers (SET_THRESHOLD), against the tree.
   for (const bool hashed : {false, true}) {
     for (const Op op : {Op::IS_IN, Op::IS_NOT_IN}) {
-      BoundPredicates sets;
-      const Predicate tree(0, op, {abc, Value(2.5)}, hashed);
-      const std::uint32_t i = sets.add(tree);
-      for (const Value& x : operands) {
-        Sample sample(1);
-        sample.change_value(0, x);
-        CHECK(sets.evaluate(i, sample) == tree.evaluate(sample));
+      for (const std::vector<Value>& members :
+           {std::vector<Value>{abc, text25}, std::vector<Value>{Value(2.5), Value(inf)},
+            std::vector<Value>{Value(cpmml::types::Float{2.5f})}}) {
+        BoundPredicates sets;
+        const Predicate tree = Predicate::simple_set(0, op, members, hashed);
+        const std::uint32_t i = sets.add(tree);
+        for (const Value& x : operands) {
+          if (std::holds_alternative<cpmml::types::Boolean>(x.typed())) continue;  // no common type
+          Sample sample(1);
+          sample.change_value(0, x);
+          CHECK(answer([&] { return sets.evaluate(i, sample); }) == answer([&] { return tree.evaluate(sample); }));
+        }
       }
+      // The rules: a number against strings by its text (D2), INF against a
+      // set holding INF and NaN UNKNOWN (D9), INF against one without FALSE.
+      BoundPredicates sets;
+      const std::uint32_t strings = sets.add(Predicate::simple_set(0, op, {abc, text25}, hashed));
+      const std::uint32_t numbers = sets.add(Predicate::simple_set(0, op, {Value(2.5), Value(inf)}, hashed));
+      const std::uint32_t finite = sets.add(Predicate::simple_set(0, op, {Value(2.5)}, hashed));
+      const R yes = op == Op::IS_IN ? R::TRUE_ : R::FALSE_;
+      const R no = op == Op::IS_IN ? R::FALSE_ : R::TRUE_;
+      Sample t(1);
+      const auto in = [&](const Value& v, std::uint32_t i) {
+        t.change_value(0, v);
+        return sets.evaluate(i, t);
+      };
+      CHECK(in(Value(2.5), strings) == yes && in(Value(cpmml::legacy::code_of(abc)), strings) == no);
+      CHECK(in(Value::string("2.5"), numbers) == yes && in(Value::string("2.50"), numbers) == no);
+      CHECK(in(Value(inf), numbers) == R::UNKNOWN && in(Value(nan), numbers) == R::UNKNOWN);
+      CHECK(in(Value(inf), finite) == no && in(Value(nan), finite) == R::UNKNOWN && in(Value(-inf), numbers) == no);
+      CHECK(in(Value(2.5), numbers) == yes && in(Value(), numbers) == R::UNKNOWN);
+      // Two integers compare exactly, beyond 2^53 too, where one double key
+      // holds 2^53 and 2^53 + 1: a big member, or a big probe.
+      const Value big0(cpmml::types::Integer{9007199254740992});
+      const Value big1(cpmml::types::Integer{9007199254740993});
+      const std::uint32_t with_big1 = sets.add(Predicate::simple_set(0, op, {big1, Value(cpmml::types::Integer{5})}, hashed));
+      const std::uint32_t with_big0 = sets.add(Predicate::simple_set(0, op, {big0, Value(cpmml::types::Integer{5})}, hashed));
+      CHECK(in(big0, with_big1) == no && in(big1, with_big1) == yes && in(Value(cpmml::types::Integer{5}), with_big1) == yes);
+      CHECK(in(big1, with_big0) == no && in(big0, with_big0) == yes);
+      CHECK(in(Value(cpmml::types::Integer{-9007199254740993}), with_big0) == no);
+      CHECK(in(Value(cpmml::types::Integer{5}), with_big0) == yes && in(Value(cpmml::types::Integer{6}), with_big0) == no);
     }
   }
 }
 
+// P6.3 (§2.7, Q7): a comparison of a boolean with a value of another type has
+// no common type, a load error in the binder's words (E-TYPE-BOOLEAN-MIXED).
+// Functions.html: "The various date, time and dateTime as well as boolean
+// dataTypes can not be mixed with other types in a defined function without
+// explicitly defining the expected output dataType". These are the three
+// cells fix_typed_equal_mixed had (e_b_ct, e_b_c1, e_s_b) and their
+// neighbours; each document loads on base 49847ca, which compared the
+// boolean's 1 or 0 with the other value's double (a string's pool code).
+// JPMML 1.7.7 converts the second operand to the first's type (equal(b,
+// "true") and equal(b, 1) true for b = true, equal(s, b) by text).
+static void boolean_mixed() {
+  const auto doc = [](const std::string& expression) {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="b" optype="categorical" dataType="boolean"/>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="i" optype="continuous" dataType="integer"/>
+    <DataField name="d" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="b"/><MiningField name="s"/><MiningField name="i"/><MiningField name="d"/>
+      <MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="o" dataType="string" feature="transformedValue">)") +
+           expression + R"(</OutputField>
+    </Output>
+    <RegressionTable intercept="1"/>
+  </RegressionModel>
+</PMML>)";
+  };
+  const std::string code = "E-TYPE-BOOLEAN-MIXED: Apply \"";
+  CHECK(contains(load_error(doc(R"(<Apply function="equal"><FieldRef field="b"/><Constant dataType="string">true</Constant></Apply>)")),
+                 code + "equal\" in RegressionModel compares boolean with string"));
+  CHECK(contains(load_error(doc(R"(<Apply function="equal"><FieldRef field="b"/><Constant>1</Constant></Apply>)")),
+                 "compares boolean with integer"));
+  CHECK(contains(load_error(doc(R"(<Apply function="equal"><FieldRef field="s"/><FieldRef field="b"/></Apply>)")),
+                 "compares string with boolean"));
+  CHECK(contains(load_error(doc(R"(<Apply function="notEqual"><FieldRef field="d"/><FieldRef field="b"/></Apply>)")),
+                 "compares double with boolean"));
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="b"/><FieldRef field="i"/></Apply>)")),
+                 code + "lessThan\""));
+  CHECK(contains(load_error(doc(R"(<Apply function="isIn"><FieldRef field="b"/><Constant dataType="boolean">true</Constant><Constant>0</Constant></Apply>)")),
+                 code + "isIn\" in RegressionModel compares boolean with integer"));
+  CHECK(contains(load_error(doc(R"(<Apply function="isNotIn"><FieldRef field="i"/><Constant>2</Constant><FieldRef field="b"/></Apply>)")),
+                 "compares integer with boolean"));
+  // Controls: boolean against boolean, and the other types among themselves.
+  CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="b"/><Constant dataType="boolean">true</Constant></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="b"/><FieldRef field="b"/></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="isIn"><FieldRef field="b"/><Constant dataType="boolean">true</Constant><Constant dataType="boolean">0</Constant></Apply>)")).empty());
+  // An untyped Constant true is a string (Transformations.html, Constant: a
+  // Constant is a number only when it "consists solely of numbers"), so it
+  // mixes too (JPMML 1.7.7 reads it as the boolean).
+  CHECK(contains(load_error(doc(R"(<Apply function="equal"><FieldRef field="b"/><Constant>true</Constant></Apply>)")),
+                 "compares boolean with string"));
+  CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="s"/><FieldRef field="i"/></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="d"/><Constant dataType="string">3</Constant></Apply>)")).empty());
+}
+
 int main() {
   bound_predicates();
+  boolean_mixed();
   xsd_double();
   xsd_integer();
   xsd_boolean();

@@ -2193,9 +2193,14 @@ class Binder {
           }
       }
       const bool target_usage = usage && (*usage == "target" || *usage == "predicted");
-      if (mode_ == Mode::Load && source && !target_usage && type.type == source->type.type) {
+      if (mode_ == Mode::Load && source && !target_usage && type.type == source->type.type &&
+          type.optype == source->type.optype) {
         // Load mode: the field reads its source with the source's type (its
         // treatments are the engine's MiningField's): a pass-through, as above.
+        // A MiningField whose optype differs from its source's is not one:
+        // MiningSchema.html, optype: "overrides the corresponding value in
+        // the DataField", and the model's ordinal comparisons read it
+        // (bind::ordinal_values, P6.3).
         m.mining.emplace(key, const_cast<Binding*>(source));
         index++;
         continue;

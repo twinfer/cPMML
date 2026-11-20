@@ -1,0 +1,7 @@
+sel,o,p,y,py,a_o,a_p
+1,low,low,1T,1T,true,true
+1,mid,mid,1F,1F,false,false
+1,high,high,1F,1F,false,true
+2,low,low,2T,2T,true,true
+2,mid,mid,2F,2F,false,false
+2,high,high,2T,2T,false,true

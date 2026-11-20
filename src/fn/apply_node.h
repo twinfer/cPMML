@@ -324,12 +324,38 @@ class ApplyNode : public Expression {
         bound.narrow_arguments = true;
       }
     if (comparison) {
-      // §2.7 (design commit P2.7): string x number ordering is a load error.
-      if (cpmml::bind::is_ordering(sig.name))
-        for (std::size_t i = 1; i < argument_types.size(); i++)
-          if (cpmml::bind::order_mixed(argument_types[0], argument_types[i]))
-            throw cpmml::ParsingException(cpmml::bind::order_mixed_message(apply, std::string(sig.name),
-                                                                           *argument_types[0], *argument_types[i]));
+      const bool ordering = cpmml::bind::is_ordering(sig.name);
+      for (std::size_t i = 1; i < argument_types.size(); i++) {
+        if (!argument_types[0] || !argument_types[i]) continue;
+        // §2.7 / Q7 (P6.3): boolean against another type has no common type,
+        // a load error, as the binder reports it (Binder::check_comparable,
+        // E-TYPE-BOOLEAN-MIXED). Functions.html: "boolean dataTypes can not
+        // be mixed with other types in a defined function without explicitly
+        // defining the expected output dataType".
+        if ((*argument_types[0] == TypeId::Boolean) != (*argument_types[i] == TypeId::Boolean))
+          throw cpmml::ParsingException(
+              boolean_mixed_message(apply, sig, *argument_types[0], *argument_types[i]));
+        // §2.7 (design commit P2.7): string x number ordering is a load error.
+        if (ordering && cpmml::bind::order_mixed(argument_types[0], argument_types[i]))
+          throw cpmml::ParsingException(cpmml::bind::order_mixed_message(apply, std::string(sig.name),
+                                                                         *argument_types[0], *argument_types[i]));
+      }
+      // P6.3: the comparison reads each operand as its static type
+      // (core/compare.h); unknown is TypeId::Missing (as stored).
+      for (const auto& t : argument_types) bound.argument_type.push_back(t ? *t : TypeId::Missing);
+      // §2.7: an ordering of strings follows the declared Values of an
+      // ordinal string field operand (DataDictionary.html: "For ordinal
+      // fields, if a sequence of Value elements is given, the sequence
+      // defines the ascending order"); the first such FieldRef's.
+      if (ordering && bound.argument_type.size() == 2 && bound.argument_type[0] == TypeId::String &&
+          bound.argument_type[1] == TypeId::String)
+        for (pugi::xml_node argument : apply.xml().children()) {
+          if (argument.type() != pugi::node_element || std::strcmp(argument.name(), "FieldRef") != 0) continue;
+          if (auto values = cpmml::bind::ordinal_values(XmlNode(argument), argument.attribute("field").value())) {
+            bound.ordinal = std::make_shared<const compare::OrdinalOrder>(*values);
+            break;
+          }
+        }
       return kernel;
     }
     const cpmml::bind::StaticType result = cpmml::bind::apply_result_type(sig, argument_types).type;
@@ -354,6 +380,18 @@ class ApplyNode : public Expression {
            ": argument " + std::to_string(i) + " of " + name + " is " + std::string(cpmml::bind::type_name(type)) +
            ", where the parameter is declared boolean (" + basis +
            "; Functions.html: boolean \"can not be mixed with other types\", Q7)";
+  }
+
+  // The load error of a comparison of a boolean with a value of another type
+  // (§2.7, Q7; design item P6.3), in the binder's words for the same check
+  // (Binder::check_comparable): 'E-TYPE-BOOLEAN-MIXED: Apply "equal" in
+  // RegressionModel compares boolean with string (...)'.
+  static std::string boolean_mixed_message(const XmlNode& apply, const Signature& sig, cpmml::bind::TypeId a,
+                                           cpmml::bind::TypeId b) {
+    return std::string(cpmml::bind::code::kTypeBooleanMixed) + ": " +
+           cpmml::bind::apply_label(apply, std::string(sig.name)) + " compares " +
+           std::string(cpmml::bind::type_name(a)) + " with " + std::string(cpmml::bind::type_name(b)) +
+           " (Functions.html: boolean \"can not be mixed with other types\", Q7)";
   }
 
   // The load error of a formatNumber argument of the wrong type (design item

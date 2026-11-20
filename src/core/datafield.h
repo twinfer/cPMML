@@ -90,8 +90,9 @@ class DataField {
       }
     }
     using Op = PredicateOpType::PredicateOpTypeValue;
-    // The members are one per LegacyCompare key, as the std::set<Value> they
-    // were (switch 2): n_values counts the distinct ones.
+    // The members are one per ContainerKey (a number itself, a string its
+    // pool id), as the std::set<Value> they were: n_values counts the
+    // distinct ones.
     std::size_t n_allowed = 0;
     if (allowed_values.size() > 0) {
       tmp_contraints.push_back(Predicate(index, Op::IS_IN, allowed_values, false));

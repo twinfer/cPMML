@@ -1,15 +1,15 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 463
+# documents: 466
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
-# E-TYPE-BOOLEAN-MIXED: 3
 # U-ELEMENT: 25
 # W-CAST-LOSSY: 115
 # W-CAST-NARROWING: 66
 # W-FORWARD-REF: 10
 # W-NAME-SHADOWS-MININGFIELD: 7
 # W-NAME-SHADOWS-TD: 4
+# W-ORDER-CATEGORICAL: 4
 # W-OUTPUT-NO-DATATYPE: 4
 # W-SCOPE-FLAT: 1
 # W-SCOPE-IMPLICIT: 8
@@ -181,6 +181,10 @@ test/data/model/fix_cast_output_types.zip:15	W-CAST-NARROWING	1	RegressionModel	
 test/data/model/fix_cast_output_types.zip:16	W-CAST-NARROWING	1	RegressionModel	OutputField "oi2": declares integer over its expression of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_cast_td_widened_slot.zip:9	W-CAST-NARROWING	1		DerivedField "di": declares integer over an expression of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_cast_td_widened_slot.zip:13	W-SLOT-WIDENED	1	RegressionModel	MiningField "j": missingValueReplacement="2.5" is not an integer: the slot of integer field "j" is widened to double (§3.4, N3, D22)
+test/data/model/fix_compare_mining_optype.zip:15	W-ORDER-CATEGORICAL	1	TreeModel	Apply "lessThan" in OutputField "a_p": Apply "lessThan" orders categorical field "p" (DataDictionary.html: "Categorical field values can only be tested for equality"; accepted, Q6)
+test/data/model/fix_compare_mining_optype.zip:20	W-ORDER-CATEGORICAL	1	TreeModel	SimplePredicate "p": operator "lessThan" orders categorical field "p" (DataDictionary.html: "Categorical field values can only be tested for equality"; accepted, Q6)
+test/data/model/fix_compare_typed_probes.zip:42	W-ORDER-CATEGORICAL	1	RegressionModel	Apply "lessThan" in OutputField "c_s_lt_b": Apply "lessThan" orders categorical field "s" (DataDictionary.html: "Categorical field values can only be tested for equality"; accepted, Q6)
+test/data/model/fix_compare_typed_probes.zip:43	W-ORDER-CATEGORICAL	1	RegressionModel	Apply "greaterOrEqual" in OutputField "c_s_ge_b": Apply "greaterOrEqual" orders categorical field "s" (DataDictionary.html: "Categorical field values can only be tested for equality"; accepted, Q6)
 test/data/model/fix_derived_cast_novalue.zip:12	W-CAST-NARROWING	1		DerivedField "ti": declares integer over an expression of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_derived_cast_novalue.zip:13	W-CAST-NARROWING	1		DerivedField "tb": declares boolean over an expression of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_derived_cast_novalue.zip:14	W-CAST-NARROWING	1		DerivedField "tsd": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
@@ -286,6 +290,3 @@ test/data/model/single_audit_dectree.zip:147	W-TEXT-WIDENED	2	TreeModel "Decisio
 test/data/pending/model/fix_typed_derived_conversions.zip:18	W-CAST-NARROWING	1		DerivedField "td": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/pending/model/fix_typed_derived_conversions.zip:19	W-CAST-LOSSY	1		DerivedField "tf": declares float over an expression of type double: the value is rounded to float (§2.6)
 test/data/pending/model/fix_typed_derived_conversions.zip:23	W-CAST-LOSSY	1		DerivedField "ncf": declares float over an expression of type double: the value is rounded to float (§2.6)
-test/data/pending/model/fix_typed_equal_mixed.zip:22	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_b_ct": Apply "equal" compares boolean with string (Functions.html: boolean "can not be mixed with other types", Q7)
-test/data/pending/model/fix_typed_equal_mixed.zip:23	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_b_c1": Apply "equal" compares boolean with integer (Functions.html: boolean "can not be mixed with other types", Q7)
-test/data/pending/model/fix_typed_equal_mixed.zip:24	E-TYPE-BOOLEAN-MIXED	1	RegressionModel	Apply "equal" in OutputField "e_s_b": Apply "equal" compares string with boolean (Functions.html: boolean "can not be mixed with other types", Q7)

@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/compare.h"
 #include "core/datadictionary.h"
 #include "core/enum_parser.h"
 #include "core/internal_model.h"
@@ -244,7 +245,7 @@ class AssociationModel : public InternalModel {
         const DataType dt  = indexer->get_type(item.field);
         if (sample[idx].value.is_missing()) continue;
         const std::string& match = !item.category.empty() ? item.category : item.value;
-        if (cpmml::legacy::LegacyCompare::equal(sample[idx].value, Value::document(match, dt)))
+        if (cpmml::compare::same_value(sample[idx].value, Value::document(match, dt)))
           active.insert(id);
       } else {
         // Binary encoding: field name == item value, item present when field != 0

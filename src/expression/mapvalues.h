@@ -9,6 +9,7 @@
 
 #include <set>
 
+#include "core/compare.h"
 #include "bind/load_scope.h"
 #include "expression.h"
 #include "treetable/treetable.h"
@@ -55,8 +56,8 @@ class MapValues : public Expression {
   std::unordered_map<std::string, size_t> index;
   std::unordered_map<std::string, DataType> datatype;
   std::vector<std::string> columns;
-  // Keyed by each cell's LegacyCompare key (switch 2, core/value.h): a number
-  // itself, a string its code.
+  // Keyed by each cell's ContainerKey (core/compare.h): a number itself, a
+  // string its pool id (the keys are read in the column field's type).
   TreeTable<double, Value, std::hash<double>> tree_table;
   std::unordered_map<std::string, std::string> fieldcolumn_pairs;
   std::vector<size_t> raw_columns;
@@ -120,7 +121,7 @@ class MapValues : public Expression {
           throw cpmml::ParsingException(std::string(cpmml::bind::code::kKeyNaN) + ": MapValues row <" + column +
                                         ">NaN</" + column +
                                         ">: a NaN key matches no input (§2.7, D26: a NaN key is a load error)");
-        keys.push_back(cpmml::legacy::LegacyCompare::constant_key(Value::document(text, type)));
+        keys.push_back(cpmml::ContainerKey::of_constant(Value::document(text, type)));
         const double key = keys.back();
         typed.push_back(type == DataType::DataTypeValue::FLOAT ? static_cast<double>(static_cast<float>(key)) : key);
       }
@@ -144,7 +145,7 @@ class MapValues : public Expression {
       const Value& tmp = sample[column].value;
       if (tmp.is_missing()) missing_input = true;
 
-      keys.push_back(cpmml::legacy::LegacyCompare::key(tmp));
+      keys.push_back(cpmml::ContainerKey::of(tmp));
     }
 
     if (missing_input) {

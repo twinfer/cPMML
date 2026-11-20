@@ -78,14 +78,14 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_float_equal | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `predicted: 72.0  expected: 9.0`, rows 1-3) | **done: `e_isin` rows 1-2 false** (note 1; header rewritten) | FAIL `predicted: 72.0  expected: 9.0` | all 6 rows agree but `e_isin` rows 1-2 (D1; re-checked on caa57c9) |
 | fix_float_set_narrow | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `target 'y': predicted: 240.0  expected: 231.0`, row 1) | no; **header written by P6.2** (note 2) | FAIL `predicted: 240.0  expected: 0.20000000149011612` (the `o_fpd` column) | all 7 rows agree (re-checked on caa57c9) |
 | fix_output_double_float_target | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity`) | no | FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity` | all 7 rows agree (re-checked on caa57c9) |
-| fix_string_number_equal | P6.3 | no (note 3) | FAIL `predicted: 0.0  expected: 15.0` | all 6 rows agree |
-| fix_typed_equal_mixed | P6.3 | **yes, and restructure** (note 4) | FAIL `output 'e_s_i': predicted: false  expected: true` | all 4 rows agree |
+| fix_string_number_equal | **registered by P6.3** (moved to `test/data/`, as are its files; base 49847ca FAIL `predicted: 0.0  expected: 15.0`, rows 1, 2, 5, 6; header rewritten to state D2) | no (note 3) | FAIL `predicted: 0.0  expected: 15.0` | all 6 rows agree (re-checked on 49847ca) |
+| fix_typed_equal_mixed | **registered by P6.3** (moved to `test/data/`, as are its files; base 49847ca FAIL `output 'e_s_i': predicted: false  expected: true`) | **done: restructured and re-derived** (note 4; header rewritten) | FAIL `output 'e_s_i': predicted: false  expected: true` | all 4 rows agree but the re-derived cells (D1, D2; re-checked on 49847ca) |
 | fix_binsim_clustering_string | P6.5 | **yes: row 6** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |
 | fix_binsim_clustering_string_declared | P6.5 | check (note 5) | **PASS** (a guard, not a sentinel) | every row refused (`Expected false or true, got "n"`) |
 | fix_binsim_knn_string | P6.5 | **yes: every row** (note 5) | FAIL `predicted: 12.0  expected: no prediction` | every row refused (`Expected false or true, got "0"`) |
 | fix_string_derived_set | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree |
-| fix_string_typed_values | P6.7 | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree |
-| fix_typed_derived_conversions | P6.7 | **yes: `e_d_s3` row 1** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree |
+| fix_string_typed_values | P6.7 | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree; **passes since P6.3** (its `e2` rows 1, 3, equal of a double DerivedField with the string `3.0`, by text, D2) |
+| fix_typed_derived_conversions | P6.7 | **yes: `e_d_s3` row 1** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree; since P6.3 only `e_d_s3` row 1 fails (`predicted: false  expected: true`, the D2 re-derivation left to P6.7; P6.3 moved `e_s_c3`, `e_s_c30`, `e_isin` rows 2-4 to the fixture's cells) |
 | fix_string_sum_avg | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no; **header written by P4.7** (note 2) | FAIL `predicted: 0.0  expected: 6` (the `o_sii` column) | all 7 rows agree |
 | fix_derived_cast_novalue | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 3-6 are invalid records** (notes 6, 16) | FAIL `output 'o_tsd': predicted: 1  expected: 1.0` | rows 1-2 agree; rows 3-6 refused (TypeCheckException) |
 | fix_output_integer_nonintegral | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 4-6, 8 are invalid records** (notes 6, 16) | FAIL `predicted: 3.5  expected: INVALID` (row 4; before P4.7's INVALID marker the pending row read `output 'ti': predicted: 3.5  expected: no value`) | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
@@ -150,6 +150,11 @@ JPMML gives up on the whole file at the first row it refuses.
      P6.3 must move these three OutputFields into a separate load-error
      check, or the whole document stops loading. This is a correction to
      the design's table: it lists only `e_f_c01`.
+   - **Done in P6.3:** the three OutputFields and their columns are removed
+     and checked as load errors (E-TYPE-BOOLEAN-MIXED) in
+     `test/strict_parse.cc` (`boolean_mixed`); `e_d_s3` rows 1-2, `e_i_s30`
+     rows 1, 2, 4 and `e_f_c01` rows 1-3 are false; the header states the
+     rules.
 5. **Binary similarity over strings (D15).** XML Schema Part 2, 3.2.2.1:
    "An instance of a datatype that is defined as boolean can have the
    following legal literals {true, false, 1, 0}." JPMML accepts only

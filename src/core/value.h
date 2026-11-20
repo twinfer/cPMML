@@ -52,11 +52,13 @@
  * as the Double it was read as, B4, B5) was deleted by P6.2: a float is a
  * types::Float. What remains:
  *
- *   (2) legacy (LegacyCompare): order, and equality but for two strings,
- *       compare as_double(), and a String's as_double() is its legacy code:
- *       its rep's pool id, -1 for a string the pool lacks (B18, the order of
- *       strings; P6.3). Two strings are equal iff their texts are (XSD
- *       string, §2.3; P6.1 closed B1 and B2): types::string_equal.
+ *   (2) legacy: a String's as_double() is its legacy code, its rep's pool
+ *       id, -1 for a string the pool lacks, for the numeric readers of a
+ *       string (B38, P6.8). Comparisons no longer read it: P6.1 made two
+ *       strings equal iff their texts are (types::string_equal), and P6.3
+ *       deleted LegacyCompare: every comparison is typed (core/compare.h,
+ *       §2.7; B18, D1, D2, D9), and containers keyed by values of one type
+ *       read cpmml::ContainerKey (a string's key is its pool id).
  *
  * A String's rep is canonical (P6.1): a string whose text the pool holds has
  * the pooled rep, whoever made it (an input, a cast, an edit: uppercase,
@@ -384,48 +386,14 @@ static_assert(sizeof(Value) <= 32);
 
 namespace cpmml::legacy {
 
-// Switch 2 (design P5, LegacyCompare; P6.1 took its string equality, P6.3
-// deletes the rest): the double a Value is compared by. A number or boolean
-// is itself; a string is its code (Value::legacy_code), so a string equals
-// the number of its code (B18) and strings are ordered by their codes.
+// What remains of switch 2 (design P5; P6.1 took its string equality, P6.3
+// deleted LegacyCompare, the comparisons by this double: core/compare.h):
+// the double as_double() gives a string, its code (Value::legacy_code), -1
+// for a string the pool lacks. No comparison reads it; a numeric reader of a
+// string does (B38, P6.8).
 inline double code_of(const ::Value& v) {
   return v.legacy_code() == kUnseen ? -1.0 : static_cast<double>(v.legacy_code());
 }
-
-struct LegacyCompare {
-  static inline double key(const ::Value& v) { return v.as_double(); }
-  // Two strings: equal iff their texts are (P6.1, B1, B2). XML Schema Part 2
-  // §3.2.1: the value space of string is "the set of finite-length sequences
-  // of characters"; §4.2.1 equal: "if a = b, then a and b cannot be
-  // distinguished (i.e., equality is identity)". types::string_equal: one
-  // rep, or two pooled reps (one pool per document: distinct texts), decide
-  // without reading text; otherwise the texts are compared. Any other pair
-  // compares its keys (switch 2: B18, P6.3).
-  static inline bool equal(const ::Value& a, const ::Value& b) {
-    const auto* sa = std::get_if<cpmml::types::String>(&a.typed());
-    const auto* sb = std::get_if<cpmml::types::String>(&b.typed());
-    if (sa && sb) return cpmml::types::string_equal(*sa, *sb);
-    return key(a) == key(b);
-  }
-  static inline bool not_equal(const ::Value& a, const ::Value& b) { return !equal(a, b); }
-  // The key of a document constant that a container compares by key (a
-  // SimplePredicate's value, a set's member, a MapValues or
-  // CategoricalPredictor key). Its string is pooled (document text is
-  // interned at load), so its code is its text's and key equality with a
-  // canonical string is text equality (P6.1). A string the pool lacks would
-  // have the shared code -1 and equal every other string the pool lacks (B1):
-  // a programming error, never a key.
-  static inline double constant_key(const ::Value& v) {
-    if (std::holds_alternative<cpmml::types::String>(v.typed()) && v.legacy_code() == kUnseen)
-      throw std::logic_error("LegacyCompare::constant_key: the string \"" + std::string(v.text()) +
-                             "\" is not in the document's pool");
-    return key(v);
-  }
-  static inline bool less_than(const ::Value& a, const ::Value& b) { return key(a) < key(b); }
-  static inline bool less_or_equal(const ::Value& a, const ::Value& b) { return key(a) <= key(b); }
-  static inline bool greater_than(const ::Value& a, const ::Value& b) { return key(a) > key(b); }
-  static inline bool greater_or_equal(const ::Value& a, const ::Value& b) { return key(a) >= key(b); }
-};
 
 }  // namespace cpmml::legacy
 
