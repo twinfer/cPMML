@@ -13,6 +13,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include "fn/kernels.h"
@@ -104,13 +105,32 @@ class CastInteger {
   // becomes 0, -0.5000000000000001 becomes -1) and returning a double
   // from 2^52 on as it is. The result is "an integer", whose value space has
   // one zero, so -0.4, -0.5 and -0.0 become +0 (as the built-in round,
-  // which stores +0, P4.10). INF and NaN come back as they went in, as
-  // std::round gave them before (round_half_up returns x for both); the
-  // Target has no invalid result of its own, unlike the built-in (D38).
+  // which stores +0, P4.10). INF and NaN come back from round_half_up as
+  // they went in; `holds_integer` then refuses them (P6.11, B61).
   static double round_to_integer(const double a) {
     const double r = cpmml::fn::scalar::round_half_up(a);
     return r == 0.0 ? 0.0 : r;
   }
+
+  // Whether `r`, the result of the cast, is an integer the engine holds
+  // (P6.11, B61). Targets.html: "If a regression model should predict
+  // integers, use the attribute castInteger to control how decimal places
+  // should be handled", so the result is an integer, and DataDictionary.html
+  // "The dataType reuses names and semantics of atomic types in XML Schema":
+  // XML Schema Part 2 §3.3.13, "The value space of integer is the infinite set
+  // {...,-2,-1,0,1,2,...}", which has no INF or NaN (they are values of
+  // float and double only, §3.2.4, §3.2.5); BuiltinFunctions.html says the
+  // same of its floor, ceil and round: "Since INF and -INF can only
+  // be floating point numbers, they will cause floor, ceil, round, and modulo
+  // to return an invalid value" (D38). The integer is an int64 (D4: "integers
+  // are int64; overflow invalid", Q10), so a result outside [-2^63, 2^63) has
+  // none either, the same test as the built-ins' fn::scalar::to_integer. The
+  // comparison is false for NaN. Every finite double from 2^52 on is an
+  // integer, so the cast of 1e19 is 1e19 itself, an integer XSD has and
+  // int64 does not. JPMML 1.7.7 saturates round (Math.round: INF and 1e19
+  // give 9.223372036854776E18, NaN gives 0) and passes ceiling and floor
+  // through as doubles (Infinity, NaN, 1.0E19): D50.
+  static inline bool holds_integer(const double r) { return r >= -9223372036854775808.0 && r < 9223372036854775808.0; }
 
   explicit CastInteger(const XmlNode& target) {
     if (!target.exists_attribute("castInteger")) {
@@ -118,7 +138,8 @@ class CastInteger {
       return;
     }
     empty = false;
-    switch (read_enum(target, "castInteger", TABLE)) {
+    kind = read_enum(target, "castInteger", TABLE);
+    switch (kind) {
       case Kind::ROUND:
         cast_function = round_to_integer;
         break;
@@ -131,10 +152,20 @@ class CastInteger {
     }
   }
 
+  // The attribute's value, for messages.
+  std::string_view kind_name() const {
+    for (const auto& entry : TABLE)
+      if (entry.value == kind) return entry.token;
+    return "";
+  }
+
   // Not constexpr: no instantiation of this can be a constant expression, since
   // it calls std::function::operator(). That makes it ill-formed, no diagnostic
   // required -- a compiler is free to reject it and none is obliged to say why.
   inline double operator()(const double value) const { return cast_function(value); }
+
+ private:
+  Kind kind = Kind::ROUND;
 };
 
 class TargetValue {
@@ -187,6 +218,8 @@ class Target {
   std::vector<TargetValue> target_values;
   Category category;  // compares the TargetValue classes with the model's
   std::function<void(InternalScore&)> transform_score;
+  // The target the messages name: Target@field, else the MiningSchema's target.
+  std::string target_name;
 
   Target() = default;
 
@@ -203,7 +236,8 @@ class Target {
         has_rescale_factor(node.exists_attribute("rescaleFactor")),
         rescale_factor(node.get_double_attribute("rescaleFactor", 1.0)),
         target_values(TargetValue::to_targetvalues(node.get_childs("TargetValue"))),
-        category(mining_schema.target.datatype) {}
+        category(mining_schema.target.datatype),
+        target_name(has_field_name ? field_name : mining_schema.target.name) {}
 
   // When the model produced no prediction, Targets supply one: the class with
   // the highest priorProbability, or the defaultValue of a continuous target.
@@ -357,9 +391,23 @@ class Target {
 
     if (has_rescale_factor) value *= rescale_factor;
     if (has_rescale_constant) value += rescale_constant;
-    if (!cast.empty) value = cast(value);
+    if (!cast.empty) {
+      const double cast_value = cast(value);
+      if (!CastInteger::holds_integer(cast_value)) raise_cast_invalid(value);
+      value = cast_value;
+    }
 
     return value;
+  }
+
+  // castInteger of ±INF, NaN or a value whose integer is outside int64: no
+  // integer, an invalid result for the record (Q2, decided (b)), naming the
+  // target, as the target cast does (P6.11, B61, D50).
+  [[noreturn]] [[gnu::cold]] [[gnu::noinline]] void raise_cast_invalid(const double value) const {
+    throw cpmml::InvalidValueException("target \"" + target_name + "\": castInteger=\"" +
+                                       std::string(cast.kind_name()) + "\" of the value " + java::double_text(value) +
+                                       " has no integer value (an integer has no INF or NaN and is an int64; " +
+                                       "§2.6, D4, D50, Q2)");
   }
 
   inline const TargetValue* find_default_value() const {

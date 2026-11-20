@@ -1667,6 +1667,65 @@ static void casts_in_document() {
   const std::string round = R"(<Targets><Target field="y" castInteger="round"/></Targets>)";
   CHECK(score_text(model("", "", "y", round), fields + yi, {{"x", "3.5"}}, "") == "4",
         "castInteger comes first (Targets.html order), so the cast has an integer");
+  // P6.11 (B61, D50): castInteger of ±INF, NaN or a value whose integer is
+  // outside int64 has no integer: an invalid record naming the target, for a
+  // double target too, in the Target's every path (the score, a defaultValue,
+  // a selectAll segment's text).
+  {
+    const std::string yd0 = R"(<DataField name="y" optype="continuous" dataType="double"/>)";
+    const std::string why = " has no integer value (an integer has no INF or NaN and is an int64; §2.6, D4, D50, Q2)";
+    auto cast = [](const std::string& kind, const std::string& extra = "") {
+      return R"(<Targets><Target field="y" castInteger=")" + kind + "\"" + extra + "/></Targets>";
+    };
+    CHECK(score_text(model("", "", "y", cast("round")), fields + yd0, {{"x", "INF"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value Infinity" + why,
+          "castInteger round of INF is an invalid record naming the target");
+    CHECK(score_text(model("", "", "y", cast("ceiling")), fields + yd0, {{"x", "-INF"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"ceiling\" of the value -Infinity" + why,
+          "castInteger ceiling of -INF is an invalid record");
+    CHECK(score_text(model("", "", "y", cast("floor")), fields + yd0, {{"x", "1e19"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"floor\" of the value 1.0E19" + why,
+          "castInteger floor of 1e19 (beyond int64) is an invalid record");
+    CHECK(score_text(model("", "", "y", cast("round", R"( rescaleFactor="0")")), fields + yd0, {{"x", "INF"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value NaN" + why,
+          "castInteger round of NaN (INF * rescaleFactor 0) is an invalid record");
+    CHECK(score_text(model("", "", "y", cast("round", R"( rescaleConstant="1e19")")), fields + yd0, {{"x", "1"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value 1.0E19" + why,
+          "castInteger after rescaleConstant: the rescaled value is cast");
+    CHECK(score_text(model("", "", "y", cast("round")), fields + yd0, {{"x", "-9223372036854775808"}}, "") ==
+              "-9.223372036854776E18",
+          "castInteger round of -2^63, the least int64, is that integer");
+    CHECK(score_text(model("", "", "y", cast("round")), fields + yd0, {{"x", "9223372036854775808"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value 9.223372036854776E18" + why,
+          "castInteger round of 2^63 is outside int64");
+    CHECK(score_text(model("", "", "y", cast("round", R"( min="0" max="10")")), fields + yd0, {{"x", "INF"}}, "") ==
+              "10.0",
+          "max comes before castInteger (Targets.html order): INF is clamped to 10 first");
+    // An integer target: castInteger refuses INF before the target cast.
+    CHECK(score_text(model("", "", "y", cast("round")), fields + yi, {{"x", "INF"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value Infinity" + why,
+          "integer target: castInteger round of INF is an invalid record");
+    // No Target@field: the message names the MiningSchema's target.
+    CHECK(score_text(model("", "", "y", R"(<Targets><Target castInteger="round"/></Targets>)"), fields + yd0,
+                     {{"x", "INF"}}, "") == "ERROR: target \"y\": castInteger=\"round\" of the value Infinity" + why,
+          "a Target without field names the MiningSchema's target");
+    // defaultValue goes through castInteger too (no prediction: x missing).
+    const std::string dflt =
+        R"(<Targets><Target field="y" castInteger="round"><TargetValue defaultValue="INF"/></Target></Targets>)";
+    CHECK(score_text(model("", "", "y", dflt), fields + yd0, {{"n", "1"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value Infinity" + why,
+          "a defaultValue INF under castInteger is an invalid record");
+    const std::string seg_round =
+        R"(<MiningModel functionName="regression"><MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+      <Segmentation multipleModelMethod="selectAll"><Segment id="1"><True/><RegressionModel functionName="regression">
+      <MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+      <Targets><Target field="y" castInteger="round"/></Targets>
+      <RegressionTable intercept="0"><NumericPredictor name="x" coefficient="1"/></RegressionTable></RegressionModel></Segment></Segmentation></MiningModel>)";
+    CHECK(score_text(seg_round, fields + yd0, {{"x", "2.5"}}, "") == "[3.0]", "selectAll segment, castInteger: [3.0]");
+    CHECK(score_text(seg_round, fields + yd0, {{"x", "INF"}}, "") ==
+              "ERROR: target \"y\": castInteger=\"round\" of the value Infinity" + why,
+          "selectAll segment, castInteger round of INF is an invalid record");
+  }
   const std::string yb = R"(<DataField name="y" optype="categorical" dataType="boolean"/>)";
   CHECK(score_text(model("", "", "y"), fields + yb, {{"x", "1"}}, "") == "true", "boolean target: 1 is true");
   CHECK(score_text(model("", "", "y"), fields + yb, {{"x", "2"}}, "").rfind("ERROR: target \"y\"", 0) == 0,
