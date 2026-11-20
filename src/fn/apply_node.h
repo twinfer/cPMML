@@ -238,6 +238,20 @@ class ApplyNode : public Expression {
       const cpmml::bind::StaticType type = cpmml::bind::expression_type(condition);
       if (type && *type != TypeId::Boolean)
         throw cpmml::ParsingException(cpmml::bind::if_condition_message(apply, *type));
+      // P4.7 (B24): an `if` of type string casts a number or boolean branch
+      // to string (adapter::if_then_else_text).
+      if (cpmml::bind::expression_type(apply) == TypeId::String) {
+        bound.argument_type = {TypeId::Boolean, TypeId::String, TypeId::String};
+        bool cast = false;
+        std::size_t i = 0;
+        for (pugi::xml_node branch = condition.next_sibling(); branch && i < 2; branch = branch.next_sibling()) {
+          if (branch.type() != pugi::node_element || std::strcmp(branch.name(), "Extension") == 0) continue;
+          bound.argument_type[++i] = adapter::text_type(cpmml::bind::expression_type(branch));
+          cast |= bound.argument_type[i] != TypeId::String;
+        }
+        if (cast) return &adapter::if_then_else_text;
+        bound.argument_type.clear();
+      }
       return kernel;
     }
     if (sig.op == Op::Not || sig.op == Op::And || sig.op == Op::Or) {

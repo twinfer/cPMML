@@ -1,0 +1,7 @@
+d,s,n,g,y,pv,o_ti,o_tb,o_tsd,o_tsi,o_tsb,o_tnb,o_tgi
+1,1,1,0.5,1.0,1.0,1,true,1.0,1,true,true,5
+0,0,0,0.5,1.0,1.0,0,false,0.0,0,false,false,5
+1,true,2,0.1,,INVALID,,,,,,,
+-1,false,-1,0.2,,INVALID,,,,,,,
+3.5,x,,0.25,,INVALID,,,,,,,
+2,2.5,1,0.5,,INVALID,,,,,,,

@@ -429,6 +429,27 @@ void rule_cases() {
          {"E-TYPE-PARAM"});
   expect("narrowing-derived", "§2.6, Q2: an integer DerivedField over a double (B17)",
          in_model(derived("u", "integer", call("*", ref("x") + constant("1.0")))), {"W-CAST-NARROWING"});
+  // P4.7: a TD FieldRef to a field a MiningField widens reads the widened
+  // slot (FieldScope.html: instantiated TD fields "can only reference:
+  // MiningFields from the MiningSchema of that model element"), and the
+  // binder knows it before the TD's bodies are checked, as the engine does
+  // (the pre-pass, Binder::note_widened_sources): the same model with the
+  // field in LocalTransformations reports the same narrowing.
+  const std::string kWidenI = mf("x") + mf("i", "missingValueReplacement=\"2.5\"") + mf("y", "usageType=\"target\"");
+  expect("td-widened-slot", "§3.4 N3/D22 + FieldScope.html: a TD FieldRef reads the widened MiningField",
+         pmml(kNum, td(derived("u", "integer", ref("i"))) + regression(kWidenI)),
+         {"W-CAST-NARROWING", "W-SLOT-WIDENED"});
+  expect("lt-widened-slot", "§3.4 N3/D22: a LocalTransformations FieldRef reads the widened MiningField",
+         pmml(kNum, regression(kWidenI, lt(derived("u", "integer", ref("i"))))),
+         {"W-CAST-NARROWING", "W-SLOT-WIDENED"});
+  expect("td-unwidened-slot", "§3.4: no widening, an integer TD FieldRef",
+         pmml(kNum, td(derived("u", "integer", ref("i"))) + regression(kMining)), {});
+  expect("td-widened-slot-segment", "§3.4 N3/D22: a segment model's MiningField widens the DataField it reads",
+         pmml(kNum, td(derived("u", "integer", ref("i"))) +
+                        "<MiningModel functionName=\"regression\">\n<MiningSchema>" + kMining +
+                        "</MiningSchema>\n<Segmentation multipleModelMethod=\"sum\"><Segment><True/>" +
+                        regression(kWidenI) + "</Segment></Segmentation>\n</MiningModel>\n"),
+         {"W-CAST-NARROWING", "W-SLOT-WIDENED"});
   expect("if-static-type", "D7: if has the common type of THEN and ELSE (B19)",
          in_model(derived("u", "integer",
                           call("if", call("greaterThan", ref("x") + constant("0")) + ref("i") + constant("1.5")))),

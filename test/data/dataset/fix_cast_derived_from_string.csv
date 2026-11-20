@@ -1,0 +1,9 @@
+s,t,b,u,y,pv,c_dd,o_di,o_db,n_db,o_du
+2.50,3,true,1,32.5,32.5,2.5|,3,true,false,true
+1e3,+7,false,0,1070.0,1070.0,1000.0|,7,false,true,false
+-1,007,true,0,69.0,69.0,-1.0|,7,true,false,false
+INF,-2,false,1,Infinity,Infinity,Infinity|,-2,false,true,true
+x,3,true,1,,INVALID,,,,,
+2,3.0,true,1,,INVALID,,,,,
+2,1e1,true,1,,INVALID,,,,,
+2,3,true,true,,INVALID,,,,,

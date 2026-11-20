@@ -1,0 +1,8 @@
+n,x,y,pv,ob,obd,oi,oi2,os
+1,1,1.0,1.0,true,true,1,2,true
+0,0,0.0,0.0,false,false,0,0,false
+1,-0,0.0,0.0,true,false,0,0,true
+2,1,,INVALID,,,,,
+-1,0,,INVALID,,,,,
+1,0.5,,INVALID,,,,,
+0,2,,INVALID,,,,,

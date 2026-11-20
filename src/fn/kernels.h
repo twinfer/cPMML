@@ -43,9 +43,12 @@
  * core/builtinfunctions.h did since P2.4). A call whose result is an
  * integer (P4.5, D4) has its own kernel, chosen at load (`instantiate`):
  * it reads each operand as the int64 the stored double holds and computes
- * in int64, an overflow being invalid; see "Integer kernels" below. It is
- * not `unpack<types::Integer>`: that makes 3.5 in an integer slot invalid
- * (B17, P4.7), which today it is not (legacy::B17). Comparisons delegate
+ * in int64, an overflow being invalid; see "Integer kernels" below. An
+ * integer operand that holds no int64 is invalid, as unpack<types::Integer>
+ * reads it (§2.6; P4.7's casts keep integer slots integral, B17, and the
+ * binder types a slot that a MiningField widens as double, also from the
+ * TransformationDictionary; see integer_operand).
+ * Comparisons delegate
  * to `LegacyCompare`, today's Value operators (the double: a number, a boolean's 1 or 0, a
  * string's Indexer code), until P6. The string edits (uppercase, lowercase,
  * substring, trimBlanks) delegate to `LegacyStringEdit`, the Value's own
@@ -83,11 +86,6 @@ namespace cpmml::fn {
 // keeps is the base build's, measured by the fixture dump (P4.1: no cell
 // changes).
 namespace legacy {
-// B17 (P4.7): an integer slot can hold a number that is no integer (an
-// integer DerivedField over a double keeps its fraction, `dint` = 3.5; or
-// ±INF, NaN). An integer kernel that meets such an operand computes the
-// whole call as before P4.5, in double (adapter::integer_operand).
-inline constexpr bool B17 = true;
 // B2 (P6): uppercase, lowercase, substring and trimBlanks edit a copy of
 // their argument's Value, which keeps the argument's string code
 // (LegacyStringEdit).
@@ -96,7 +94,6 @@ inline constexpr bool B2 = true;
 // (LegacyCompare).
 inline constexpr bool LegacyCompare = true;
 
-static_assert(B17, "P4.7 removes this switch together with the code it keeps");
 static_assert(B2 && LegacyCompare, "P6 removes these switches together with the code they keep");
 }  // namespace legacy
 
@@ -317,27 +314,6 @@ inline types::Value modulo(types::Integer a, types::Integer b) {
   if (r != 0 && ((r < 0) != (b.v < 0))) r += b.v;
   return types::Integer{r};
 }
-// legacy::B17: an integer call with an operand that holds no integer (an
-// integer slot keeping a fraction, ±INF or NaN) is computed as before P4.5,
-// in double: these are the double kernels as an integer call ran them.
-template <Double (*F)(Double, Double)>
-types::Value b17(Double a, Double b) {
-  return F(a, b);
-}
-template <Double (*F)(Double)>
-types::Value b17(Double x) {
-  return F(x);
-}
-inline types::Value b17_divide(Double a, Double b) {
-  if (b.v == 0.0) return divide_by_zero(a, true);
-  return divide(a, b, true);
-}
-inline types::Value b17_pow(Double a, Double b) { return pow(a, b, true); }
-inline types::Value b17_modulo(Double a, Double b) {
-  if (!modulo_domain(a, b)) return types::Invalid{types::InvalidReason::DivisionByZero};
-  return modulo(a, b);
-}
-
 // Distribution functions. Phi(x) = 1/2 erfc(-x/sqrt 2): erfc rather than
 // 1 - 1/2 erfc(x/sqrt 2), which loses every digit in the left tail.
 inline Double erf(Double x) { return {std::erf(x.v)}; }
@@ -794,18 +770,27 @@ inline Status median(const Bound& b, const ::Value* args, std::size_t n, ::Value
 // finds outside int64 (`integer_operand`: Overflow), so a later integer
 // call over it is invalid, as the cast of that double to an integer is
 // (§2.6); no input or kernel can hold the int64 it was.
-enum class IntegerOperand : std::uint8_t { Integer, Overflow, NotInteger };
-// The int64 the Value holds: NotInteger when it holds no integer (a
-// fraction, ±INF, NaN: legacy::B17, which P4.7's casts make impossible in an
-// integer slot), Overflow for an integer double outside [-2^63, 2^63) (the
-// double 2^63 above, or an integer slot over a double, B17), else Integer
-// (a -0.0 is the integer 0).
-inline IntegerOperand integer_operand(const ::Value& v, types::Integer& out) {
+//
+// An operand that holds no int64 is invalid (`integer_operand`: false), as
+// §2.6's cast of its double to an integer is ("double, float -> integer: the
+// value if integral and in range, else Invalid(NotIntegral/Overflow)";
+// unpack<types::Integer>): the double 2^63 above, and nothing else since
+// P4.7 (B17), whose casts keep an integer slot integral (an integer
+// DerivedField or OutputField over a double, the integer target), and
+// whose binder types a TransformationDictionary FieldRef to a field that a
+// MiningField widens to double (missingValueReplacement="2.5" on an integer
+// field, §3.4 W-SLOT-WIDENED) as that double (bind::Binder::value_type), as
+// a LocalTransformations FieldRef to the MiningField already was. Before
+// P4.7 a fraction, ±INF or NaN there made the whole call the double kernel
+// it was before P4.5 (legacy::B17, removed).
+//
+// The int64 the Value holds (a -0.0 is the integer 0); false when it holds
+// no integer (a fraction, ±INF, NaN) or one outside [-2^63, 2^63).
+inline bool integer_operand(const ::Value& v, types::Integer& out) {
   const double d = v.as_double();
-  if (!std::isfinite(d) || std::trunc(d) != d) return IntegerOperand::NotInteger;
-  if (!(d >= -9223372036854775808.0 && d < 9223372036854775808.0)) return IntegerOperand::Overflow;
+  if (!(std::trunc(d) == d && d >= -9223372036854775808.0 && d < 9223372036854775808.0)) return false;
   out = {static_cast<std::int64_t>(d)};
-  return IntegerOperand::Integer;
+  return true;
 }
 // An integer kernel's result in the engine's storage: an Integer as its
 // double, invalid, or missing (`out` stays missing).
@@ -818,28 +803,20 @@ inline Status integer(const types::Value& r, ::Value& out) {
   if (types::is_missing(r)) return Status::Ok;
   throw std::logic_error("fn::adapter::integer: an integer kernel returned neither an integer, invalid nor missing");
 }
-// A call with an operand that holds no integer is computed whole by
-// `Legacy`, the double kernel it ran before P4.5 (legacy::B17); otherwise an
-// operand outside int64 makes the result invalid, and the int64 kernel `I`
-// computes it.
-template <types::Value (*I)(types::Integer), types::Value (*Legacy)(scalar::Double)>
-Status integer_unary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+// An operand that holds no int64 makes the result invalid; otherwise the
+// int64 kernel `I` computes it.
+template <types::Value (*I)(types::Integer)>
+Status integer_unary(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   types::Integer x{};
-  switch (integer_operand(args[0], x)) {
-    case IntegerOperand::NotInteger: return number(b, Legacy(operand(b, args, 0)), out);  // legacy::B17
-    case IntegerOperand::Overflow: return Status::Invalid;
-    case IntegerOperand::Integer: break;
-  }
+  if (!integer_operand(args[0], x)) return Status::Invalid;
   return integer(I(x), out);
 }
-template <types::Value (*I)(types::Integer, types::Integer), types::Value (*Legacy)(scalar::Double, scalar::Double)>
-Status integer_binary(const Bound& b, const ::Value* args, std::size_t, ::Value& out) {
+template <types::Value (*I)(types::Integer, types::Integer)>
+Status integer_binary(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   types::Integer x{}, y{};
-  const IntegerOperand rx = integer_operand(args[0], x);
-  const IntegerOperand ry = integer_operand(args[1], y);
-  if (rx == IntegerOperand::NotInteger || ry == IntegerOperand::NotInteger)  // legacy::B17
-    return number(b, Legacy(operand(b, args, 0), operand(b, args, 1)), out);
-  if (rx == IntegerOperand::Overflow || ry == IntegerOperand::Overflow) return Status::Invalid;
+  const bool ok_x = integer_operand(args[0], x);
+  const bool ok_y = integer_operand(args[1], y);
+  if (!(ok_x && ok_y)) return Status::Invalid;
   return integer(I(x, y), out);
 }
 // The aggregates over integers (sum, product, max, min): the present
@@ -852,23 +829,21 @@ Status integer_binary(const Bound& b, const ::Value* args, std::size_t, ::Value&
 // product of two such values fits in 128 bits), and a product of nonzero
 // integers never shrinks in magnitude, so once beyond 2^63 it stays outside
 // int64, unless a later factor is 0, which makes it 0. (product(INT64_MIN,
-// -1, -1) is INT64_MIN although INT64_MIN * -1 is not an int64.) An operand
-// outside int64 makes the result invalid; one that holds no integer makes
-// the whole call the double fold it was (legacy::B17).
+// -1, -1) is INT64_MIN although INT64_MIN * -1 is not an int64.) A present
+// operand that holds no int64 makes the result invalid.
 enum class Aggregate : std::uint8_t { Sum, Product, Max, Min };
-template <Aggregate A, scalar::Double (*Legacy)(scalar::Double, scalar::Double)>
-Status integer_fold(const Bound& b, const ::Value* args, std::size_t n, ::Value& out) {
-  bool any = false, operand_overflow = false, overflow = false, zero = false;
+template <Aggregate A>
+Status integer_fold(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
+  bool any = false, bad_operand = false, overflow = false, zero = false;
   constexpr __int128 kTwo63 = static_cast<__int128>(1) << 63;
   __int128 wide = A == Aggregate::Product ? 1 : 0;
   std::int64_t acc = 0;
   for (std::size_t i = 0; i < n; i++) {
     if (args[i].is_missing()) continue;
     types::Integer x{};
-    switch (integer_operand(args[i], x)) {
-      case IntegerOperand::NotInteger: return fold<Legacy>(b, args, n, out);  // legacy::B17
-      case IntegerOperand::Overflow: operand_overflow = true; continue;
-      case IntegerOperand::Integer: break;
+    if (!integer_operand(args[i], x)) {
+      bad_operand = true;
+      continue;
     }
     if constexpr (A == Aggregate::Sum) {
       wide += x.v;
@@ -886,7 +861,7 @@ Status integer_fold(const Bound& b, const ::Value* args, std::size_t n, ::Value&
     }
     any = true;
   }
-  if (operand_overflow) return Status::Invalid;
+  if (bad_operand) return Status::Invalid;
   if (!any) return Status::Ok;
   if constexpr (A == Aggregate::Sum || A == Aggregate::Product) {
     if (A == Aggregate::Product && zero) {
@@ -943,6 +918,33 @@ inline std::size_t if_taken(const ::Value& condition, std::size_t n) {
 // mapMissingTo, which it refuses (MissingArgumentException; D3).
 inline Status if_then_else(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
   if (n == 2) out = args[1];
+  return Status::Ok;
+}
+// `if` of type string with a number or boolean branch (design commit P4.7,
+// B24). BuiltinFunctions.html declares no result dataType for `if`, so
+// Functions.html's rule gives it one: "When the input parameters have
+// multiple dataTypes, the least restrictive dataType will be inherited by
+// default" (D7, P2.6), and the value of an expression of type string is a
+// string: the branch's Cast<string> (§2.6 "number -> string: Java text";
+// Q1, D17), as concat casts it (append_text). The old storage keeps the
+// branch's number as well, so the equality readers compare what they
+// compared before (P2.6: equal(si, 7) over si = if(c, "abc", 7) is true on
+// base and in JPMML 1.7.7); the text is what a string reader and a cast to a
+// number or boolean read (fn::DeclaredCast: a string expression's value
+// without text is the empty string). Bound::argument_type holds the static
+// types of the condition, THEN and ELSE; ApplyNode instantiates this kernel
+// only when a branch is of a number or boolean type. An integer branch that
+// holds no int64 has no Cast<string> (append_text), an invalid result.
+inline bool append_text(std::string& out, const ::Value& v, types::TypeId type);
+inline Status if_then_else_text(const Bound& bound, const ::Value* args, std::size_t n, ::Value& out) {
+  if (n != 2) return Status::Ok;
+  out = args[1];
+  if (out.is_missing()) return Status::Ok;
+  const types::TypeId type = bound.argument_type[args[0].as_double() != 0.0 ? 1 : 2];
+  if (type == types::TypeId::String || !out.text().empty()) return Status::Ok;
+  std::string text;
+  if (!append_text(text, out, type)) return Status::Invalid;
+  out.set_text(std::move(text));
   return Status::Ok;
 }
 
@@ -1044,28 +1046,31 @@ inline Status substring(const Bound&, const ::Value* args, std::size_t, ::Value&
 //     constant in a string slot "keeps its text", so concat(FieldRef d
 //     mapMissingTo="5", "z") stays "5z", as base and JPMML 1.7.7 give);
 //   - any other number or boolean is written as Java writes its type:
-//     integer the int64 the double holds (an integer slot that keeps a
-//     fraction, ±INF or NaN, legacy::B17, is written as the double it holds,
-//     as java::text writes such an integer; P4.7 makes it unreachable), float
-//     the double narrowed to float, double the double, boolean 1 -> true,
-//     else false (a boolean slot holds 1 or 0).
+//     integer the int64 the double holds, float the double narrowed to
+//     float, double the double, boolean 1 -> true, else false (a boolean
+//     slot holds 1 or 0). An integer argument that holds no int64 (the
+//     double 2^63 an integer kernel stores at the edge of int64, P4.5) has
+//     no integer text: the call is invalid, as an integer kernel's is over
+//     it (§2.6; before P4.7, legacy::B17 wrote a fraction, ±INF or NaN of an
+//     integer slot as the double it held, which P4.7's casts make
+//     unreachable).
 // A missing argument never reaches the kernel (MissingRule::Propagate:
 // "any missing inputs to a built-in function will result in a missing value
 // being returned"). The result is a string the kernel built: packed as the
 // engine builds one (Value(text, STRING): the active Indexer's code).
-inline void append_text(std::string& out, const ::Value& v, types::TypeId type) {
-  if (type == types::TypeId::String || !v.text().empty()) return scalar::append(out, v.text());
+inline bool append_text(std::string& out, const ::Value& v, types::TypeId type) {
+  if (type == types::TypeId::String || !v.text().empty()) return scalar::append(out, v.text()), true;
   const double d = v.as_double();
   switch (type) {
     case types::TypeId::Integer:
-      if (java::is_long(d)) return scalar::append(out, types::Integer{static_cast<std::int64_t>(d)});
-      return scalar::append(out, types::Double{d});  // legacy::B17
+      if (!java::is_long(d)) return false;
+      return scalar::append(out, types::Integer{static_cast<std::int64_t>(d)}), true;
     case types::TypeId::Float:
-      return scalar::append(out, types::Float{static_cast<float>(d)});
+      return scalar::append(out, types::Float{static_cast<float>(d)}), true;
     case types::TypeId::Double:
-      return scalar::append(out, types::Double{d});
+      return scalar::append(out, types::Double{d}), true;
     case types::TypeId::Boolean:
-      return scalar::append(out, types::Boolean{d != 0});
+      return scalar::append(out, types::Boolean{d != 0}), true;
     case types::TypeId::String:
     case types::TypeId::Missing:
     case types::TypeId::Invalid:
@@ -1076,7 +1081,8 @@ inline void append_text(std::string& out, const ::Value& v, types::TypeId type) 
 inline Status concat(const Bound& bound, const ::Value* args, std::size_t n, ::Value& out) {
   if (bound.argument_type.size() != n) throw std::logic_error("concat: the call was not bound to its argument types");
   std::string result;
-  for (std::size_t i = 0; i < n; i++) append_text(result, args[i], bound.argument_type[i]);
+  for (std::size_t i = 0; i < n; i++)
+    if (!append_text(result, args[i], bound.argument_type[i])) return Status::Invalid;
   out = ::Value(result, DataType::DataTypeValue::STRING);
   return Status::Ok;
 }
@@ -1165,17 +1171,17 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
   namespace s = scalar;
   if (integer_result) {
     switch (op) {
-      case Op::Plus: return a::integer_binary<s::plus, s::b17<s::plus>>;
-      case Op::Minus: return a::integer_binary<s::minus, s::b17<s::minus>>;
-      case Op::Times: return a::integer_binary<s::times, s::b17<s::times>>;
-      case Op::Divide: return a::integer_binary<s::divide, s::b17_divide>;
-      case Op::Pow: return a::integer_binary<s::pow, s::b17_pow>;
-      case Op::Modulo: return a::integer_binary<s::modulo, s::b17_modulo>;
-      case Op::Abs: return a::integer_unary<s::abs, s::b17<s::abs>>;
-      case Op::Max: return a::integer_fold<a::Aggregate::Max, s::max>;
-      case Op::Min: return a::integer_fold<a::Aggregate::Min, s::min>;
-      case Op::Sum: return a::integer_fold<a::Aggregate::Sum, s::sum>;
-      case Op::Product: return a::integer_fold<a::Aggregate::Product, s::product>;
+      case Op::Plus: return a::integer_binary<s::plus>;
+      case Op::Minus: return a::integer_binary<s::minus>;
+      case Op::Times: return a::integer_binary<s::times>;
+      case Op::Divide: return a::integer_binary<s::divide>;
+      case Op::Pow: return a::integer_binary<s::pow>;
+      case Op::Modulo: return a::integer_binary<s::modulo>;
+      case Op::Abs: return a::integer_unary<s::abs>;
+      case Op::Max: return a::integer_fold<a::Aggregate::Max>;
+      case Op::Min: return a::integer_fold<a::Aggregate::Min>;
+      case Op::Sum: return a::integer_fold<a::Aggregate::Sum>;
+      case Op::Product: return a::integer_fold<a::Aggregate::Product>;
       default: break;
     }
   }

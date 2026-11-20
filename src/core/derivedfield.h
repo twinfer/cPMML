@@ -7,8 +7,10 @@
 #ifndef CPMML_DERIVEDFIELD_H
 #define CPMML_DERIVEDFIELD_H
 
+#include "bind/load_scope.h"
 #include "expression/expression.h"
 #include "expression/expressionbuilder.h"
+#include "fn/cast.h"
 #include "sample.h"
 #include "xmlnode.h"
 
@@ -31,6 +33,12 @@ class DerivedField {
   DataType datatype;
   size_t index = std::numeric_limits<size_t>::max();
   std::shared_ptr<Expression> expression;
+  // §3.4 "DerivedField dataType=X -> Cast<X>(expression)" (design commit
+  // P4.7, B17, B24): the cast from the expression's static type (the
+  // binder's, bind::expression_type) to the declared one, fixed at load;
+  // fn::DeclaredCast::Op::None when there is nothing to do, so an identity
+  // costs a byte compare per record.
+  cpmml::fn::DeclaredCast cast;
 
   DerivedField() = default;
 
@@ -42,7 +50,8 @@ class DerivedField {
         optype(OpType::read(node)),
         datatype(DataType::read(node)),
         index(indexer->get_or_set(name, datatype).first),
-        expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)) {}
+        expression(ExpressionBuilder::build(node.get_child_bylist(expression_names), index, datatype, indexer)),
+        cast(cpmml::bind::expression_type(node.get_child_bylist(expression_names)), cpmml::bind::type_id(datatype)) {}
 
   // A DerivedField of a TransformationDictionary or LocalTransformations: its
   // name is how it is referenced, so an absent one is a load error.
@@ -53,11 +62,22 @@ class DerivedField {
 
   inline void prepare(Sample& sample) const {
     Value v = expression->eval(sample);
-    // Quantize to float32 when DerivedField declares dataType="float", to avoid precision issues in case of float32
-    // quantization in the original model
-    if (datatype.value == DataType::DataTypeValue::FLOAT && !v.is_missing())
-      v.set_double(static_cast<double>(static_cast<float>(v.as_double())));
+    if (!v.is_missing()) {
+      // Q2 (decided (b)): "a narrowing cast that fails at run time is an
+      // invalid result for the record (InvalidValueException naming the
+      // field)"; JPMML 1.7.7: TypeCheckException "Expected integer value,
+      // got double value".
+      if (cast.op != cpmml::fn::DeclaredCast::Op::None && !cast.apply(v)) raise_invalid(v);
+      // Quantize to float32 when DerivedField declares dataType="float", to avoid precision issues in case of float32
+      // quantization in the original model (§2.6 "double -> float: IEEE round to nearest")
+      if (datatype.value == DataType::DataTypeValue::FLOAT)
+        v.set_double(static_cast<double>(static_cast<float>(v.as_double())));
+    }
     sample.change_value(index, v);
+  }
+
+  [[noreturn]] [[gnu::cold]] [[gnu::noinline]] void raise_invalid(const Value& v) const {
+    throw cpmml::InvalidValueException("DerivedField \"" + name + "\": " + cast.failure(v));
   }
 
   inline static std::unordered_map<std::string, DerivedField> to_derivedfields(

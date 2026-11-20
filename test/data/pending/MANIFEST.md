@@ -83,15 +83,15 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_binsim_clustering_string | P6.5 | **yes: row 6** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |
 | fix_binsim_clustering_string_declared | P6.5 | check (note 5) | **PASS** (a guard, not a sentinel) | every row refused (`Expected false or true, got "n"`) |
 | fix_binsim_knn_string | P6.5 | **yes: every row** (note 5) | FAIL `predicted: 12.0  expected: no prediction` | every row refused (`Expected false or true, got "0"`) |
-| fix_string_derived_set | P6.7 | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree |
+| fix_string_derived_set | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree |
 | fix_string_typed_values | P6.7 | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree |
 | fix_typed_derived_conversions | P6.7 | **yes: `e_d_s3` row 1** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree |
-| fix_string_sum_avg | P6.7 | no; **header to write** (note 2) | FAIL `predicted: 0.0  expected: 6` (the `o_sii` column) | all 7 rows agree |
-| fix_derived_cast_novalue | P6.7 (after P4.7) | **yes: rows 3-6** (note 6) | FAIL `output 'o_tsd': predicted: 1  expected: 1.0` | rows 1-2 agree; rows 3-6 refused (TypeCheckException) |
-| fix_output_integer_nonintegral | P6.7 (after P4.7) | **yes: rows 4-6, 8** (note 6) | FAIL `output 'ti': predicted: 3.5  expected: no value` | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
-| fix_output_integer_chain | P7b.4 | **yes: rows 2, 5** (note 6) | FAIL `predicted: 103.5  expected: no prediction` | rows 1, 3, 4 agree; rows 2, 5 refused (TypeCheckException) |
-| fix_mapmissing_string_slot_equal | P4.7 | no (note 8) | FAIL `output 'o': predicted: false  expected: true` (row 2) | both rows agree |
-| fix_mapmissing_string_slot_numeric | P4.7, else P6.8 (note 9) | no (note 9) | FAIL `predicted: 200.0  expected: 255.0` (row 1) | both rows agree |
+| fix_string_sum_avg | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no; **header written by P4.7** (note 2) | FAIL `predicted: 0.0  expected: 6` (the `o_sii` column) | all 7 rows agree |
+| fix_derived_cast_novalue | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 3-6 are invalid records** (notes 6, 16) | FAIL `output 'o_tsd': predicted: 1  expected: 1.0` | rows 1-2 agree; rows 3-6 refused (TypeCheckException) |
+| fix_output_integer_nonintegral | **registered by P4.7** (planned P6.7 after P4.7; moved to `test/data/`; note 16) | **done: rows 4-6, 8 are invalid records** (notes 6, 16) | FAIL `predicted: 3.5  expected: INVALID` (row 4; before P4.7's INVALID marker the pending row read `output 'ti': predicted: 3.5  expected: no value`) | rows 1-3 agree; rows 4-8 refused (TypeCheckException; row 7, 1e10, refused as 32-bit, D4) |
+| fix_output_integer_chain | P7b.4 | **yes: rows 2, 5** (notes 6, 16) | FAIL `predicted: 103.5  expected: no prediction` | rows 1, 3, 4 agree; rows 2, 5 refused (TypeCheckException) |
+| fix_mapmissing_string_slot_equal | **registered by P4.7** (moved to `test/data/`, as are its files) | no (note 8) | FAIL `output 'o': predicted: false  expected: true` (row 2) | both rows agree |
+| fix_mapmissing_string_slot_numeric | **registered by P4.7** (moved to `test/data/`, as are its files; notes 9, 16) | **yes: `os3` row 2** (note 16) | FAIL `predicted: 200.0  expected: 255.0` (row 1) | both rows agree |
 | fix_builtin_text_if | **registered by P2.8b4** (planned P4.3; moved to `test/data/`, as are its files) | no | FAIL `output 'if_full': predicted: E  expected: no value` (also the sentinel on P2.8b4's base a6eeee4) | rows 1, 2, 4, 5 agree; rows 3, 6 refused (`Function "if" cannot accept missing value`); spec-derived there (D3) |
 | fix_builtin_text_concat | **registered by P4.6** (moved to `test/data/`, as are its files) | **done: every double and float cell re-derived** (note 7) | FAIL `output 'c_spec': predicted: -  expected: 2-2000` (since P2.3 the untyped Constant `-` keeps its text, B8; the integer month and year are dropped until P4.6, B23); with the re-derived cells, on P4.6's base 73cf6ea: the same line (row 1) | rows 1-5, 7-9 agree on every cell (the re-derived Java text); row 6 refused at evaluation (MissingFieldException: `Field "pv" is not defined`), spec-derived |
 | fix_builtin_text_formatnumber | **registered by P4.9** (moved to `test/data/`, as are its files) | **done: the float-narrowing columns added** (`f_flt` %.10f, `f_flt_g` %.9g, `f_flt_d` %d of a float field `f`: 0.1 is `[0.1000000015]` and `[0.100000001]`, 16777217 is `[16777216]`), with `f_fix2` (%.2f), `f_hexf` (%a), `f_field` (the pattern read from a field `pat`, per record) and a row 10 (x = 1.005, a binary value below the decimal tie); every cell from an independent C program calling snprintf (the existing cells unchanged, which it reproduces) | FAIL `unsupported value "formatNumber" for Apply@function; ...` (a load error since P2.5, B13: the OutputField catch had hidden it, giving `output 'f_pct': model declares it but produced no value  expected: rate 0.5%`); the same line on P4.9's base 9bd050f, its list ending `, and, or` | scored column by column and row by row: every cell agrees but those the header lists (Java's Formatter: %d/%i of a double or a float, %#g and %.2f of an integer refused; %g keeps trailing zeros; half-up rounding of the decimal; %a `0x1.0p-1`; 32-bit two's complement for %x/%o of a negative; `0x0`; -0.0 read as 0.0, D18) and row 7 (a missing input, refused, D24): spec-derived throughout (POSIX printf) |
@@ -358,3 +358,38 @@ JPMML gives up on the whole file at the first row it refuses.
    No missing-offset row: JPMML scores it (the offset is ignored), cPMML
    gives no prediction (`generalregressionmodel.h:182`), and the spec says
    nothing; P8.3 decides, with the generalLinear question of note 13.
+16. **Design commit P4.7 (Cast nodes on DerivedField, OutputField and the
+   target; base 2114e55)** registered six fixtures, each failing on its base
+   (the first line `pmml_tester.exe` prints there) and passing with the
+   casts: `fix_mapmissing_string_slot_equal` (`output 'o': predicted: false
+   expected: true`, row 2), `fix_mapmissing_string_slot_numeric`
+   (`predicted: 200.0  expected: 255.0`, row 1), `fix_derived_cast_novalue`
+   (`output 'o_tsd': predicted: 1  expected: 1.0`, row 1),
+   `fix_output_integer_nonintegral` (`predicted: 3.5  expected: INVALID`,
+   row 4), `fix_string_sum_avg` (`predicted: 0.0  expected: 6`, row 1) and
+   `fix_string_derived_set` (`predicted: 138.0  expected: 511.0`, row 1).
+   The last two were planned for P6.7, but P4.7's Cast<string> is what
+   fixes them, and a fixture must fail on the base of the commit that
+   registers it. P4.7 added the invalid-record marker note 6 asks for: a
+   cell `INVALID` in the predicted column (`pmml_tester.cc`) expects
+   `cpmml::InvalidValueException` and checks nothing else in the row. Rows
+   re-derived with it: `fix_derived_cast_novalue` rows 3-6 and
+   `fix_output_integer_nonintegral` rows 4-6 and 8 (the headers say why,
+   quoting XML Schema Part 2; JPMML 1.7.7 scores none of them). In
+   `fix_mapmissing_string_slot_numeric`, `os3` on row 2 is `4.0`, not
+   JPMML's `4`: `s3` is FieldRef i with mapMissingTo="2.5", which is not an
+   integer literal, so by the design's K1 rule 2 the FieldRef's static type
+   is the least restrictive of integer and double, double, and its value 4
+   is cast to string as the double 4.0 (proposed D43; the header says so).
+   `fix_string_sum_avg` got the header note 2 asks for. Still pending, and
+   why: `fix_output_integer_chain` (P7b.4) fails on P4.7 with `predicted:
+   103.5  expected: no prediction` (row 2), because a modelChain step writes
+   its OutputFields for the next segments through
+   `InternalModel::_write_outputs_to_sample`, which does not go through
+   `OutputField::add_output` and so not through its cast; P7b.4 also has to
+   write rows 2 and 5 as `INVALID` (Q2) rather than N/A.
+   `fix_typed_derived_conversions` (P6.7) still fails on `e_d_s3` (note 3,
+   D2: equal(d, "3") compares the double's text), although P4.7 gave its
+   string DerivedFields their text (`o_ds` N/A -> 3.0 ...); and
+   `fix_float_set_narrow` (P6.2) on the float narrowing of inputs (B4)
+   (its `o_fpd` cells changed from N/A to the expected values).

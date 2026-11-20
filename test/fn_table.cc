@@ -9,10 +9,10 @@
  *     rule of §4.2, pow of integers with a negative exponent, D8; normalCDF's
  *     sigma), never against cPMML's output.
  *   - The legacy switches (kernels.h `legacy`): what each keeps is pinned
- *     here by the symptom the design's bug table records for it (§1.2: B17
- *     "an integer slot keeps the fraction"; B2 "keep the argument's
- *     code"), so that the commit removing a switch sees these checks fail
- *     and replaces them with the spec's.
+ *     here by the symptom the design's bug table records for it (§1.2: B2
+ *     "keep the argument's code"), so that the commit removing a switch sees
+ *     these checks fail and replaces them with the spec's. B17's switch is
+ *     gone (P4.7): an integer operand that holds no int64 is invalid.
  *   - concat's casts of its arguments to string (P4.6, B23; Java text, Q1,
  *     D17), kernel by kernel and through a whole document.
  *   - Division by zero and the functions' domains (P4.4: B21, D20, B41),
@@ -22,6 +22,9 @@
  *   - formatNumber (P4.9): POSIX printf patterns against the C library's
  *     snprintf, the patterns it cannot apply, float narrowing, and through a
  *     whole document (load errors included).
+ *   - The explicit casts of a declaration (P4.7, fn/cast.h: B17, B24; §2.6,
+ *     §3.4, §5.1, Q2), rule by rule and through whole documents: a
+ *     DerivedField, an OutputField, the target and an entityId.
  *   - ArgBuffer, inline and on the heap.
  *
  * Usage: fn_table.exe   (exit 0 when every check holds)
@@ -45,6 +48,7 @@
 #include "core/value.h"
 #include "cPMML.h"
 #include "fn/apply_node.h"
+#include "fn/cast.h"
 #include "fn/kernels.h"
 #include "fn/table.h"
 
@@ -250,12 +254,26 @@ static void kernels() {
 }
 
 static void legacy_switches(Indexer& indexer) {
-  // B17 (P4.7): an integer call over an operand that holds no integer (an
-  // integer slot keeping a fraction) is computed in double, as before P4.5.
-  CHECK(number("+", nums({3.5, 1}), {}, kInteger) == 4.5, "legacy::B17: integer 3.5 + 1 is 4.5");
-  CHECK(number("sum", nums({3.5, 1, 1}), {}, kInteger) == 5.5, "legacy::B17: integer sum(3.5, 1, 1) is 5.5");
-  CHECK(number("/", nums({7.5, 2}), {}, kInteger) == 3, "legacy::B17: integer 7.5/2 truncated, 3");
-  CHECK(number("modulo", nums({7.5, 2}), {}, kInteger) == 1.5, "legacy::B17: integer modulo(7.5, 2) is 1.5");
+  // B17 (P4.7, legacy::B17 removed): an integer operand that holds no int64
+  // (a fraction, ±INF, NaN; P4.7's casts keep integer slots integral) makes
+  // the integer call invalid, as §2.6's cast of the double to an integer is
+  // ("the value if integral and in range, else Invalid(NotIntegral/
+  // Overflow)"); it was computed in double before (integer 3.5 + 1 was 4.5).
+  {
+    const double inf = std::numeric_limits<double>::infinity();
+    CHECK(invalid("+", nums({3.5, 1}), {}, kInteger), "B17: integer 3.5 + 1 is invalid");
+    CHECK(invalid("-", nums({1, inf}), {}, kInteger), "B17: integer 1 - INF is invalid");
+    CHECK(invalid("*", nums({std::nan(""), 2}), {}, kInteger), "B17: integer NaN * 2 is invalid");
+    CHECK(invalid("/", nums({7.5, 2}), {}, kInteger), "B17: integer 7.5/2 is invalid");
+    CHECK(invalid("pow", nums({2, 0.5}), {}, kInteger), "B17: integer pow(2, 0.5) is invalid");
+    CHECK(invalid("modulo", nums({7.5, 2}), {}, kInteger), "B17: integer modulo(7.5, 2) is invalid");
+    CHECK(invalid("abs", nums({-3.5}), {}, kInteger), "B17: integer abs(-3.5) is invalid");
+    CHECK(invalid("sum", nums({3.5, 1, 1}), {}, kInteger), "B17: integer sum(3.5, 1, 1) is invalid");
+    CHECK(invalid("max", nums({1, -inf}), {}, kInteger), "B17: integer max(1, -INF) is invalid");
+    CHECK(invalid("product", nums({0, 2.5}), {}, kInteger), "B17: integer product(0, 2.5) is invalid");
+    CHECK(number("+", nums({3, 1}), {}, kInteger) == 4, "integer 3 + 1 is 4");
+    CHECK(number("sum", nums({-0.0, 1}), {}, kInteger) == 1, "a -0 operand is the integer 0");
+  }
   // B2 (P6): uppercase keeps its argument's string code.
   {
     Value out;
@@ -405,9 +423,6 @@ static void concat_casts(Indexer& indexer) {
            // Long.toString; XSD's integer has one zero.
            Case{TypeId::Integer, 2000, "2000|"}, Case{TypeId::Integer, -3, "-3|"}, Case{TypeId::Integer, -0.0, "0|"},
            Case{TypeId::Integer, 4611686018427387904.0, "4611686018427387904|"},
-           // legacy::B17 (P4.7): an integer slot that keeps a fraction or an
-           // infinity is written as the double it holds.
-           Case{TypeId::Integer, 3.5, "3.5|"}, Case{TypeId::Integer, inf, "Infinity|"},
            // Float.toString of the double narrowed to float.
            Case{TypeId::Float, 0.1, "0.1|"}, Case{TypeId::Float, 1e8, "1.0E8|"}, Case{TypeId::Float, 3, "3.0|"},
            Case{TypeId::Float, 16777217, "1.6777216E7|"}, Case{TypeId::Float, 1e300, "Infinity|"},
@@ -417,6 +432,15 @@ static void concat_casts(Indexer& indexer) {
     CHECK(concat_one(c.type, Value(c.v)) == c.text,
           std::string("concat of ") + std::string(cpmml::bind::type_name(c.type)) + " " + std::to_string(c.v) +
               " is " + c.text + " (got " + concat_one(c.type, Value(c.v)) + ")");
+  // B17 (P4.7, legacy::B17 removed): an integer argument that holds no
+  // int64 has no integer text; the call is invalid, as an integer kernel's
+  // is (it was written as the double it held, 3.5 -> "3.5").
+  for (const double d : {3.5, inf, -inf, std::nan(""), 9223372036854775808.0}) {
+    fn::Bound bound;
+    bound.argument_type = {TypeId::Integer, TypeId::String};
+    CHECK(invalid("concat", {Value(d), Value("|", DataType::DataTypeValue::STRING)}, bound),
+          "B17: concat of an integer slot holding " + std::to_string(d) + " is invalid");
+  }
   // A string is its text, as it came in: an empty one, one that spells a
   // number, and a numeric_text one (§9, decided 2026-11-18: string readers
   // get the text).
@@ -1256,6 +1280,308 @@ static void if_lazy() {
         "if over strings: false without ELSE gives defaultValue");
 }
 
+// §2.6's table, as fn::DeclaredCast implements it over the old storage
+// (P4.7). The expected values are XML Schema Part 2's value and lexical
+// spaces (3.3.13 integer, 3.2.5 double, 3.2.4 float, 3.2.2.1 boolean
+// "{true, false, 1, 0}", whiteSpace collapse) and Java's text (Q1, D17),
+// written out here, not cPMML's.
+static void declared_casts(Indexer& indexer) {
+  using TypeId = cpmml::types::TypeId;
+  using Op = fn::DeclaredCast::Op;
+  const double inf = std::numeric_limits<double>::infinity();
+  const TypeId all[] = {TypeId::Integer, TypeId::Float, TypeId::Double, TypeId::Boolean, TypeId::String};
+  for (const TypeId t : all) CHECK(fn::DeclaredCast(t, t).op == Op::None, "T -> T is the identity: no work");
+  CHECK(fn::DeclaredCast(TypeId::Integer, TypeId::Double).op == Op::None, "integer -> double: the double is the value");
+  CHECK(fn::DeclaredCast(TypeId::Float, TypeId::Double).op == Op::None, "float -> double: exact");
+  CHECK(fn::DeclaredCast(TypeId::Boolean, TypeId::Integer).op == Op::None, "boolean -> integer: 1, 0 as held");
+  CHECK(fn::DeclaredCast(TypeId::Boolean, TypeId::Double).op == Op::None, "boolean -> double: 1, 0 as held");
+  CHECK(fn::DeclaredCast(TypeId::Double, TypeId::Float).op == Op::None, "double -> float: the caller narrows");
+  CHECK(fn::DeclaredCast(TypeId::Double, TypeId::Integer).op == Op::NumberToInteger, "double -> integer");
+  CHECK(fn::DeclaredCast(TypeId::Float, TypeId::Integer).op == Op::NumberToInteger, "float -> integer");
+  CHECK(fn::DeclaredCast(TypeId::Integer, TypeId::Boolean).op == Op::NumberToBoolean, "integer -> boolean");
+  CHECK(fn::DeclaredCast(TypeId::Double, TypeId::Boolean).op == Op::NumberToBoolean, "double -> boolean");
+  for (const TypeId t : {TypeId::Integer, TypeId::Float, TypeId::Double, TypeId::Boolean}) {
+    CHECK(fn::DeclaredCast(t, TypeId::String).op == Op::ToString, "number, boolean -> string");
+    CHECK(fn::DeclaredCast(TypeId::String, t).op == Op::StringToNumber, "string -> number, boolean");
+  }
+  CHECK(fn::DeclaredCast(std::nullopt, TypeId::Integer).from == TypeId::Double,
+        "an unknown static type is cast as the double the engine computed");
+
+  // §2.6 "double, float -> integer: the value if integral and in range".
+  const fn::DeclaredCast to_int(TypeId::Double, TypeId::Integer);
+  auto int_of = [&](double d, double& out) {
+    Value v(d);
+    const bool ok = to_int.apply(v);
+    out = v.as_double();
+    return ok;
+  };
+  double out = 0;
+  CHECK(int_of(3, out) && out == 3, "3.0 is the integer 3");
+  CHECK(int_of(-0.0, out) && out == 0 && !std::signbit(out), "-0 is the integer 0 (XSD integer has one zero)");
+  CHECK(int_of(1e10, out) && out == 1e10, "1e10 is an integer (int64, D4)");
+  CHECK(int_of(-9223372036854775808.0, out), "-2^63 is an int64");
+  for (const double d : {3.5, -2.5, 3.0000000001, inf, -inf, std::nan(""), 9223372036854775808.0})
+    CHECK(!int_of(d, out), "B17: " + std::to_string(d) + " is no integer: the cast fails (Q2)");
+  {
+    double d = 3.5;
+    CHECK(!to_int.apply_number(d) && d == 3.5, "apply_number agrees and leaves the value");
+    d = -0.0;
+    CHECK(to_int.apply_number(d) && !std::signbit(d), "apply_number: -0 is 0");
+  }
+  // §2.6 "number -> boolean: 1 -> true, 0 -> false, else Invalid(NoCast)" (D14).
+  const fn::DeclaredCast to_bool(TypeId::Integer, TypeId::Boolean);
+  for (const double d : {1.0, 0.0, -0.0}) {
+    double x = d;
+    CHECK(to_bool.apply_number(x) && x == d && !std::signbit(x), "1, 0, -0 are true, false, false");
+  }
+  for (const double d : {2.0, -1.0, 0.5, inf, std::nan("")}) {
+    double x = d;
+    CHECK(!to_bool.apply_number(x), "B24: " + std::to_string(d) + " is no boolean: the cast fails (Q2)");
+  }
+  // §2.6 "number -> string: Java text"; "boolean -> string: true / false".
+  auto text_of = [&](TypeId from, double d) {
+    Value v(d);
+    if (!fn::DeclaredCast(from, TypeId::String).apply(v)) return std::string("<fails>");
+    return v.text();
+  };
+  CHECK(text_of(TypeId::Integer, 3) == "3", "integer 3: Long.toString");
+  CHECK(text_of(TypeId::Integer, -0.0) == "0", "integer -0: 0");
+  CHECK(text_of(TypeId::Integer, 1e10) == "10000000000", "integer 1e10: 10000000000");
+  CHECK(text_of(TypeId::Integer, 9223372036854775808.0) == "<fails>", "an integer slot holding 2^63 has no text");
+  CHECK(text_of(TypeId::Double, 2) == "2.0", "double 2: Double.toString, 2.0 (D17)");
+  CHECK(text_of(TypeId::Double, 1e7) == "1.0E7", "double 1e7: 1.0E7");
+  CHECK(text_of(TypeId::Double, -0.0) == "-0.0", "double -0: -0.0 (D18)");
+  CHECK(text_of(TypeId::Double, inf) == "Infinity", "double INF: Infinity");
+  CHECK(text_of(TypeId::Float, 0.1) == "0.1", "float 0.1: Float.toString of the float");
+  CHECK(text_of(TypeId::Float, 16777217) == "1.6777216E7", "float 16777217: 1.6777216E7");
+  CHECK(text_of(TypeId::Boolean, 1) == "true" && text_of(TypeId::Boolean, 0) == "false", "boolean: true, false");
+  {
+    Value v(2.0);
+    fn::DeclaredCast(TypeId::Double, TypeId::String).apply(v);
+    CHECK(v.as_double() == Value("2.0", DataType::DataTypeValue::STRING).as_double() && !v.has_numeric_text(),
+          "the string the cast builds is packed as the engine builds one (its text's code, no mark)");
+    Value constant(5.0);
+    constant.set_text("5");
+    CHECK(fn::DeclaredCast(TypeId::Double, TypeId::String).apply(constant) && constant.text() == "5" &&
+              constant.as_double() == 5.0,
+          "a number that carries the text the load gave it keeps that Value (decided 2026-11-18)");
+  }
+  // §2.6 "string -> number, boolean: strict XSD reading of the text".
+  struct Parse {
+    TypeId to;
+    const char* text;
+    bool ok;
+    double value;
+  };
+  for (const Parse& c : {Parse{TypeId::Double, "2.50", true, 2.5}, Parse{TypeId::Double, "1e3", true, 1000},
+                         Parse{TypeId::Double, " -1 ", true, -1}, Parse{TypeId::Double, "INF", true, inf},
+                         Parse{TypeId::Double, "+3", true, 3}, Parse{TypeId::Double, "x", false, 0},
+                         Parse{TypeId::Double, "true", false, 0}, Parse{TypeId::Double, "inf", false, 0},
+                         Parse{TypeId::Integer, "3", true, 3}, Parse{TypeId::Integer, "+7", true, 7},
+                         Parse{TypeId::Integer, "007", true, 7}, Parse{TypeId::Integer, " 3 ", true, 3},
+                         Parse{TypeId::Integer, "3.0", false, 0}, Parse{TypeId::Integer, "1e1", false, 0},
+                         Parse{TypeId::Integer, "99999999999999999999", false, 0},
+                         Parse{TypeId::Float, "0.1", true, static_cast<double>(0.1f)},
+                         Parse{TypeId::Boolean, "true", true, 1}, Parse{TypeId::Boolean, "1", true, 1},
+                         Parse{TypeId::Boolean, "false", true, 0}, Parse{TypeId::Boolean, "0", true, 0},
+                         Parse{TypeId::Boolean, "TRUE", false, 0}, Parse{TypeId::Boolean, "yes", false, 0}}) {
+    Value v(c.text, DataType::DataTypeValue::STRING);
+    const bool ok = fn::DeclaredCast(TypeId::String, c.to).apply(v);
+    const std::string rule = std::string("string \"") + c.text + "\" -> " +
+                             std::string(cpmml::bind::type_name(c.to)) + (c.ok ? " is a value" : " fails (Q2)");
+    CHECK(ok == c.ok && (!ok || (v.as_double() == c.value && v.text().empty())), rule);
+    double d = 0;
+    CHECK(fn::DeclaredCast(TypeId::String, c.to).parse_text(c.text, d) == c.ok, "parse_text: " + rule);
+  }
+  {
+    // Decided 2026-11-20 after P4.9, item 3: "An empty string (or any
+    // text-less string) cast to a number or boolean is an invalid record,
+    // never its string code." XSD: "" is in no number's or boolean's lexical
+    // space. At run time the empty string is a Value with text "" and a
+    // string code (here -1, the code of a string not seen at load, as
+    // trimBlanks(substring("  x", 1, 2)) gives it, B2).
+    for (const TypeId t : {TypeId::Integer, TypeId::Float, TypeId::Double, TypeId::Boolean}) {
+      Value empty(-1.0);
+      CHECK(!fn::DeclaredCast(TypeId::String, t).apply(empty) && empty.as_double() == -1,
+            "the empty string (code -1) is no " + std::string(cpmml::bind::type_name(t)) + " (item 3, D42)");
+      Value code(0.0);
+      CHECK(!fn::DeclaredCast(TypeId::String, t).apply(code), "the empty string (code 0) is no number or boolean");
+      Value blank("   ", DataType::DataTypeValue::STRING);
+      CHECK(!fn::DeclaredCast(TypeId::String, t).apply(blank), "\"   \" collapses to the empty string: no value");
+    }
+    {
+      const Value empty(-1.0);
+      CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).failure(empty) ==
+                "the string is empty, and the empty string is not a value of type integer (§2.6, D42, Q2)",
+            "the failure says the string is empty");
+      const Value x("x", DataType::DataTypeValue::STRING);
+      CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).failure(x) ==
+                "the value \"x\" of type string is not a value of type integer (§2.6, Q2)",
+            "the failure quotes a malformed text");
+    }
+    // A document constant the load casts to the field's number slot keeps its
+    // text (bind::document_constant), which the cast reads.
+    Value five(5.0);
+    five.set_text("5");
+    CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).apply(five) && five.as_double() == 5 &&
+              five.text().empty(),
+          "a load-cast constant is read by its text");
+    Value half(2.5);
+    half.set_text("2.5");
+    CHECK(!fn::DeclaredCast(TypeId::String, TypeId::Integer).apply(half) && half.as_double() == 2.5,
+          "... strictly: \"2.5\" is no integer");
+    Value marked = Value("7", DataType::DataTypeValue::STRING);
+    marked.mark_numeric_text();
+    CHECK(fn::DeclaredCast(TypeId::String, TypeId::Integer).apply(marked) && marked.as_double() == 7,
+          "a numeric_text constant is read by its text");
+    // NormContinuous mapMissingTo="INF" in a string slot has the text of its
+    // Cast<string>, Infinity (bind::number_constant), which is no XSD double:
+    // a numeric reader takes the number the load read (decided 2026-11-18).
+    Value infinity = Value("Infinity", DataType::DataTypeValue::STRING);
+    infinity.mark_numeric_text();
+    CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).apply(infinity) && infinity.as_double() == inf &&
+              !infinity.has_numeric_text(),
+          "a numeric_text constant is its number, Infinity included");
+    Value plain = Value("Infinity", DataType::DataTypeValue::STRING);
+    CHECK(!fn::DeclaredCast(TypeId::String, TypeId::Double).apply(plain), "the text Infinity is no XSD double");
+  }
+  // The record errors' reason (Q2).
+  CHECK(to_int.failure(3.5) == "the value 3.5 of type double is not a value of type integer (§2.6, Q2)",
+        "failure: a number");
+  CHECK(to_bool.failure(2.0) == "the value 2 of type integer is not a value of type boolean (§2.6, Q2)",
+        "failure: an integer is written as one");
+  CHECK(fn::DeclaredCast(TypeId::String, TypeId::Double).failure(Value("x", DataType::DataTypeValue::STRING)) ==
+            "the value \"x\" of type string is not a value of type double (§2.6, Q2)",
+        "failure: a string");
+  CHECK(message_of<std::logic_error>([] {
+          double d = 1;
+          fn::DeclaredCast(TypeId::Double, TypeId::String).apply_number(d);
+        }) == "DeclaredCast::apply_number: the cast is not between numbers",
+        "apply_number of a string cast is a programming error");
+  (void)indexer;
+}
+
+// The casts through whole documents (P4.7): the record error names the
+// DerivedField, OutputField or target (Q2: "InvalidValueException naming the
+// field or target"; JPMML 1.7.7: TypeCheckException), and a valid value
+// is the cast's.
+static std::string score_text(const std::string& body, const std::string& fields,
+                              const std::vector<std::pair<std::string, std::string>>& input,
+                              const std::string& column) {
+  const std::string path = "fn_table_cast.pmml";
+  {
+    std::ofstream out(path);
+    out << R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/><DataDictionary>)"
+        << fields << "</DataDictionary>" << body << "</PMML>\n";
+  }
+  cpmml::Model model(path, false);
+  std::remove(path.c_str());
+  cpmml::Input in;
+  for (const auto& [k, v] : input) in[k] = v;
+  try {
+    const cpmml::Result result = model.evaluate(in);
+    if (column.empty()) return result.as_string();
+    const auto str = result.str_outputs();
+    if (const auto it = str.find(column); it != str.end()) return it->second;
+    const auto num = result.num_outputs();
+    if (const auto it = num.find(column); it != num.end()) return java::double_text(it->second);
+    return "N/A";
+  } catch (const cpmml::InvalidValueException& error) {
+    return std::string("ERROR: ") + error.what();
+  }
+}
+static void casts_in_document() {
+  const std::string fields = R"(<DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="n" optype="continuous" dataType="integer"/><DataField name="s" optype="categorical" dataType="string"/>)";
+  auto model = [](const std::string& td, const std::string& output, const std::string& target = "y",
+                  const std::string& targets = "") {
+    return "<TransformationDictionary>" + td +
+           R"(</TransformationDictionary><RegressionModel functionName="regression"><MiningSchema>
+      <MiningField name="x"/><MiningField name="n"/><MiningField name="s"/><MiningField name=")" +
+           target + R"(" usageType="target"/></MiningSchema>)" + targets + "<Output>" + output +
+           R"(</Output><RegressionTable intercept="0"><NumericPredictor name="x" coefficient="1"/></RegressionTable></RegressionModel>)";
+  };
+  const std::string y = R"(<DataField name="y" optype="continuous" dataType="double"/>)";
+  const std::string yi = R"(<DataField name="y" optype="continuous" dataType="integer"/>)";
+  const std::string dint = R"(<DerivedField name="d" optype="continuous" dataType="integer"><FieldRef field="x"/></DerivedField>)";
+  const std::string o_d = R"(<OutputField name="o" optype="categorical" dataType="string" feature="transformedValue"><FieldRef field="d"/></OutputField>)";
+  CHECK(score_text(model(dint, o_d), fields + y, {{"x", "3"}}, "o") == "3", "integer DerivedField over 3.0 is 3");
+  CHECK(score_text(model(dint, o_d), fields + y, {{"x", "3.5"}}, "o") ==
+            "ERROR: DerivedField \"d\": the value 3.5 of type double is not a value of type integer (§2.6, Q2)",
+        "B17: integer DerivedField over 3.5 is an invalid record naming the field");
+  // An unused DerivedField is evaluated too (today's eager DAG, Q11 is P7d).
+  const std::string dsd = R"(<DerivedField name="d" optype="continuous" dataType="double"><FieldRef field="s"/></DerivedField>)";
+  CHECK(score_text(model(dsd, o_d), fields + y, {{"x", "1"}, {"s", "2.50"}}, "o") == "2.5",
+        "double DerivedField over the text 2.50 is 2.5 (B38 part)");
+  CHECK(score_text(model(dsd, o_d), fields + y, {{"x", "1"}, {"s", "x"}}, "o") ==
+            "ERROR: DerivedField \"d\": the value \"x\" of type string is not a value of type double (§2.6, Q2)",
+        "double DerivedField over the text x is an invalid record");
+  const std::string ob = R"(<OutputField name="o" optype="categorical" dataType="boolean" feature="transformedValue"><FieldRef field="n"/></OutputField>)";
+  CHECK(score_text(model("", ob), fields + y, {{"x", "1"}, {"n", "1"}}, "o") == "1.0", "boolean OutputField over 1");
+  CHECK(score_text(model("", ob), fields + y, {{"x", "1"}, {"n", "2"}}, "o") ==
+            "ERROR: OutputField \"o\": the value 2 of type integer is not a value of type boolean (§2.6, Q2)",
+        "B24: integer 2 into a boolean OutputField is an invalid record naming the field");
+  const std::string oi = R"(<OutputField name="o" optype="continuous" dataType="integer" feature="predictedValue"/>)";
+  CHECK(score_text(model("", oi), fields + y, {{"x", "-4"}}, "o") == "-4.0", "integer predictedValue -4");
+  CHECK(score_text(model("", oi), fields + y, {{"x", "2.5"}}, "o") ==
+            "ERROR: OutputField \"o\": the value 2.5 of type double is not a value of type integer (§2.6, Q2)",
+        "B24: a non-integral prediction into an integer OutputField is an invalid record");
+  const std::string ois = R"(<OutputField name="o" optype="continuous" dataType="integer" feature="transformedValue"><FieldRef field="s"/></OutputField>)";
+  CHECK(score_text(model("", ois), fields + y, {{"x", "1"}, {"s", "07"}}, "o") == "7.0",
+        "integer OutputField over the text 07 is 7");
+  CHECK(score_text(model("", ois), fields + y, {{"x", "1"}, {"s", "7.0"}}, "o") ==
+            "ERROR: OutputField \"o\": the value \"7.0\" of type string is not a value of type integer (§2.6, Q2)",
+        "integer OutputField over the text 7.0 is an invalid record (D42)");
+  // An OutputField without dataType declares nothing, so nothing is cast.
+  const std::string untyped = R"(<OutputField name="o" optype="continuous" feature="transformedValue"><FieldRef field="x"/></OutputField>)";
+  CHECK(score_text(model("", untyped), fields + yi, {{"x", "2"}}, "o") == "2.0",
+        "an OutputField without dataType is not cast");
+  const std::string yb0 = R"(<DataField name="y" optype="categorical" dataType="boolean"/>)";
+  const std::string untyped_n = R"(<OutputField name="o" optype="continuous" feature="transformedValue"><FieldRef field="n"/></OutputField>)";
+  CHECK(score_text(model("", untyped_n), fields + yb0, {{"x", "1"}, {"n", "2"}}, "o") == "2.0",
+        "an OutputField without dataType is not cast, whatever type the engine infers for it (here the target's)");
+  // entityId declared integer (Q2): an id that is no integer is an invalid
+  // record naming the field; it gave no value, silently, before P4.7.
+  {
+    const std::string tree = R"(<TreeModel functionName="classification"><MiningSchema><MiningField name="x"/>
+      <MiningField name="c" usageType="target"/></MiningSchema><Output>
+      <OutputField name="eid" optype="categorical" dataType="integer" feature="entityId"/></Output>
+      <Node id="r"><True/><Node id="7" score="a"><SimplePredicate field="x" operator="lessThan" value="0"/></Node>
+      <Node id="n2" score="b"><True/></Node></Node></TreeModel>)";
+    const std::string c = R"(<DataField name="c" optype="categorical" dataType="string"><Value value="a"/><Value value="b"/></DataField>)";
+    CHECK(score_text(tree, fields + c, {{"x", "-1"}}, "eid") == "7.0", "entityId 7 as an integer");
+    CHECK(score_text(tree, fields + c, {{"x", "1"}}, "eid") ==
+              "ERROR: OutputField \"eid\": the value \"n2\" of type string is not a value of type integer (§2.6, Q2)",
+          "entityId n2 as an integer is an invalid record naming the field");
+  }
+  // §5.1: the target cast, after the Target.
+  CHECK(score_text(model("", "", "y"), fields + yi, {{"x", "3"}}, "") == "3", "integer target: 3");
+  CHECK(score_text(model("", "", "y"), fields + yi, {{"x", "3.5"}}, "") ==
+            "ERROR: target \"y\": the predicted value 3.5 of type double is not a value of type integer (§2.6, Q2)",
+        "B24: a non-integral regression prediction of an integer target is an invalid record naming the target");
+  const std::string round = R"(<Targets><Target field="y" castInteger="round"/></Targets>)";
+  CHECK(score_text(model("", "", "y", round), fields + yi, {{"x", "3.5"}}, "") == "4",
+        "castInteger comes first (Targets.html order), so the cast has an integer");
+  const std::string yb = R"(<DataField name="y" optype="categorical" dataType="boolean"/>)";
+  CHECK(score_text(model("", "", "y"), fields + yb, {{"x", "1"}}, "") == "true", "boolean target: 1 is true");
+  CHECK(score_text(model("", "", "y"), fields + yb, {{"x", "2"}}, "").rfind("ERROR: target \"y\"", 0) == 0,
+        "boolean target: 2 is an invalid record");
+  const std::string yd = R"(<DataField name="y" optype="continuous" dataType="double"/>)";
+  CHECK(score_text(model("", "", "y"), fields + yd, {{"x", "3.5"}}, "") == "3.5", "a double target is not cast");
+  // A selectAll segment's prediction is read as text (InternalModel::finish
+  // of a string, Segment::predict): the target cast applies there too.
+  const std::string select_all =
+      R"(<MiningModel functionName="regression"><MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+      <Segmentation multipleModelMethod="selectAll"><Segment id="1"><True/><RegressionModel functionName="regression">
+      <MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+      <RegressionTable intercept="0"><NumericPredictor name="x" coefficient="1"/></RegressionTable></RegressionModel></Segment></Segmentation></MiningModel>)";
+  CHECK(score_text(select_all, fields + yi, {{"x", "3"}}, "") == "[3]", "selectAll segment, integer target: [3]");
+  CHECK(score_text(select_all, fields + yi, {{"x", "3.5"}}, "") ==
+            "ERROR: target \"y\": the predicted value 3.5 of type double is not a value of type integer (§2.6, Q2)",
+        "selectAll segment, integer target: 3.5 is an invalid record");
+}
+
 static void arg_buffer() {
   for (std::size_t n : {std::size_t{0}, std::size_t{3}, fn::ArgBuffer::kInline, fn::ArgBuffer::kInline + 3}) {
     fn::ArgBuffer args(n);
@@ -1285,6 +1611,8 @@ int main() {
   format_number_in_document();
   integer_kernels();
   integer_in_document();
+  declared_casts(indexer);
+  casts_in_document();
   arg_buffer();
   std::cout << checks - failures << "/" << checks << " checks passed" << std::endl;
   return failures == 0 ? 0 : 1;

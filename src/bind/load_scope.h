@@ -320,6 +320,13 @@ inline ::Value document_constant(const XmlNode& node, const std::string& what, c
   // A number or boolean cast to a string slot keeps its number for numeric
   // readers (decided 2026-11-18, §9; Value::numeric_text).
   if (to == TypeId::String) out.mark_numeric_text();
+  // A string cast to a number or boolean slot keeps its document text (design
+  // commit P4.7): the value is the field's (or the argument of an `if` that
+  // gives it), and the field's cast reads a string expression's text
+  // (fn::DeclaredCast, the strict reading this cast made), so a value of a
+  // string expression always has a text and only the empty string has none
+  // (decided 2026-11-20 after P4.9, item 3).
+  if (type == TypeId::String) out.set_text(text);
   return out;
 }
 

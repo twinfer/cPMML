@@ -78,8 +78,40 @@ class Discretize : public Expression {
     for (const auto& child : raw_node.get_childs("DiscretizeBin")) {
       discretizebin_values.push_back(cpmml::bind::element_constant(
           raw_node, child, "binValue", child.required_attribute("binValue"), type, output_type, reads_slot));
-      discretizebin_intervals.push_back(IntervalBuilder::build(child.get_child("Interval"), index, datatype));
+      discretizebin_intervals.push_back(bin_interval(child.get_child("Interval"), index));
     }
+  }
+
+  // A DiscretizeBin's Interval (design commit P4.7, B40). DataDictionary.html,
+  // Interval: "The attributes leftMargin and rightMargin are optional but at
+  // least one value must be defined. If a margin is missing, then ±∞ is
+  // assumed." Transformations.html, Discretize, the example's bins
+  // <Interval closure="closedOpen" leftMargin="0"/> ("right margin is
+  // +infinity by default") and openOpen rightMargin="0" ("left margin is
+  // -infinity by default"), which "maps values less than 0 to negative and
+  // other values to positive ... CASE When "Profit" < 0 Then 'negative' When
+  // "Profit" >= 0 Then 'positive' End": an absent margin bounds nothing, so
+  // the side has no test, and INF (-INF) is in a bin open to the right
+  // (left) whatever its closure. IntervalBuilder used DBL_MAX (DBL_LOWEST)
+  // for an absent margin, which put INF in no bin (missing, or the
+  // defaultValue; JPMML 1.7.7 gives the open last bin). A margin that is
+  // present is compared as written, INF included (pmml-4-4.xsd: NUMBER).
+  // pmml-4-4.xsd: Interval@leftMargin and @rightMargin are NUMBER.
+  static Predicate bin_interval(const XmlNode& node, const size_t index) {
+    using Op = PredicateOpType::PredicateOpTypeValue;
+    const Closure closure(node);
+    const bool left_closed =
+        closure.value == Closure::ClosureValue::CLOSED_CLOSED || closure.value == Closure::ClosureValue::CLOSED_OPEN;
+    const bool right_closed =
+        closure.value == Closure::ClosureValue::CLOSED_CLOSED || closure.value == Closure::ClosureValue::OPEN_CLOSED;
+    std::vector<Predicate> bounds;
+    if (const auto left = node.optional_attribute("leftMargin"))
+      bounds.push_back(Predicate(index, left_closed ? Op::GREATER_OR_EQUAL : Op::GREATER_THAN,
+                                 Value(*left, DataType::DataTypeValue::DOUBLE)));
+    if (const auto right = node.optional_attribute("rightMargin"))
+      bounds.push_back(Predicate(index, right_closed ? Op::LESS_OR_EQUAL : Op::LESS_THAN,
+                                 Value(*right, DataType::DataTypeValue::DOUBLE)));
+    return Predicate(bounds, Op::AND);
   }
 
   inline Value eval(const Sample& sample) const override {

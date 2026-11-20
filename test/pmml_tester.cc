@@ -11,7 +11,12 @@
  *
  * In scoring mode the fixture's output_name() column, its target column (the
  * predicted value, as JPMML writes it; an input when the model has a residual
- * OutputField) and every OutputField column are checked.
+ * OutputField) and every OutputField column are checked. An output_name()
+ * cell "INVALID" expects an invalid result for the record: evaluate() must
+ * throw cpmml::InvalidValueException (MiningSchema.html returnInvalid: "the
+ * model should return a value indicating an invalid result"; design Q2, a
+ * failed cast, and §2.8), and the row's other cells are not checked. JPMML
+ * scores no such record, which its output cannot express.
  *
  * --locale installs a host locale before scoring: results must be identical
  * under a comma-decimal locale. Exits 77 (ctest SKIP) if it is unavailable.
@@ -262,6 +267,18 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
   while (!row.empty()) {
     const std::string& expected = row.at(out_col);
+
+    if (expected == "INVALID") {
+      try {
+        const cpmml::Result result = model.evaluate(to_input(row));
+        std::cerr << "predicted: " << (result.as_string().empty() ? "no prediction" : result.as_string())
+                  << "  expected: an invalid result (InvalidValueException)  sample: " << to_string(row) << std::endl;
+        return -1;
+      } catch (const cpmml::InvalidValueException&) {
+      }
+      row = reader.read();
+      continue;
+    }
 
     // The oracle emits "N/A" (and hand-written fixtures leave the cell blank)
     // when the model yields no prediction: require the same of cPMML rather

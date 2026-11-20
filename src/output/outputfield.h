@@ -7,8 +7,10 @@
 #ifndef CPMML_OUTPUTFIELD_H
 #define CPMML_OUTPUTFIELD_H
 
+#include "bind/load_scope.h"
 #include "core/xmlnode.h"
 #include "expression/expression.h"
+#include "fn/cast.h"
 #include "outputexpressionbuilder.h"
 #include "outputexpressiontype.h"
 
@@ -34,6 +36,22 @@ class OutputField {
   DataType datatype;
   size_t index;
   std::shared_ptr<OutputExpression> expression;
+  // §3.4 (design commit P4.7, B24): "predictedValue -> Cast(dataType,
+  // prediction); probability, residual, ... double; transformedValue ->
+  // Cast(dataType, expression)". Output.html: "The required attribute
+  // dataType of an OutputField element specifies the data type for the
+  // output column". The cast of a number or boolean field, from the static
+  // type of what the feature gives (set_cast) to the declared dataType;
+  // Op::None for an OutputField without dataType, whose type is inferred
+  // from that value (nothing is declared, so nothing is cast), and for a
+  // string field, whose Cast<string> is add_output's Java text (P2.4).
+  cpmml::fn::DeclaredCast cast;
+  // Where a number or boolean field reads its value from: eval_double (a
+  // number), the expression's Value (a transformedValue over a string
+  // expression: its text is parsed, §2.6), or eval_str (entityId: the id's
+  // text is parsed).
+  enum class Source : unsigned char { Number, Value, Text };
+  Source source = Source::Number;
 
   OutputField() : derived(false), index(std::numeric_limits<size_t>::max()) {}
 
@@ -79,6 +97,51 @@ class OutputField {
 
     index = indexer->get_or_set(name, datatype).first;
     expression = OutputExpressionBuilder::build(node, index, datatype, indexer, model_target);
+    if (node.exists_attribute("dataType") && datatype.value != DataType::DataTypeValue::STRING)
+      set_cast(node, indexer, model_target);
+  }
+
+  // The static type of what the feature gives and the cast from it (§3.4):
+  //   transformedValue  the expression's (bind::expression_type), the cast of
+  //                     §2.6, a string's text read strictly (Source::Value);
+  //   entityId          a string, the id: its text read strictly
+  //                     (Source::Text); it used to give no value silently
+  //                     when the id was not a number (the catch of
+  //                     ParsingException in EntityId::eval_double);
+  //   predictedValue    the target's type: the prediction's number, as
+  //                     PredictedValue::eval_double gives it, checked to be a
+  //                     value of the dataType (a string target's class is
+  //                     the number of its text, as before);
+  //   any other         a double (probability, residual, confidence, ...;
+  //                     the number of the text of a predictedDisplayValue,
+  //                     reasonCode, ruleValue, as before), checked the same.
+  void set_cast(const XmlNode& node, const std::shared_ptr<Indexer>& indexer, const std::string& model_target) {
+    using cpmml::bind::TypeId;
+    const TypeId to = cpmml::bind::type_id(datatype);
+    std::optional<TypeId> from = TypeId::Double;
+    switch (expression_type.value) {
+      case OutputExpressionType::OutputExpressionTypeValue::TRANSFORMED_VALUE:
+        from = cpmml::bind::expression_type(node.get_child_bylist(expression_names));
+        if (from == TypeId::String) source = Source::Value;
+        break;
+      case OutputExpressionType::OutputExpressionTypeValue::ENTITY_ID:
+        // An association rule's id (algorithm=...) is AssociationOutput's,
+        // a number of its own.
+        if (!node.exists_attribute("algorithm")) {
+          from = TypeId::String;
+          source = Source::Text;
+        }
+        break;
+      case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
+        if (indexer->contains(model_target)) {
+          const TypeId target = cpmml::bind::type_id(indexer->get_type(model_target));
+          if (target != TypeId::String) from = target;
+        }
+        break;
+      default:
+        break;
+    }
+    cast = cpmml::fn::DeclaredCast(from, to);
   }
 
   inline void prepare(Sample& sample) const { sample.change_value_if_missing(index, expression->eval(sample)); }
@@ -104,12 +167,39 @@ class OutputField {
         return Value(sv, datatype);
       }
       default: {
-        const double v = expression->eval_double(sample, from);
-        if (is_double_min(v)) return Value();
+        double v = 0;
+        switch (source) {
+          case Source::Number:
+            v = expression->eval_double(sample, from);
+            if (is_double_min(v)) return Value();
+            // Q2 (decided (b)): a narrowing cast that fails is an invalid
+            // result for the record; JPMML 1.7.7: TypeCheckException
+            // "Expected integer value, got double value" ("... boolean
+            // value, got integer value").
+            if (cast.op != cpmml::fn::DeclaredCast::Op::None && !cast.apply_number(v)) raise_invalid(cast.failure(v));
+            break;
+          case Source::Value: {
+            Value value = expression->eval(sample);
+            if (value.is_missing()) return Value();
+            if (!cast.apply(value)) raise_invalid(cast.failure(value));
+            v = value.as_double();
+            break;
+          }
+          case Source::Text: {
+            const std::string id = expression->eval_str(sample, from);
+            if (id.empty()) return Value();  // no entity: no value
+            if (!cast.parse_text(id, v)) raise_invalid(cast.failure(std::string_view(id)));
+            break;
+          }
+        }
         into.num_outputs[name] = v;
         return Value(v, datatype);
       }
     }
+  }
+
+  [[noreturn]] [[gnu::cold]] [[gnu::noinline]] void raise_invalid(const std::string& why) const {
+    throw cpmml::InvalidValueException("OutputField \"" + name + "\": " + why);
   }
 
   inline bool is_display_value() const {

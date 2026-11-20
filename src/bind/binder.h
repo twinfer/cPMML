@@ -296,11 +296,35 @@ class Binder {
   // gave it (LocalTransformations, then Output, then the
   // TransformationDictionary, at the nearest enclosing model). nullopt: no
   // binding, or one of unknown type.
+  //
+  // A TransformationDictionary reference to a field whose slot a MiningField
+  // widens (§3.4, N3, D22, W-SLOT-WIDENED) has the widened type, double
+  // (design commit P4.7, As built). FieldScope.html: "When they are
+  // instantiated inside a model element, DerivedFields from the
+  // TransformationDictionary can only reference: MiningFields from the
+  // MiningSchema of that model element", so what the reference reads is the
+  // model's MiningField, whose slot holds the replacement 2.5. lookup()
+  // resolves it to the DataField, as the TD bodies are bound once, in the
+  // document scope; and the engine builds them once for every model of the
+  // document (InternalEvaluator), so their types, casts and kernels are fixed
+  // once: the type is the least restrictive over every MiningField of the
+  // document that reads the field, double when one of them widens it.
   StaticType value_type(pugi::xml_node from, std::string_view name) const {
     std::optional<StaticType> shadow;
     const Binding* b = lookup(from, name, &shadow);
     if (shadow) return *shadow;
-    return b ? b->type.type : StaticType{};
+    if (!b) return StaticType{};
+    return read_type(*b, in_transformation_dictionary(from));
+  }
+
+  // The type a reference to `b` reads: its own, or for a reference from the
+  // TransformationDictionary to a field a MiningField widens, the widened
+  // one (value_type above; bind_fieldref in report mode, so that the
+  // binder's checks of a TD body see what the engine computes).
+  StaticType read_type(const Binding& b, bool from_transformation_dictionary) const {
+    if (from_transformation_dictionary && !widened_sources_.empty() && widened_sources_.count(&b))
+      return least_restrictive(b.type.type, TypeId::Double).type;
+    return b.type.type;
   }
 
  private:
@@ -493,6 +517,114 @@ class Binder {
   std::vector<ModelBinding> models_;
   Scope* document_ = nullptr;
   std::unordered_map<std::string, pugi::xml_node> user_functions_;
+  // The document-level fields (a DataField, or a TransformationDictionary
+  // DerivedField a sub-model's MiningField reads) whose slot a MiningField
+  // widens, directly or through the MiningFields of enclosing models
+  // (value_type).
+  std::unordered_set<const Binding*> widened_sources_;
+
+  // The pre-pass that fills widened_sources_ (bind_pmml), run after the
+  // DataDictionary and the TransformationDictionary's names are declared and
+  // before any body is typed: every MiningField of every model (nested and
+  // segment models included) that widens an integer slot, by the rules
+  // bind_mining_schema warns with (W-SLOT-WIDENED: a replacement that
+  // read_document_text reads AsDouble, an asExtremeValues bound that is not
+  // integral), noted at the document-level field its name resolves to. The
+  // resolution follows resolve() from the parent model's scope (FieldScope.
+  // html: a sub-model's MiningSchema "can refer to any fields defined within
+  // the parent model's scope"): a parent's LocalTransformations DerivedField
+  // or an earlier chain segment's OutputField is no document-level field (a TD
+  // reference cannot read it), a TD DerivedField the parent has no
+  // MiningField of is that field, a parent's MiningField is its own source,
+  // and a name in no enclosing model is the DataField (Q3). A malformed
+  // attribute widens nothing here; bind_mining_schema reports it.
+  void note_widened_sources(pugi::xml_node pmml) {
+    std::vector<pugi::xml_node> frames;
+    for (pugi::xml_node child : pmml.children())
+      if (child.type() == pugi::node_element && detail::is_model_element(child.name()))
+        note_widened_in_model(child, frames);
+  }
+
+  void note_widened_in_model(pugi::xml_node model, std::vector<pugi::xml_node>& frames) {
+    frames.push_back(model);
+    for (pugi::xml_node mf : model.child("MiningSchema").children("MiningField")) {
+      // Only these attributes widen; the source is looked for after them.
+      if (!mf.attribute("missingValueReplacement") && !mf.attribute("invalidValueReplacement") &&
+          !mf.attribute("outliers"))
+        continue;
+      const auto name = attr(mf, "name");
+      if (!name) continue;
+      const Binding* source = widened_source_of(*name, frames.size() - 1, frames);
+      if (source && source->type.type && mining_field_widens(mf, *source->type.type)) widened_sources_.insert(source);
+    }
+    for (pugi::xml_node c : model.children()) {
+      if (c.type() != pugi::node_element) continue;
+      if (detail::is_model_element(c.name())) note_widened_in_model(c, frames);
+      if (std::string_view(c.name()) == "Segmentation")
+        for (pugi::xml_node seg : c.children("Segment"))
+          for (pugi::xml_node m : seg.children())
+            if (m.type() == pugi::node_element && detail::is_model_element(m.name())) note_widened_in_model(m, frames);
+    }
+    frames.pop_back();
+  }
+
+  // The document-level binding a MiningField `name` of frames[level] reads,
+  // or nullptr when it reads a model's own field.
+  const Binding* widened_source_of(std::string_view name, std::size_t level,
+                                   const std::vector<pugi::xml_node>& frames) const {
+    const auto declares = [&name](pugi::xml_node model, const char* container, const char* element) {
+      for (pugi::xml_node f : model.child(container).children(element))
+        if (std::string_view(f.attribute("name").value()) == name) return true;
+      return false;
+    };
+    const auto data_field = [this, &name]() -> const Binding* {
+      const auto it = document_->data_fields.find(name);
+      return it == document_->data_fields.end() ? nullptr : it->second;
+    };
+    if (level == 0) return data_field();
+    const pugi::xml_node parent = frames[level - 1];
+    if (declares(parent, "LocalTransformations", "DerivedField")) return nullptr;
+    const bool parent_mining = declares(parent, "MiningSchema", "MiningField");
+    if (!parent_mining)
+      if (const auto it = document_->td_fields.find(name); it != document_->td_fields.end()) return it->second;
+    if (parent_mining) return widened_source_of(name, level - 1, frames);
+    // modelChain: an earlier segment's OutputField.
+    const pugi::xml_node segmentation = parent.child("Segmentation");
+    if (segmentation && std::string_view(segmentation.attribute("multipleModelMethod").value()) == "modelChain")
+      for (pugi::xml_node seg = frames[level].parent().previous_sibling("Segment"); seg;
+           seg = seg.previous_sibling("Segment"))
+        for (pugi::xml_node m : seg.children())
+          if (m.type() == pugi::node_element && detail::is_model_element(m.name()) &&
+              declares(m, "Output", "OutputField"))
+            return nullptr;
+    // Q3: an enclosing model's field, else the DataField.
+    for (std::size_t j = level - 1; j-- > 0;) {
+      if (declares(frames[j], "LocalTransformations", "DerivedField")) return nullptr;
+      if (declares(frames[j], "MiningSchema", "MiningField")) return widened_source_of(name, j, frames);
+    }
+    return data_field();
+  }
+
+  // bind_mining_schema's W-SLOT-WIDENED rules, without diagnostics.
+  bool mining_field_widens(pugi::xml_node mf, TypeId field_type) {
+    for (const char* rep : {"missingValueReplacement", "invalidValueReplacement"})
+      if (const auto text = attr(mf, rep))
+        if (read_document_text(field_type, *text, parse_ctx_).rule == TextRule::AsDouble) return true;
+    if (field_type != TypeId::Integer || std::string_view(mf.attribute("outliers").value()) != "asExtremeValues")
+      return false;
+    for (const char* bound : {"lowValue", "highValue"})
+      if (const auto text = attr(mf, bound)) {
+        double d = 0;
+        if (lexical::parse_double(*text, d) && std::trunc(d) != d) return true;
+      }
+    return false;
+  }
+
+  static bool in_transformation_dictionary(pugi::xml_node from) {
+    for (pugi::xml_node p = from; p && p.type() == pugi::node_element; p = p.parent())
+      if (std::strcmp(p.name(), "TransformationDictionary") == 0) return true;
+    return false;
+  }
   // U-ELEMENT, one per (scope, element name): count and first line.
   struct Unsupported {
     std::string element;
@@ -785,7 +917,16 @@ class Binder {
       bind_data_dictionary(dd);
     else
       error(code::kRequired, doc_ctx, pmml, "DataDictionary is required (pmml-4-4.xsd)");
-    if (const pugi::xml_node td = pmml.child("TransformationDictionary")) bind_transformation_dictionary(td);
+    const pugi::xml_node td = pmml.child("TransformationDictionary");
+    std::vector<Binding*> td_declared;
+    if (td) declare_transformation_dictionary(td, td_declared);
+    // Before the TransformationDictionary's bodies are typed (design commit
+    // P4.7, As built): value_type gives a TD reference to a field that a
+    // MiningField widens the widened type, so the set has to be complete
+    // when the TD's expressions and casts are checked, in report mode as in
+    // load mode (where the engine asks only after the binder has run).
+    note_widened_sources(pmml);
+    if (td) bind_transformation_dictionary_bodies(td_declared);
     for (pugi::xml_node child : pmml.children()) {
       if (child.type() != pugi::node_element) continue;
       const std::string_view n = child.name();
@@ -892,9 +1033,8 @@ class Binder {
     (void)right;
   }
 
-  void bind_transformation_dictionary(pugi::xml_node td) {
+  void declare_transformation_dictionary(pugi::xml_node td, std::vector<Binding*>& declared) {
     Ctx ctx;
-    std::vector<Binding*> declared;
     std::uint32_t index = 0;
     // Phase 1 (§3.5): every name, with its declared type.
     for (pugi::xml_node child : td.children()) {
@@ -940,6 +1080,9 @@ class Binder {
       document_->td_fields.emplace(key, &b);
       declared.push_back(&b);
     }
+  }
+
+  void bind_transformation_dictionary_bodies(const std::vector<Binding*>& declared) {
     // Phase 2: bodies, in the document scope.
     for (Binding* b : declared) {
       Ctx body;
@@ -1293,7 +1436,8 @@ class Binder {
     }
     const Binding* b = resolve(ctx, node, *f);
     if (!b) return {};
-    Typed t{b->type.type, b};
+    // ctx.model is null exactly in a TransformationDictionary body.
+    Typed t{read_type(*b, ctx.model == nullptr), b};
     // §3.4: "mapMissingTo (xs:string) parsed as T(field) by the rule above".
     if (const auto mm = attr(node, "mapMissingTo")) {
       const StaticType vt = document_value(ctx, node, b->type.type, *mm, "mapMissingTo", b);

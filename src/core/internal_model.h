@@ -13,7 +13,9 @@
 #include <variant>
 #include <vector>
 
+#include "bind/load_scope.h"
 #include "dagbuilder.h"
+#include "fn/cast.h"
 #include "miningfunction.h"
 #include "miningschema.h"
 #include "output/outputdictionary.h"
@@ -71,6 +73,9 @@ class InternalModel {
   enum class Shown : unsigned char { AS_IS, NUMBER, LABEL };
   Shown shown = Shown::AS_IS;
   java::Kind shown_kind = java::Kind::DOUBLE;
+  // The target cast of a regression's prediction (cast_target): a double
+  // to an integer or boolean target; Op::None for every other target.
+  cpmml::fn::DeclaredCast target_cast;
 
   InternalModel() = default;
 
@@ -105,9 +110,12 @@ class InternalModel {
     // and write it with Double.toString, but a TreeModel's prediction is the
     // Node@score text, which is "10" or "1e7" in the document and 10.0 or
     // 1.0E7 to JPMML.
-    if (mining_function.value == MiningFunction::MiningFunctionType::REGRESSION && !text)
+    if (mining_function.value == MiningFunction::MiningFunctionType::REGRESSION && !text) {
       shown = Shown::NUMBER;
-    else if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && !text)
+      const auto to = cpmml::bind::type_id(target_field.datatype);
+      if (to == cpmml::bind::TypeId::Integer || to == cpmml::bind::TypeId::Boolean)
+        target_cast = cpmml::fn::DeclaredCast(cpmml::bind::TypeId::Double, to);
+    } else if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && !text)
       shown = Shown::LABEL;
     else
       shown = Shown::AS_IS;
@@ -155,6 +163,7 @@ class InternalModel {
     if (shown == Shown::AS_IS || score.empty) return;
     if (shown == Shown::NUMBER) {
       if (is_double_min(score.double_score)) return;  // not a number: nothing to rewrite
+      cast_target(score.double_score);
       score.score = java::text({score.double_score, shown_kind});
       return;
     }
@@ -199,6 +208,31 @@ class InternalModel {
     present(score);
   }
 
+  // §5.1 (design commit P4.7, B24): the target cast, "result.predicted =
+  // cast_to(binding.target.type, result.predicted, ctx); // integer target:
+  // §2.6, Q2, B24", after the Target ("they must be applied in sequence,
+  // which is: min and max, rescaleFactor, rescaleConstant, castInteger",
+  // Targets.html). A regression predicts a number of the target's dataType
+  // (DataDictionary.html: "The dataType reuses names and semantics of atomic
+  // types in XML Schema"): for an integer target the value if it is
+  // integral and within int64 (§2.6, as an integer DerivedField), for a
+  // boolean one 1 or 0 (D14); any other prediction is an invalid result for
+  // the record (Q2, decided (b)), as JPMML 1.7.7's TypeCheckException
+  // "Expected integer value, got double value". Targets.html: "If a
+  // regression model should predict integers, use the attribute castInteger
+  // to control how decimal places should be handled". cPMML returned the
+  // double (3.5 for an integer target) before. A float or double target is
+  // not checked here (a float's narrowing is B5, P6/P8).
+  inline void cast_target(double& value) const {
+    if (target_cast.op == cpmml::fn::DeclaredCast::Op::None) return;
+    if (!target_cast.apply_number(value)) raise_target_invalid(value);
+  }
+
+  [[noreturn]] [[gnu::cold]] [[gnu::noinline]] void raise_target_invalid(double value) const {
+    throw cpmml::InvalidValueException("target \"" + target_field.name + "\": the predicted " +
+                                       target_cast.failure(value).substr(4));
+  }
+
   // The same for a prediction carried as text (predict_raw). A label is
   // rewritten before the Target, which matches classes by value and may
   // rename it to a displayValue; a number after it, as the Target rescales
@@ -216,7 +250,9 @@ class InternalModel {
       case Shown::NUMBER: {
         const std::string number = target(predicted, display);
         double value = 0;
-        return !number.empty() && java::parse(number, value) ? java::text({value, shown_kind}) : number;
+        if (number.empty() || !java::parse(number, value)) return number;
+        cast_target(value);
+        return java::text({value, shown_kind});
       }
       case Shown::AS_IS:
         break;
