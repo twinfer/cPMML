@@ -1,12 +1,12 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 458
+# documents: 460
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
 # E-TYPE-BOOLEAN-MIXED: 3
 # U-ELEMENT: 25
 # W-CAST-LOSSY: 113
-# W-CAST-NARROWING: 65
+# W-CAST-NARROWING: 66
 # W-FORWARD-REF: 10
 # W-NAME-SHADOWS-MININGFIELD: 7
 # W-NAME-SHADOWS-TD: 4
@@ -274,6 +274,7 @@ test/data/model/fix_probability_vote_integer.zip:42	W-TEXT-WIDENED	1	MiningModel
 test/data/model/fix_probability_vote_integer.zip:51	W-TEXT-WIDENED	1	MiningModel > Segment "s3" > TreeModel	Node: score="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_string_derived_set.zip:18	W-CAST-NARROWING	1		DerivedField "td": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_string_sum_avg.zip:10	W-CAST-LOSSY	1		DerivedField "ff": declares float over an expression of type double: the value is rounded to float (§2.6)
+test/data/model/fix_target_castinteger_round_half_up.zip:16	W-CAST-NARROWING	1	RegressionModel	OutputField "pv": declares integer over the predicted value of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_td_fieldref_widened_slot.zip:14	W-SLOT-WIDENED	1	RegressionModel	MiningField "j": missingValueReplacement="2.5" is not an integer: the slot of integer field "j" is widened to double (§3.4, N3, D22)
 test/data/model/fix_tree_integer_decimal_text.zip:10	W-TEXT-WIDENED	2	TreeModel	SimplePredicate "x": value="2.5" of integer field "x" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/single_audit_dectree.zip:147	W-TEXT-WIDENED	2	TreeModel "DecisionTree"	SimplePredicate "Age": value="33.0" of integer field "Age" is an xs:double literal, read as double (§3.4 rule 2, D22)

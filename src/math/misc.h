@@ -40,8 +40,6 @@ inline double loglog(const double a) { return std::exp(-std::exp(a)); }
 
 inline double cauchit(const double a) { return 0.5 + (1 / M_PI) * atan(a); }
 
-inline double _round(const double a) { return std::round(a); }
-
 inline double _floor(const double a) { return std::floor(a); }
 
 inline double _ceil(const double a) { return std::ceil(a); }

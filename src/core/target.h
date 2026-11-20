@@ -15,6 +15,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "fn/kernels.h"
 #include "internal_score.h"
 #include "math/misc.h"
 #include "miningfunction.h"
@@ -92,6 +93,25 @@ class CastInteger {
       {"floor", Kind::FLOOR},
   };
 
+  // castInteger="round" (P4.11, B57). Targets.html: "If a regression model
+  // should predict integers, use the attribute castInteger to control how
+  // decimal places should be handled: round: round to nearest integer, e.g.,
+  // 2.718 becomes 3, -2.89 becomes -3". A half has two nearest integers;
+  // it goes up, as the built-in round does (B54, decided 2026-11-20 after
+  // P4.9, §9; decided 2026-11-20 for castInteger too, P4.11): -2.5 becomes
+  // -2, -0.5 becomes 0, 2.5 becomes 3. One kernel for both,
+  // fn::scalar::round_half_up, exact near a half (0.49999999999999994
+  // becomes 0, -0.5000000000000001 becomes -1) and returning a double
+  // from 2^52 on as it is. The result is "an integer", whose value space has
+  // one zero, so -0.4, -0.5 and -0.0 become +0 (as the built-in round,
+  // which stores +0, P4.10). INF and NaN come back as they went in, as
+  // std::round gave them before (round_half_up returns x for both); the
+  // Target has no invalid result of its own, unlike the built-in (D38).
+  static double round_to_integer(const double a) {
+    const double r = cpmml::fn::scalar::round_half_up(a);
+    return r == 0.0 ? 0.0 : r;
+  }
+
   explicit CastInteger(const XmlNode& target) {
     if (!target.exists_attribute("castInteger")) {
       cast_function = _identity;
@@ -100,7 +120,7 @@ class CastInteger {
     empty = false;
     switch (read_enum(target, "castInteger", TABLE)) {
       case Kind::ROUND:
-        cast_function = _round;
+        cast_function = round_to_integer;
         break;
       case Kind::CEILING:
         cast_function = _ceil;
