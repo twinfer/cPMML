@@ -80,9 +80,9 @@ JPMML gives up on the whole file at the first row it refuses.
 | fix_output_double_float_target | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity`) | no | FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity` | all 7 rows agree (re-checked on caa57c9) |
 | fix_string_number_equal | **registered by P6.3** (moved to `test/data/`, as are its files; base 49847ca FAIL `predicted: 0.0  expected: 15.0`, rows 1, 2, 5, 6; header rewritten to state D2) | no (note 3) | FAIL `predicted: 0.0  expected: 15.0` | all 6 rows agree (re-checked on 49847ca) |
 | fix_typed_equal_mixed | **registered by P6.3** (moved to `test/data/`, as are its files; base 49847ca FAIL `output 'e_s_i': predicted: false  expected: true`) | **done: restructured and re-derived** (note 4; header rewritten) | FAIL `output 'e_s_i': predicted: false  expected: true` | all 4 rows agree but the re-derived cells (D1, D2; re-checked on 49847ca) |
-| fix_binsim_clustering_string | P6.5 | **yes: row 6** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |
-| fix_binsim_clustering_string_declared | P6.5 | check (note 5) | **PASS** (a guard, not a sentinel) | every row refused (`Expected false or true, got "n"`) |
-| fix_binsim_knn_string | P6.5 | **yes: every row** (note 5) | FAIL `predicted: 12.0  expected: no prediction` | every row refused (`Expected false or true, got "0"`) |
+| fix_binsim_clustering_string | **registered by P6.5** (moved to `test/data/`, as are its files; base de332ca FAIL `predicted:   expected: K2`, rows 1-4, 6, 8, 9; rows 8-11 added; header rewritten) | **done: row 6 K2** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |
+| fix_binsim_clustering_string_declared | **registered by P6.5** (moved to `test/data/`, as are its files; a guard, PASS on base de332ca; header rewritten) | **checked: no change** (note 5) | **PASS** (a guard, not a sentinel) | every row refused (`Expected false or true, got "n"`) |
+| fix_binsim_knn_string | **registered by P6.5** (moved to `test/data/`, as are its files; base de332ca FAIL `predicted:   expected: 1.5`, row 4; rows 5-7 added; header rewritten) | **done: every row** (note 5; equal to JPMML 1.7.7's on the document spelled true/false) | FAIL `predicted: 12.0  expected: no prediction` | every row refused (`Expected false or true, got "0"`) |
 | fix_string_derived_set | **registered by P4.7** (planned P6.7; moved to `test/data/`, as are its files; note 16) | no (checked against Q1) | FAIL `predicted: 138.0  expected: 511.0` | all 7 rows agree |
 | fix_string_typed_values | P6.7 | no (checked against Q1) | FAIL `predicted: 1.0  expected: 3.0` | all 4 rows agree; **passes since P6.3** (its `e2` rows 1, 3, equal of a double DerivedField with the string `3.0`, by text, D2) |
 | fix_typed_derived_conversions | P6.7 | **yes: `e_d_s3` row 1** (note 3) | FAIL `predicted: 1.0  expected: 3.0` | all 5 rows agree; since P6.3 only `e_d_s3` row 1 fails (`predicted: false  expected: true`, the D2 re-derivation left to P6.7; P6.3 moved `e_s_c3`, `e_s_c30`, `e_isin` rows 2-4 to the fixture's cells) |
@@ -171,6 +171,10 @@ JPMML gives up on the whole file at the first row it refuses.
      binary measure, gives "no prediction" (the cells as written) or an
      invalid record (§2.8). If it is an invalid record, these N/A cells
      need the same invalid-record expectation as note 6.
+   - **Done in P6.5:** no prediction (a value the counts do not cover makes
+     the measure undefined, as a number other than 0 or 1 already does,
+     `fix_binsim_*_nonbinary`); the N/A cells stand. The three fixtures are
+     registered with the cells above; design §7 "As built (P6.5)".
 6. **Q2 = (b): a failed narrowing cast is an invalid record.** The
    fixtures write N/A for the field that has no value, because "JPMML 1.7.7
    does not score these records at all ... which a fixture cannot express".

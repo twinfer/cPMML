@@ -21,6 +21,7 @@
 #include "core/internal_score.h"
 #include "core/transformationdictionary.h"
 #include "core/xmlnode.h"
+#include "math/binary_value.h"
 #include "math/distance.h"
 
 /**
@@ -67,6 +68,9 @@ class ClusteringModel : public InternalModel {
 
   std::vector<ClusteringField> fields;
   std::vector<DataType> field_types;  // the declared type of each center field (load only)
+  // Under a binary measure, the center fields of type string: their values
+  // count as the booleans they read as (binary_measure::of_string_value, D15).
+  std::vector<size_t> binary_string_fields;
   std::vector<Cluster> clusters;
   // MissingValueWeights: Qi per ClusteringField, in field order. Without the
   // element every Qi is 1.
@@ -205,6 +209,8 @@ class ClusteringModel : public InternalModel {
       // scope.resolve (P2.1): the field's slot and declared type.
       const auto field = cpmml::bind::scope_resolve(*indexer, cf, f.field_name);
       f.field_index = field.index;
+      if (is_binary_metric() && cpmml::binary_measure::reads_as_string(field.datatype))
+        binary_string_fields.push_back(fields.size());
       field_types.push_back(field.datatype);
       fields.push_back(std::move(f));
     }
@@ -255,8 +261,13 @@ class ClusteringModel : public InternalModel {
       // typically a mean such as 0.37, and "1.0" is its true. That is what the
       // query's 0/1 is compared with, as in JPMML 1.7.7.
       //
-      // A string field's query value is its legacy code (switch 2,
-      // core/value.h), so its center has to
+      // Under a binary measure a string field's query value is the 0/1 of
+      // its boolean (binary_measure::of_string_value, B3, D15), so its center
+      // is that number too, as for any field: read as a number, or, for an
+      // Array of type="string", as the boolean its token reads as.
+      //
+      // Under the other measures a string field's query value is its legacy
+      // code (switch 2, core/value.h), so its center has to
       // become a string to be compared with it. JPMML 1.7.7 compares the
       // string with the text Java's Double.toString gives the center, whatever
       // the Array's type (int or real): the center 0 is the string "0.0", 7 is
@@ -270,8 +281,10 @@ class ClusteringModel : public InternalModel {
       c.centroid.resize(static_cast<Eigen::Index>(vals.size()));
       for (size_t i = 0; i < vals.size(); i++) {
         const Eigen::Index at = static_cast<Eigen::Index>(i);
-        if (field_types[i] != DataType::DataTypeValue::STRING) {
-          c.centroid[at] = ::to_double(vals[i]);
+        if (field_types[i] != DataType::DataTypeValue::STRING || is_binary_metric()) {
+          c.centroid[at] = string_array && is_binary_metric() && field_types[i] == DataType::DataTypeValue::STRING
+                               ? cpmml::binary_measure::of_text(vals[i])
+                               : ::to_double(vals[i]);
           continue;
         }
         const std::string center =
@@ -284,9 +297,14 @@ class ClusteringModel : public InternalModel {
     }
   }
 
-  // Callers have checked has_missing_input, so the present Qi sum to > 0.
+  // Callers have checked has_missing_input, so the present Qi sum to > 0;
+  // under a binary measure every field is present.
   Query build_query(const Sample& sample) const {
-    return ::build_query(sample, fields, [&](size_t i) { return missing_value_weight(i); });
+    Query query = ::build_query(sample, fields, [&](size_t i) { return missing_value_weight(i); });
+    for (const size_t i : binary_string_fields)
+      query.values[static_cast<Eigen::Index>(i)] =
+          cpmml::binary_measure::of_string_value(sample[fields[i].field_index].value);
+    return query;
   }
 
   // The query's dissimilarity to one center, shared with NearestNeighborModel

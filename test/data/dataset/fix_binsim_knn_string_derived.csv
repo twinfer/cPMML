@@ -1,0 +1,8 @@
+a,b,c,y_pred
+FALSE,0,1,12.0
+True,true,0,1.5
+false,false,0,3.0
+TRUE,0,true,1.5
+1,1,1,4.5
+0,TRUE,1,N/A
+yes,0,0,N/A

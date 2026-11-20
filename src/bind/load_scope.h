@@ -305,8 +305,9 @@ inline TypeId untyped_type(const XmlNode& node, const DataType& fallback) {
   return untyped_value_type(node.xml(), declared).value_or(type_id(fallback));
 }
 
-// The engine Value of a typed value. Float text is kept as its xs:double
-// reading by the callers (B4, P6), so a Float here is only a cast's result.
+// The engine Value of a typed value. A Float stays the IEEE single it is
+// (P6.2, B4): float text the caller read (a typed Constant, rounded once to
+// the nearest float) or a cast's result, never its xs:double reading.
 // It is cpmml::pack (core/value.h) but for the sentinels, which no document
 // constant can be.
 inline ::Value engine_value(const types::Value& v) {

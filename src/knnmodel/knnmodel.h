@@ -25,6 +25,7 @@
 #include "core/transformationdictionary.h"
 #include "core/value.h"
 #include "core/xmlnode.h"
+#include "math/binary_value.h"
 #include "math/distance.h"
 #include "regressionmodel/regressionscore.h"
 
@@ -86,6 +87,10 @@ class NearestNeighborModel : public InternalModel {
 
   std::vector<KnnInput> knn_inputs;
   std::vector<DataType> knn_input_types;  // the declared type of each KNNInput's field (load only)
+  // Under a binary measure, the KNNInputs of type string: their values, the
+  // query's and the training instances', count as the booleans they read as
+  // (binary_measure::of_string_value, B3, D15).
+  std::vector<size_t> binary_string_inputs;
   Eigen::MatrixXd training_features;  // [n_instances x n_features]
   std::vector<std::string> training_targets;
   std::vector<std::string> training_instance_ids;  // per-instance ID (instanceIdVariable)
@@ -239,6 +244,8 @@ class NearestNeighborModel : public InternalModel {
       // scope.resolve (P2.1): the field's slot and declared type.
       const auto field = cpmml::bind::scope_resolve(*indexer, ki, input.field_name);
       input.field_index = field.index;
+      if (is_binary_metric() && cpmml::binary_measure::reads_as_string(field.datatype))
+        binary_string_inputs.push_back(knn_inputs.size());
       knn_input_types.push_back(field.datatype);
       knn_inputs.push_back(std::move(input));
     }
@@ -318,6 +325,9 @@ class NearestNeighborModel : public InternalModel {
         Eigen::VectorXd fv(static_cast<Eigen::Index>(knn_inputs.size()));
         for (size_t i = 0; i < knn_inputs.size(); i++)
           fv[static_cast<Eigen::Index>(i)] = train_sample[knn_inputs[i].field_index].value.as_double();
+        for (const size_t i : binary_string_inputs)
+          fv[static_cast<Eigen::Index>(i)] =
+              cpmml::binary_measure::of_string_value(train_sample[knn_inputs[i].field_index].value);
         rows.push_back(fv);
       } else {
         // Direct KNNInputs: read feature columns directly from InlineTable,
@@ -330,6 +340,10 @@ class NearestNeighborModel : public InternalModel {
         for (size_t i = 0; i < feat_cols.size(); i++)
           fv[static_cast<Eigen::Index>(i)] =
               Value::document(xml_row.get_child(feat_cols[i]).value(), knn_input_types[i]).as_double();
+        // Under a binary measure a string cell is the boolean its text reads
+        // as, as the query's value is (B3, D15).
+        for (const size_t i : binary_string_inputs)
+          fv[static_cast<Eigen::Index>(i)] = cpmml::binary_measure::of_text(xml_row.get_child(feat_cols[i]).value());
         rows.push_back(fv);
       }
 
@@ -356,8 +370,13 @@ class NearestNeighborModel : public InternalModel {
   // --- Query vector ---
 
   // Every Qi is 1: a NearestNeighborModel has no MissingValueWeights.
+  // Under a binary measure every input is present (has_missing_input).
   Query build_query(const Sample& sample) const {
-    return ::build_query(sample, knn_inputs, [](size_t) { return 1.0; });
+    Query query = ::build_query(sample, knn_inputs, [](size_t) { return 1.0; });
+    for (const size_t i : binary_string_inputs)
+      query.values[static_cast<Eigen::Index>(i)] =
+          cpmml::binary_measure::of_string_value(sample[knn_inputs[i].field_index].value);
+    return query;
   }
 
   bool is_binary_metric() const { return ::is_binary_metric(metric); }

@@ -287,8 +287,9 @@ static void floats(t::ParseContext& ctx) {
     CHECK(fx && std::bit_cast<std::uint32_t>(fx->v) == std::bit_cast<std::uint32_t>(f), rule);
     CHECK(round_trips(v, TypeId::Float, ctx), rule + " (a float of a float slot round trips)");
   }
-  // A double that is not a float (the engine keeps float inputs as their
-  // xs:double reading, B4) reads as its nearest float.
+  // A double that is not a float (a float slot holds a types::Float since
+  // P6.2, B4; this is the guard for a Double that reaches one) reads as its
+  // nearest float.
   CHECK(cpmml::unpack<t::Float>(Value(0.1), TypeId::Float).v == 0.1f, rule);
   CHECK(cpmml::unpack<t::Float>(Value(1e300), TypeId::Float).v == std::numeric_limits<float>::infinity(),
         rule + " (overflow -> INF)");

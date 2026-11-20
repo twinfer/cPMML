@@ -1,0 +1,6 @@
+a,b,c,cluster
+1,1,0,K1
+true,false,false,K2
+0,1,true,K3
+false,0,1,K4
+n,0,0,N/A
