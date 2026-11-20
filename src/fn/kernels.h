@@ -696,10 +696,34 @@ inline Status is_in(const Bound& b, const ::Value* args, std::size_t n, ::Value&
 inline Status is_not_in(const Bound& b, const ::Value* args, std::size_t n, ::Value& out) {
   return boolean(!is_in_values(b, args, n), out);
 }
-// not: "Returns the boolean negation" of its boolean argument, read as today:
-// any non-zero double is true.
+// not: "Negates input boolean value" (BuiltinFunctions.html, not). The
+// argument is a boolean (`<ParameterField name="x" dataType="boolean"/>`;
+// ApplyNode refuses any other static type at load, B53, design item P4.8),
+// held as the double 1 or 0; it is true when that double is not 0.
 inline Status logical_not(const Bound&, const ::Value* args, std::size_t, ::Value& out) {
   return boolean(!(args[0].as_double() != 0.0), out);
+}
+// and, or (design item P4.8). BuiltinFunctions.html: "Evaluate the results of
+// two or more boolean values. and: true only if all input values are true,
+// false otherwise. or: true if a single input value is true, false only if
+// all input values are false." The inputs are booleans (ApplyNode refuses any
+// other static type at load), each true when the double it holds is not 0.
+// They are never missing here: the functions give no missing rule of their
+// own, so "any missing inputs to a built-in function will result in a
+// missing value being returned" (MissingRule::Propagate; ApplyNode returns
+// mapMissingTo or a missing result before the kernel), and no three-valued
+// logic applies: and(false, missing) is missing, not false. The spec's
+// three-valued tables are CompoundPredicate's (TreeModel.html), not these
+// functions'.
+inline Status logical_and(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
+  for (std::size_t i = 0; i < n; i++)
+    if (args[i].as_double() == 0.0) return boolean(false, out);
+  return boolean(true, out);
+}
+inline Status logical_or(const Bound&, const ::Value* args, std::size_t n, ::Value& out) {
+  for (std::size_t i = 0; i < n; i++)
+    if (args[i].as_double() != 0.0) return boolean(true, out);
+  return boolean(false, out);
 }
 
 // String edits (legacy::B2).
@@ -908,6 +932,8 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
     case Op::NormalPDF: return a::ternary<s::normal_pdf>;
     case Op::StdNormalCDF: return a::unary<s::std_normal_cdf>;
     case Op::StdNormalPDF: return a::unary<s::std_normal_pdf>;
+    case Op::And: return a::logical_and;
+    case Op::Or: return a::logical_or;
     case Op::None: break;
   }
   throw std::logic_error("fn::instantiate: no kernel for this function");
@@ -916,7 +942,8 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
 // The functions whose numeric arguments and result ApplyNode types (the
 // arithmetic, aggregate, mathematical and distribution functions), and the
 // comparisons, whose float arguments it narrows. The others (if, isMissing,
-// isNotMissing, not, the string functions) read their arguments as they are.
+// isNotMissing, not, and, or, the string functions) read their arguments as
+// they are.
 constexpr bool compares(Op op) {
   switch (op) {
     case Op::Equal:
@@ -939,6 +966,8 @@ constexpr bool numeric(Op op) {
     case Op::IsMissing:
     case Op::IsNotMissing:
     case Op::Not:
+    case Op::And:
+    case Op::Or:
     case Op::Replace:
     case Op::Matches:
     case Op::Uppercase:

@@ -210,7 +210,8 @@ class ApplyNode : public Expression {
  private:
   // The kernel of `sig`, after the load checks of the call: the arity (the
   // table's min_args/max_args, E-ARITY), for `if` the condition's static type
-  // (boolean, E-TYPE-BOOLEAN-MIXED, B53), and for the numeric functions and
+  // and for not, and, or every argument's (boolean, E-TYPE-BOOLEAN-MIXED,
+  // B53: P4.3c, P4.8), and for the numeric functions and
   // the comparisons the arguments' static types (bind::expression_type), a
   // string ordered against a number (§2.7, E-TYPE-ORDER-MIXED) and the
   // typing flags of `bound`; for concat the static type each argument is
@@ -235,6 +236,21 @@ class ApplyNode : public Expression {
       const cpmml::bind::StaticType type = cpmml::bind::expression_type(condition);
       if (type && *type != TypeId::Boolean)
         throw cpmml::ParsingException(cpmml::bind::if_condition_message(apply, *type));
+      return kernel;
+    }
+    if (sig.op == Op::Not || sig.op == Op::And || sig.op == Op::Or) {
+      // B53 (P4.8): not declares a boolean parameter, and and/or evaluate
+      // "two or more boolean values"; an argument of another static type is a
+      // load error, as for if's condition (D36). Unknown (nullopt) is left to
+      // the binder's report.
+      std::size_t i = 0;
+      for (pugi::xml_node argument : apply.xml().children()) {
+        if (argument.type() != pugi::node_element || std::strcmp(argument.name(), "Extension") == 0) continue;
+        i++;
+        const cpmml::bind::StaticType type = cpmml::bind::expression_type(argument);
+        if (type && *type != TypeId::Boolean)
+          throw cpmml::ParsingException(boolean_argument_message(apply, sig, i, *type));
+      }
       return kernel;
     }
     if (sig.op == Op::Concat) {
@@ -270,6 +286,24 @@ class ApplyNode : public Expression {
     bound.float_result = result == TypeId::Float;
     // P4.5 (D4): an integer result has its int64 kernel.
     return instantiate(sig.op, result == TypeId::Integer);
+  }
+
+  // The load error of a not, and or or argument (position `i`, from 1) whose
+  // static type is not boolean (design item P4.8, B53), in the words of
+  // bind::if_condition_message (P4.3c) and of the binder's report of the same
+  // check (Binder::check_param, fn::Param::Boolean), with each function's
+  // basis: 'E-TYPE-BOOLEAN-MIXED: Apply "and" in RegressionModel: argument 2
+  // of and is integer, where the parameter is declared boolean (...)'.
+  static std::string boolean_argument_message(const XmlNode& apply, const Signature& sig, std::size_t i,
+                                              cpmml::bind::TypeId type) {
+    const std::string name(sig.name);
+    const char* basis = sig.op == Op::Not
+                            ? "BuiltinFunctions.html: <ParameterField name=\"x\" dataType=\"boolean\"/>"
+                            : "BuiltinFunctions.html: and, or \"Evaluate the results of two or more boolean values\"";
+    return std::string(cpmml::bind::code::kTypeBooleanMixed) + ": " + cpmml::bind::apply_label(apply, name) +
+           ": argument " + std::to_string(i) + " of " + name + " is " + std::string(cpmml::bind::type_name(type)) +
+           ", where the parameter is declared boolean (" + basis +
+           "; Functions.html: boolean \"can not be mixed with other types\", Q7)";
   }
 
   // The field whose expression holds the Apply, for the record error of an

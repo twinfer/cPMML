@@ -1360,6 +1360,8 @@ static void arity() {
       {"greaterThan", 2, 2},
       {"greaterOrEqual", 2, 2},
       {"not", 1, 1},
+      {"and", 2, -1},
+      {"or", 2, -1},
       {"isIn", 2, -1},
       {"isNotIn", 2, -1},
       {"if", 2, 3},
@@ -1597,6 +1599,122 @@ static void if_condition() {
             .empty());
 }
 
+// Design item P4.8 (the rest of B53): not, and and or take boolean arguments.
+// BuiltinFunctions.html, not: "<DefineFunction name="not" ...>
+// <ParameterField name="x" dataType="boolean"/>"; and, or: "Evaluate the
+// results of two or more boolean values"; Functions.html: "boolean dataTypes
+// can not be mixed with other types", and "If the dataType for the
+// ParameterField is more restrictive than the expression dataType, the PMML
+// document is not valid" (Q7). An argument whose static type is a number or a
+// string fails the load with E-TYPE-BOOLEAN-MIXED, as if's condition does
+// (P4.3c, D36); the base build scored not(FieldRef integer) (false for 2, true
+// for 0) and refused and/or as unsupported. S2 differs between them: not's
+// ParameterField declares boolean, so an untyped Constant 1 inherits it; and
+// and or have no ParameterField (bind/typing.h parameter_type), so an untyped
+// "1" is an integer and "true" a string, both refused. JPMML 1.7.7 refuses
+// each number or string at evaluation (TypeCheckException "Expected boolean
+// value, got integer value") but accepts the values 1/0 and the strings
+// "true"/"false": a departure (D36's), the spec is followed.
+static void boolean_arguments() {
+  const std::string td =
+      R"(<DerivedField name="c" optype="categorical" dataType="boolean"><Apply function="greaterThan">)"
+      R"(<FieldRef field="d"/><Constant>0</Constant></Apply></DerivedField>)"
+      R"(<DerivedField name="di" optype="continuous" dataType="integer"><FieldRef field="i"/></DerivedField>)";
+  const std::string c = R"(<FieldRef field="c"/>)";
+  const auto call = [](const std::string& function, const std::string& args) {
+    return R"(<Apply function=")" + function + R"(">)" + args + "</Apply>";
+  };
+  const auto output_error = [&](const std::string& expression) {
+    return load_error(output_doc(transformed("boolean", expression), td));
+  };
+  const auto refused = [&](const std::string& expression, const std::string& function, int position,
+                           const std::string& type) {
+    const std::string error = output_error(expression);
+    const std::string want = "E-TYPE-BOOLEAN-MIXED: Apply \"" + function + "\" in RegressionModel: argument " +
+                             std::to_string(position) + " of " + function + " is " + type +
+                             ", where the parameter is declared boolean";
+    const bool ok = contains(error, want);
+    CHECK(ok);
+    if (!ok) std::cerr << "  " << expression << ": \"" << error << "\"\n";
+  };
+  const std::string mapvalues_int =
+      R"(<MapValues outputColumn="out" dataType="integer"><FieldColumnPair field="s" column="in"/>)"
+      R"(<InlineTable><row><in>a</in><out>1</out></row><row><in>b</in><out>0</out></row></InlineTable></MapValues>)";
+  // not: fields, typed Constants (0 and 1 included), an Apply, a MapValues.
+  refused(call("not", R"(<FieldRef field="i"/>)"), "not", 1, "integer");
+  refused(call("not", R"(<FieldRef field="d"/>)"), "not", 1, "double");
+  refused(call("not", R"(<FieldRef field="s"/>)"), "not", 1, "string");
+  refused(call("not", R"(<FieldRef field="di"/>)"), "not", 1, "integer");
+  refused(call("not", R"(<Constant dataType="integer">1</Constant>)"), "not", 1, "integer");
+  refused(call("not", R"(<Constant dataType="integer">0</Constant>)"), "not", 1, "integer");
+  refused(call("not", R"(<Constant dataType="string">true</Constant>)"), "not", 1, "string");
+  refused(call("not", R"(<Apply function="+"><FieldRef field="i"/><Constant>0</Constant></Apply>)"), "not", 1,
+          "integer");
+  refused(call("not", mapvalues_int), "not", 1, "integer");
+  refused(call("not", R"(<Extension extender="X" name="n" value="v"/><FieldRef field="i"/>)"), "not", 1, "integer");
+  // and, or: every argument is checked, at its position after Extension*.
+  refused(call("and", c + R"(<FieldRef field="i"/>)"), "and", 2, "integer");
+  refused(call("and", R"(<FieldRef field="d"/>)" + c), "and", 1, "double");
+  refused(call("or", c + c + R"(<FieldRef field="s"/>)"), "or", 3, "string");
+  refused(call("or", c + R"(<Extension extender="X" name="n" value="v"/><Constant dataType="integer">1</Constant>)"),
+          "or", 2, "integer");
+  refused(call("and", c + R"(<Constant dataType="string">true</Constant>)"), "and", 2, "string");
+  refused(call("or", c + mapvalues_int), "or", 2, "integer");
+  refused(call("and", c + R"(<Apply function="if">)" + c + "<Constant>1</Constant><Constant>0</Constant></Apply>"),
+          "and", 2, "integer");
+  // S2: and and or declare no ParameterField, so untyped Constants are inferred.
+  refused(call("and", c + "<Constant>1</Constant>"), "and", 2, "integer");
+  refused(call("or", "<Constant>true</Constant>" + c), "or", 1, "string");
+  // In a TransformationDictionary DerivedField.
+  CHECK(contains(load_error(output_doc("", td + R"(<DerivedField name="t" optype="categorical" dataType="boolean">)" +
+                                               call("or", c + R"(<FieldRef field="d"/>)") + "</DerivedField>")),
+                 "E-TYPE-BOOLEAN-MIXED: Apply \"or\" in the TransformationDictionary: argument 2 of or is double"));
+  // Controls: boolean arguments load and score; the result is read through
+  // if(result, "true", "false"), a string OutputField (a missing result, a
+  // missing condition, gives no "o").
+  const auto scored = [&](const std::string& expression, const std::string& s, const std::string& d) {
+    cpmml::Input input;
+    input["s"] = s;
+    input["i"] = "1";
+    if (!d.empty()) input["d"] = d;
+    try {
+      const cpmml::Model model = load(output_doc(
+          transformed("string", R"(<Apply function="if">)" + expression +
+                                    R"(<Constant dataType="string">true</Constant><Constant dataType="string">false</Constant></Apply>)"),
+          td));
+      const auto out = model.evaluate(input).str_outputs();
+      const auto it = out.find("o");
+      return it == out.end() ? std::string("<missing>") : it->second;
+    } catch (const std::exception& e) {
+      return std::string("ERROR: ") + e.what();
+    }
+  };
+  const std::string t = R"(<Constant dataType="boolean">true</Constant>)";
+  const std::string f = R"(<Constant dataType="boolean">false</Constant>)";
+  CHECK(scored(call("not", c), "a", "1") == "false");
+  CHECK(scored(call("not", c), "a", "-1") == "true");
+  // S2: not's parameter is declared boolean, so an untyped 1 or false is one.
+  CHECK(scored(call("not", "<Constant>1</Constant>"), "a", "1") == "false");
+  CHECK(scored(call("not", "<Constant>false</Constant>"), "a", "1") == "true");
+  CHECK(scored(call("and", c + t), "a", "1") == "true");
+  CHECK(scored(call("and", c + t), "a", "-1") == "false");
+  CHECK(scored(call("and", t + t + t + t + c), "a", "1") == "true");  // five: ArgBuffer on the heap
+  CHECK(scored(call("and", t + t + f + t + c), "a", "1") == "false");
+  CHECK(scored(call("or", c + f), "a", "1") == "true");
+  CHECK(scored(call("or", c + f), "a", "-1") == "false");
+  CHECK(scored(call("or", f + f + f + f + c), "a", "1") == "true");
+  CHECK(scored(call("or", c + R"(<Apply function="isMissing"><FieldRef field="s"/></Apply>)"), "a", "-1") == "false");
+  CHECK(scored(call("not", call("or", c + call("and", c + f))), "a", "-1") == "true");
+  // A missing input gives missing ("any missing inputs to a built-in function
+  // will result in a missing value being returned"), with no three-valued
+  // logic: or(missing, true) and and(missing, false) are missing, and
+  // mapMissingTo is returned instead.
+  CHECK(scored(call("or", c + t), "a", "") == "<missing>");
+  CHECK(scored(call("and", c + f), "a", "") == "<missing>");
+  CHECK(scored(R"(<Apply function="and" mapMissingTo="true">)" + c + f + "</Apply>", "a", "") == "true");
+  CHECK(scored(R"(<Apply function="or" defaultValue="false">)" + c + t + "</Apply>", "a", "") == "false");
+}
+
 // The writer whose text the reader takes back: predictions travel between
 // evaluators as Java text (java_format.h: ensemble combination, Targets, KNN),
 // read with from_java_text, so every double -- non-finite included -- must
@@ -1725,6 +1843,7 @@ int main() {
   ordering();
   arity();
   if_condition();
+  boolean_arguments();
   surrogate_errors();
   writer_round_trip();
 

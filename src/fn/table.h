@@ -19,7 +19,7 @@
  * core/builtinfunctions.h).
  *
  * Rows cover every function of BuiltinFunctions.html, including those the
- * engine refuses today (and, or, isValid, isNotValid, formatNumber,
+ * engine refuses today (isValid, isNotValid, formatNumber,
  * normalIDF, stdNormalIDF, the date functions): typing them is independent of
  * evaluating them. `engine` records where the engine stands (§4.2 status);
  * `op` names the kernel, and a row has one exactly when the engine evaluates
@@ -29,8 +29,9 @@
  * table core/builtinfunctions.h had, because the load error for a function
  * the engine refuses lists them in that order ('unsupported value "and" for
  * Apply@function; cPMML supports +, -, *, ...'), and that text is a cell of
- * the fixture dumps that P4.1 keeps unchanged. Then the rows the engine
- * refuses, in that table's order too.
+ * the fixture dumps that P4.1 keeps unchanged; the functions added since
+ * (and, or: design item P4.8) follow them, so that list only grows at its
+ * end. Then the rows the engine refuses, in that table's order too.
  *
  * Spec basis of the columns:
  *
@@ -158,6 +159,8 @@ enum class Op : std::uint8_t {
   NormalPDF,
   StdNormalCDF,
   StdNormalPDF,
+  And,  // P4.8
+  Or,   // P4.8
 };
 
 inline constexpr std::uint8_t kVariadic = 255;
@@ -293,11 +296,13 @@ inline constexpr Signature kBuiltins[] = {
                   types::TypeId::Double),
     detail::unary("stdNormalCDF", Op::StdNormalCDF, Param::Double, Result::Fixed, types::TypeId::Double),
     detail::unary("stdNormalPDF", Op::StdNormalPDF, Param::Double, Result::Fixed, types::TypeId::Double),
+    // and, or (design item P4.8): "Evaluate the results of two or more
+    // boolean values"; no missing rule of their own, so "any missing inputs
+    // ... will result in a missing value being returned" (Propagate)
+    detail::variadic("and", Op::And, 2, Param::Boolean, types::TypeId::Boolean),
+    detail::variadic("or", Op::Or, 2, Param::Boolean, types::TypeId::Boolean),
 
     // ---- refused by the engine (load error), typed by the binder
-    // and, or
-    detail::variadic("and", Op::None, 2, Param::Boolean, types::TypeId::Boolean, Engine::P4),
-    detail::variadic("or", Op::None, 2, Param::Boolean, types::TypeId::Boolean, Engine::P4),
     // isValid, isNotValid
     detail::receive("isValid", Op::None, Param::FieldRef, Engine::P7),
     detail::receive("isNotValid", Op::None, Param::FieldRef, Engine::P7),

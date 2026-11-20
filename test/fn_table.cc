@@ -115,8 +115,9 @@ static void table() {
             rule);
     }
   }
-  // The 59 functions core/builtinfunctions.h evaluated, the 11 it refused.
-  CHECK(evaluated == 59, "every function cPMML evaluated before P4.1 is in the table with a kernel");
+  // The 59 functions core/builtinfunctions.h evaluated, and and or (P4.8);
+  // the 9 others it refused.
+  CHECK(evaluated == 61, "every function cPMML evaluated before P4.1, and and or, has a kernel");
   CHECK(std::size(fn::kBuiltins) == 70, "BuiltinFunctions.html lists 70 functions");
 
   // The load errors the engine gave (core/builtinfunctions.h from_string),
@@ -137,13 +138,14 @@ static void table() {
       "isNotMissing, equal, notEqual, lessThan, lessOrEqual, greaterThan, greaterOrEqual, isIn, isNotIn, replace, "
       "matches, uppercase, lowercase, substring, trimBlanks, concat, stringLength, median, product, threshold, "
       "modulo, not, expm1, ln1p, hypot, rint, sin, asin, sinh, cos, acos, cosh, tan, atan, tanh, erf, normalCDF, "
-      "normalPDF, stdNormalCDF, stdNormalPDF";
-  for (const char* refused : {"and", "or", "isValid", "isNotValid", "normalIDF", "stdNormalIDF", "formatNumber",
+      "normalPDF, stdNormalCDF, stdNormalPDF, and, or";
+  for (const char* refused : {"isValid", "isNotValid", "normalIDF", "stdNormalIDF", "formatNumber",
                               "formatDatetime", "dateDaysSinceYear", "dateSecondsSinceYear",
                               "dateSecondsSinceMidnight"})
     CHECK(message_of<cpmml::ParsingException>([&] { fn::engine_row(refused); }) ==
               "unsupported value \"" + std::string(refused) + "\" for Apply@function; cPMML supports " + supported,
-          std::string(refused) + ": refused at load, as before P4.1");
+          std::string(refused) + ": refused at load, as before P4.1 (and and or are evaluated since P4.8, "
+                                 "at the end of the list)");
   CHECK(&fn::engine_row("+") == fn::find("+"), "the engine reads the binder's row");
 }
 
@@ -215,6 +217,32 @@ static void kernels() {
   CHECK(number("isIn", nums({2, 1, 2})) == 1 && number("isNotIn", nums({2, 1, 2})) == 0 &&
             number("isIn", nums({2, 1, 3})) == 0 && number("isNotIn", nums({2, 1, 3})) == 1,
         "isIn, isNotIn");
+  // and, or (P4.8): "and: true only if all input values are true, false
+  // otherwise. or: true if a single input value is true, false only if all
+  // input values are false"; not: "Negates input boolean value". Every
+  // combination of two and of three booleans, and five (more than ArgBuffer
+  // holds inline, though the kernel reads a plain array).
+  for (int bits = 0; bits < 8; bits++) {
+    const double a = bits & 1, b = (bits >> 1) & 1, c = (bits >> 2) & 1;
+    const std::string which = "over " + std::to_string(bits);
+    CHECK(number("and", nums({a, b})) == (a && b ? 1 : 0), "and of two " + which);
+    CHECK(number("or", nums({a, b})) == (a || b ? 1 : 0), "or of two " + which);
+    CHECK(number("and", nums({a, b, c})) == (a && b && c ? 1 : 0), "and of three " + which);
+    CHECK(number("or", nums({a, b, c})) == (a || b || c ? 1 : 0), "or of three " + which);
+  }
+  CHECK(number("and", nums({1, 1, 1, 1, 1})) == 1 && number("and", nums({1, 1, 1, 1, 0})) == 0, "and of five");
+  CHECK(number("or", nums({0, 0, 0, 0, 0})) == 0 && number("or", nums({0, 0, 0, 0, 1})) == 1, "or of five");
+  CHECK(number("not", nums({1})) == 0 && number("not", nums({0})) == 1, "not");
+  // The rows: boolean parameters, a boolean result, two or more arguments,
+  // and a missing input propagates (no rule of their own).
+  for (const char* name : {"and", "or"}) {
+    const fn::Signature* sig = fn::find(name);
+    CHECK(sig->min_args == 2 && sig->max_args == fn::kVariadic && sig->param(0) == fn::Param::Boolean &&
+              sig->param(7) == fn::Param::Boolean && sig->result == fn::Result::Fixed &&
+              sig->fixed == t::TypeId::Boolean && sig->missing == fn::MissingRule::Propagate &&
+              sig->engine == fn::Engine::Today,
+          std::string(name) + ": the row");
+  }
 }
 
 static void legacy_switches(Indexer& indexer) {
