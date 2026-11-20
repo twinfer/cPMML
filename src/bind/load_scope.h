@@ -223,7 +223,7 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
 // text) -> load error") is what Value::document(text, DataType) computes in
 // the engine's storage, where every number is read as an xs:double: an
 // integer field's "33.0" (rule 2) is the number 33 either way, and float text
-// is not narrowed until P6 (B4, switch 1). So a value of a field is
+// is the float it reads as (P6.2 deleted switch 1, B4). So a value of a field is
 // Value::document(text, the field's type): what P2.2 changes is which type
 // that is (the field's, from scope_resolve, not the enclosing DerivedField's).
 
@@ -307,9 +307,19 @@ inline ::Value document_constant(const XmlNode& node, const std::string& what, c
                                   "\" is not a value of type " + std::string(type_name(type)) + " (§3.4)");
   const TypeId to = type_id(store);
   const auto kind = [](TypeId t) { return t == TypeId::String ? 0 : t == TypeId::Boolean ? 1 : 2; };
-  // Same kind: the text as the engine reads it in `store` (a float's text
-  // keeps its double reading, B4; an integer is a double).
-  if (kind(type) == kind(to)) return ::Value::document(text, store);
+  // Same kind: the text as the engine reads it in `store` (an integer is a
+  // double). A float and another number type cast at load as §2.6 casts
+  // (P6.2, B4): float -> double "exact", the float the text reads as,
+  // widened; integer, double -> float "IEEE round to nearest" of the double.
+  if (kind(type) == kind(to)) {
+    if (type == TypeId::Float && to != TypeId::Float) {
+      const double widened = static_cast<double>(std::get<types::Float>(v).v);
+      return to == TypeId::Integer ? ::Value::integer_slot(widened) : ::Value(widened);
+    }
+    if (to == TypeId::Float && type != TypeId::Float)
+      return ::Value(types::Float{types::narrow_to_float(::to_double(text))});
+    return ::Value::document(text, store);
+  }
   std::string scratch;
   const types::Value cast = types::cold::cast(ColdPathIssuer::make(), to, v, ctx, scratch);
   if (types::is_invalid(cast) || types::is_missing(cast))

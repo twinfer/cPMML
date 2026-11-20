@@ -222,8 +222,8 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
   // A value of `field` as input text that reads back as the same value.
   static std::string input_text(const MiningField& field, const Value& value) {
     if (field.datatype.value == DataType::DataTypeValue::STRING) return std::string(value.text());
-    // A float is carried as a double (MiningField::parse_input), so it is
-    // written as one: Float.toString would round it.
+    // A float is written as the double it widens to, which reads back as the
+    // same float (MiningField::parse_input rounds it to the nearest float).
     const java::Kind kind = java_kind(field.datatype);
     return java::text({value.as_double(), kind == java::Kind::FLOAT ? java::Kind::DOUBLE : kind});
   }

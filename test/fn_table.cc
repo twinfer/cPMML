@@ -1327,7 +1327,27 @@ static void declared_casts(Indexer& indexer) {
   CHECK(fn::DeclaredCast(TypeId::Float, TypeId::Double).op == Op::None, "float -> double: exact");
   CHECK(fn::DeclaredCast(TypeId::Boolean, TypeId::Integer).op == Op::None, "boolean -> integer: 1, 0 as held");
   CHECK(fn::DeclaredCast(TypeId::Boolean, TypeId::Double).op == Op::None, "boolean -> double: 1, 0 as held");
-  CHECK(fn::DeclaredCast(TypeId::Double, TypeId::Float).op == Op::None, "double -> float: the caller narrows");
+  // P6.2: §2.6 "double -> float: IEEE round to nearest; overflow -> ±INF,
+  // underflow -> 0" (XML Schema Part 2 §3.2.4: an IEEE single).
+  for (const TypeId t : {TypeId::Integer, TypeId::Double, TypeId::Boolean})
+    CHECK(fn::DeclaredCast(t, TypeId::Float).op == Op::NumberToFloat, "integer, double, boolean -> float");
+  {
+    const fn::DeclaredCast to_float(TypeId::Double, TypeId::Float);
+    Value v(0.1);
+    CHECK(to_float.apply(v) && std::holds_alternative<cpmml::types::Float>(v.typed()) &&
+              v.as_double() == 0.100000001490116119384765625,
+          "double -> float: the nearest float, a Float");
+    for (const auto& [d, f] : std::initializer_list<std::pair<double, double>>{
+             {1e300, inf}, {-1e300, -inf}, {1e-300, 0.0}, {16777217.0, 16777216.0}}) {
+      double x = d;
+      CHECK(to_float.apply_number(x) && x == f, "apply_number: " + std::to_string(d) + " rounds to the float " +
+                                                    std::to_string(f));
+    }
+    Value s = Value::string("0.1");
+    CHECK(fn::DeclaredCast(TypeId::String, TypeId::Float).apply(s) &&
+              std::holds_alternative<cpmml::types::Float>(s.typed()) && s.as_double() == 0.100000001490116119384765625,
+          "string -> float: the strict reading, a Float");
+  }
   CHECK(fn::DeclaredCast(TypeId::Double, TypeId::Integer).op == Op::NumberToInteger, "double -> integer");
   CHECK(fn::DeclaredCast(TypeId::Float, TypeId::Integer).op == Op::NumberToInteger, "float -> integer");
   CHECK(fn::DeclaredCast(TypeId::Integer, TypeId::Boolean).op == Op::NumberToBoolean, "integer -> boolean");

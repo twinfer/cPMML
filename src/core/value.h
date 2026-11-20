@@ -32,9 +32,11 @@
  * §7 P5).
  *
  * A Value holds a types::Value: Missing, or a value of one PMML dataType
- * (Integer, Double, Boolean, String; Float is not stored yet, switch 1
- * below). Numbers and booleans are the value itself; a String is a pointer to
- * the StringRep of its text, which is one of
+ * (Integer, Float, Double, Boolean, String). Numbers and booleans are the
+ * value itself (a float is an IEEE single since P6.2: XML Schema Part 2
+ * §3.2.4, "float is patterned after the IEEE single-precision 32-bit floating
+ * point type"); a String is a pointer to the StringRep of its text, which is
+ * one of
  *
  *   - the document's StringPool (DocumentStrings::pool): every string the
  *     load names, interned in the order the load names them, so two pooled
@@ -44,13 +46,12 @@
  *     pool lacks (an input the document never names, a string a function
  *     builds), or the document's load arena for a string the load edits.
  *
- * There is no Indexer string map any more: the pool is that map (§2.3). Two
- * compatibility switches keep today's semantics, so that this representation
- * changes no result (P5 is behaviour-preserving); each is one place below
- * that one P6 commit deletes:
+ * There is no Indexer string map any more: the pool is that map (§2.3). P5
+ * kept today's semantics with two compatibility switches, each one place
+ * that one P6 commit deletes. Switch 1 (legacy::float_value: a float stored
+ * as the Double it was read as, B4, B5) was deleted by P6.2: a float is a
+ * types::Float. What remains:
  *
- *   (1) legacy::float_value: a float is stored as the Double it was read as
- *       (B4, B5; P6.2 stores a Float).
  *   (2) legacy (LegacyCompare): order, and equality but for two strings,
  *       compare as_double(), and a String's as_double() is its legacy code:
  *       its rep's pool id, -1 for a string the pool lacks (B18, the order of
@@ -207,6 +208,8 @@ class Value {
   // A double (and the old storage's every number).
   explicit Value(const double number) : v_(cpmml::types::Double{number}) {}
   explicit Value(const cpmml::types::Integer number) : v_(number) {}
+  // A float (XSD float, an IEEE single; P6.2 deleted switch 1).
+  explicit Value(const cpmml::types::Float number) : v_(number) {}
   explicit Value(const cpmml::types::Boolean flag) : v_(flag) {}
 
   // The string `text` in this thread's StringScope: its pooled rep, or one
@@ -229,9 +232,10 @@ class Value {
 
   // A value of `datatype` read from its document text (an attribute, an
   // Array member, a table cell), as the load always read it: a string is
-  // the string; a boolean the XSD boolean; a number the xs:double reading
-  // (switch 1 for a float; an integer field's "2.5" is the double, §3.4 K1
-  // rule 2). Malformed text throws ParsingException, which at load is a load
+  // the string; a boolean the XSD boolean; a float the XSD float reading (the
+  // float closest to the decimal, ±INF beyond the range: XML Schema Part 2
+  // §3.2.4, P6.2); a double or integer the xs:double reading (an integer
+  // field's "2.5" is the double, §3.4 K1 rule 2). Malformed text throws ParsingException, which at load is a load
   // error. Inputs do not come here (MiningField::parse_input).
   static Value document(std::string_view text, const DataType& datatype);
 
@@ -273,6 +277,12 @@ class Value {
     if (is_missing()) throw std::logic_error("Value::set_double on a missing value");
     if (const auto* s = std::get_if<cpmml::types::String>(&v_)) text_ = s->rep;
     v_ = cpmml::types::Double{number};
+  }
+  // The same for the float `number` (a cast to float, §2.6).
+  inline void set_float(const float number) {
+    if (is_missing()) throw std::logic_error("Value::set_float on a missing value");
+    if (const auto* s = std::get_if<cpmml::types::String>(&v_)) text_ = s->rep;
+    v_ = cpmml::types::Float{number};
   }
   // The value keeps what it is and carries `new_text` (a string becomes the
   // string of that text, with its canonical rep).
@@ -374,10 +384,6 @@ static_assert(sizeof(Value) <= 32);
 
 namespace cpmml::legacy {
 
-// Switch 1 (design P5, deleted by P6.2): a float is stored as the Double it
-// was read as, not narrowed (B4, B5).
-inline ::Value float_value(const double read_as_double) { return ::Value(read_as_double); }
-
 // Switch 2 (design P5, LegacyCompare; P6.1 took its string equality, P6.3
 // deletes the rest): the double a Value is compared by. A number or boolean
 // is itself; a string is its code (Value::legacy_code), so a string equals
@@ -453,8 +459,19 @@ inline Value Value::document(std::string_view text, const DataType& datatype) {
         throw cpmml::ParsingException("\"" + std::string(text) + "\" is not a valid boolean (true, false, 1 or 0)");
       return Value(cpmml::types::Boolean{parsed});
     }
-    case DataType::DataTypeValue::FLOAT:
-      return cpmml::legacy::float_value(::to_double(text));
+    case DataType::DataTypeValue::FLOAT: {
+      // XML Schema Part 2 §3.2.4: "A literal in the lexical space
+      // representing a decimal number d maps to the normalized value in the
+      // value space of float that is closest to d"; XML Schema 1.1 Part 2
+      // E.1 floatLexicalMap: "Set nV to floatingPointRound(nV, 24, -149,
+      // 104) when nV is not zero. (floatingPointRound may nonetheless return
+      // zero, or INF or -INF.)" (types::detail::read_float: the decimal
+      // rounded once, to the float; beyond the float range ±INF).
+      float parsed = 0;
+      if (!cpmml::types::detail::read_float(text, parsed))
+        throw cpmml::ParsingException("\"" + std::string(text) + "\" is not a valid float");
+      return Value(cpmml::types::Float{parsed});
+    }
     case DataType::DataTypeValue::INTEGER:
       return Value::integer_slot(::to_double(text));
     case DataType::DataTypeValue::DOUBLE:
@@ -464,12 +481,15 @@ inline Value Value::document(std::string_view text, const DataType& datatype) {
 }
 
 // A Value as text, as JPMML writes it (utils/java_format.h): nothing for a
-// missing value, the text of a string, Double.toString of a number. A caller
-// that knows the type writes java::Number{v.as_double(), kind} instead
-// (OutputField does, from the expression's type).
+// missing value, the text of a string, Float.toString of a float,
+// Double.toString of any other number. A caller that knows the type writes
+// java::Number{v.as_double(), kind} instead (OutputField does, from the
+// expression's type).
 inline std::string java_text(const Value& value) {
   if (value.is_missing()) return std::string();
   if (!value.text().empty()) return std::string(value.text());
+  if (const auto* f = std::get_if<cpmml::types::Float>(&value.typed()))
+    return java::float_text(static_cast<double>(f->v));
   return java::double_text(value.as_double());
 }
 
@@ -500,7 +520,8 @@ struct std::formatter<Value, char> {
 // type is itself (std::get). Otherwise the number it holds is cast (§2.6,
 // types::CastTo), as the old storage, which held every number as a double,
 // was read: Double the double (-0, NaN, INF kept); Float its IEEE round to
-// nearest (a float is stored as the double, switch 1); Integer the value if
+// nearest (a value of a float slot that is no Float, a double the engine
+// computed); Integer the value if
 // integral and within int64, else Invalid(NotIntegral) or Invalid(Overflow)
 // (Functions.html: "a double expression can not be implicitly cast as an
 // integer"); Boolean 1 -> true, 0 -> false, else Invalid(NoCast) (the XSD
@@ -516,7 +537,7 @@ struct std::formatter<Value, char> {
 // type is a programming error (std::logic_error), never a default.
 //
 // pack(x) is the Value of a typed value: a number or boolean itself (a Float
-// as its double, switch 1), Missing Value(). A String is the string of its
+// a Float since P6.2), Missing Value(). A String is the string of its
 // text in this thread's StringScope (Value::string: the pooled rep and its
 // code, or an arena's and the unseen code), not the rep it came with: the
 // binder reads document text with pools of its own (bind::document_constant),
@@ -590,7 +611,7 @@ T unpack(const ::Value& v, const types::TypeId static_type, types::ParseContext&
 
 inline ::Value pack(const types::Value& x) {
   if (const auto* i = std::get_if<types::Integer>(&x)) return ::Value(*i);
-  if (const auto* f = std::get_if<types::Float>(&x)) return legacy::float_value(static_cast<double>(f->v));
+  if (const auto* f = std::get_if<types::Float>(&x)) return ::Value(*f);
   if (const auto* d = std::get_if<types::Double>(&x)) return ::Value(d->v);
   if (const auto* b = std::get_if<types::Boolean>(&x)) return ::Value(*b);
   if (const auto* s = std::get_if<types::String>(&x)) return ::Value::string(s->text());

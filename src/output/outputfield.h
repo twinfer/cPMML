@@ -192,6 +192,14 @@ class OutputField {
             break;
           }
         }
+        // A float OutputField holds a float (P6.2): its cast rounds a double
+        // to the nearest float, and a value read as the float it is stays.
+        if (datatype.value == DataType::DataTypeValue::FLOAT) {
+          const float f = cpmml::types::narrow_to_float(v);
+          v = static_cast<double>(f);
+          into.num_outputs[name] = v;
+          return Value(cpmml::types::Float{f});
+        }
         into.num_outputs[name] = v;
         return Value(v);
       }

@@ -67,11 +67,14 @@ class DerivedField {
       // invalid result for the record (InvalidValueException naming the
       // field)"; JPMML 1.7.7: TypeCheckException "Expected integer value,
       // got double value".
+      // A float field's value is a Float (P6.2): the cast makes one from any
+      // other number type (fn::DeclaredCast, Op::NumberToFloat); a float
+      // expression whose value the engine holds as a double (a FieldRef to a
+      // float target or OutputField slot) is rounded here, as §2.6 "double ->
+      // float: IEEE round to nearest" (a no-op on a value that is a float).
       if (cast.op != cpmml::fn::DeclaredCast::Op::None && !cast.apply(v)) raise_invalid(v);
-      // Quantize to float32 when DerivedField declares dataType="float", to avoid precision issues in case of float32
-      // quantization in the original model (§2.6 "double -> float: IEEE round to nearest")
-      if (datatype.value == DataType::DataTypeValue::FLOAT)
-        v.set_double(static_cast<double>(static_cast<float>(v.as_double())));
+      if (datatype.value == DataType::DataTypeValue::FLOAT && !std::holds_alternative<cpmml::types::Float>(v.typed()))
+        v.set_float(cpmml::types::narrow_to_float(v.as_double()));
     }
     sample.change_value(index, v);
   }

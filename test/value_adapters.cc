@@ -168,15 +168,36 @@ static void typed_storage() {
         "malformed number text is a ParsingException (a load error)");
 }
 
-// The two compatibility switches (design P5), one place each.
+// The compatibility switches (design P5), one place each; switch 1 is gone
+// (P6.2).
 static void switches() {
-  // Switch 1: a float is stored as the Double it was read as (B4, P6.2).
+  // P6.2 deleted switch 1: a float is a Float. XML Schema Part 2 §3.2.4:
+  // "float is patterned after the IEEE single-precision 32-bit floating
+  // point type"; a decimal "maps to the normalized value in the value space
+  // of float that is closest to d"; XML Schema 1.1 E.1 floatLexicalMap:
+  // floatingPointRound "may nonetheless return zero, or INF or -INF".
+  const std::string f_rule = "P6.2: float text is the float closest to it (XSD 3.2.4)";
   const Value f = Value::document("0.1", DataType::DataTypeValue::FLOAT);
-  CHECK(std::holds_alternative<t::Double>(f.typed()) && f.as_double() == 0.1,
-        "switch 1: float text is kept as its xs:double reading, not narrowed");
-  CHECK(cpmml::pack(t::Float{0.1f}).as_double() == static_cast<double>(0.1f) &&
-            std::holds_alternative<t::Double>(cpmml::pack(t::Float{0.1f}).typed()),
-        "switch 1: pack(Float) is the Double of the float");
+  CHECK(std::holds_alternative<t::Float>(f.typed()) && f.as_double() == 0.100000001490116119384765625, f_rule);
+  CHECK(Value::document("3.4e39", DataType::DataTypeValue::FLOAT).as_double() ==
+            std::numeric_limits<double>::infinity(),
+        f_rule + " (beyond the float range: INF)");
+  CHECK(Value::document("1e-50", DataType::DataTypeValue::FLOAT).as_double() == 0.0, f_rule + " (underflow: 0)");
+  CHECK(Value::document("16777217", DataType::DataTypeValue::FLOAT).as_double() == 16777216.0,
+        f_rule + " (2^24 + 1 is no float: the even neighbour)");
+  // 0.500000029802322387695312500 is the exact midpoint of the floats 0.5 and
+  // 0.50000006; one more digit is above it. Read through a double first, the
+  // second literal would round to the midpoint and then to even (0.5): the
+  // decimal is rounded once, to the float.
+  CHECK(Value::document("0.5000000298023223876953125000001", DataType::DataTypeValue::FLOAT).as_double() ==
+            0.500000059604644775390625,
+        f_rule + " (rounded once, not through a double)");
+  CHECK(throws<cpmml::ParsingException>([] { Value::document("x", DataType::DataTypeValue::FLOAT); }),
+        "malformed float text is a ParsingException (a load error)");
+  CHECK(std::holds_alternative<t::Float>(cpmml::pack(t::Float{0.1f}).typed()) &&
+            cpmml::pack(t::Float{0.1f}).as_double() == 0.100000001490116119384765625,
+        "P6.2: pack(Float) is the Float");
+  CHECK(::java_text(Value(t::Float{0.1f})) == "0.1", "P6.2: a Float is written as Float.toString writes it");
 
   // P6.1: two strings compare by text (pooled strings by pointer, any other
   // pair by its texts); an edit is the string of its new text. Switch 2's

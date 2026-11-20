@@ -21,6 +21,10 @@
  *   from -> to                    result                         failure
  *   T -> T, integer/float/boolean
  *     -> double, boolean -> integer the value (no work)            --
+ *   integer, double, boolean
+ *     -> float                    the IEEE round to nearest, a     --
+ *                                 Float (overflow ±INF, underflow
+ *                                 0; P6.2)
  *   float, double -> integer      the value if integral, in int64  NotIntegral, Overflow
  *                                 (a -0 is the integer 0)
  *   integer, float, double
@@ -37,8 +41,12 @@
  *
  * ("Functions.html: a double expression can not be implicitly cast as an
  * integer"; XML Schema Part 2 §3.2.2.1 boolean "{true, false, 1, 0}".)
- * double -> float is the caller's (DerivedField narrows every value of a
- * float field, as it did before P4.7; OutputField leaves it, B5, P6/P8).
+ * Since P6.2 (B4, B5 casts) a cast to float is this class's: XML Schema
+ * Part 2 §3.2.4, "float is patterned after the IEEE single-precision 32-bit
+ * floating point type", so a float DerivedField, OutputField or target holds
+ * the double rounded to the nearest float (§2.6 "double -> float: IEEE round
+ * to nearest; overflow -> ±INF, underflow -> 0"; JPMML 1.7.7: 1e300 is
+ * Infinity).
  *
  * Q2 (decided (b)): "a narrowing cast that fails at run time is an invalid
  * result for the record (InvalidValueException naming the field or target)":
@@ -97,6 +105,7 @@ class DeclaredCast {
     None,             // identity, or a cast with nothing to do over the old storage
     NumberToInteger,  // float, double -> integer
     NumberToBoolean,  // integer, float, double -> boolean
+    NumberToFloat,    // integer, double, boolean -> float
     ToString,         // integer, float, double, boolean -> string
     StringToNumber,   // string -> integer, float, double, boolean
   };
@@ -128,6 +137,9 @@ class DeclaredCast {
         return to_integer(v);
       case Op::NumberToBoolean:
         return to_boolean(v);
+      case Op::NumberToFloat:
+        v.set_float(types::narrow_to_float(v.as_double()));
+        return true;
       case Op::ToString:
         return to_string(v);
       case Op::StringToNumber:
@@ -144,6 +156,9 @@ class DeclaredCast {
         return integer_of(d);
       case Op::NumberToBoolean:
         return boolean_of(d);
+      case Op::NumberToFloat:
+        d = static_cast<double>(types::narrow_to_float(d));
+        return true;
       case Op::None:
         return true;
       case Op::ToString:
@@ -209,9 +224,11 @@ class DeclaredCast {
       case TypeId::Boolean:
         return from == TypeId::String ? Op::StringToNumber : Op::NumberToBoolean;
       case TypeId::Float:
+        // integer, double, boolean -> float: the nearest float (P6.2).
+        return from == TypeId::String ? Op::StringToNumber : Op::NumberToFloat;
       case TypeId::Double:
-        // integer, float, boolean -> double, and every number -> float: the
-        // double is the value (the float narrowing is the caller's).
+        // integer, float, boolean -> double: the value (a float widens
+        // exactly wherever it is read as a double).
         return from == TypeId::String ? Op::StringToNumber : Op::None;
       case TypeId::Missing:
       case TypeId::Invalid:
@@ -283,7 +300,8 @@ class DeclaredCast {
     if (!v.has_numeric_text()) {
       // The empty string has no number (see the note): parse_text("") fails.
       if (!parse_text(v.text(), d)) return false;
-      v = ::Value(d);
+      // A float is the Float of the text (parse_text read it as one, P6.2).
+      v = to == TypeId::Float ? ::Value(types::Float{static_cast<float>(d)}) : ::Value(d);
       return true;
     }
     d = v.text_number();
@@ -294,6 +312,9 @@ class DeclaredCast {
       case TypeId::Boolean:
         if (!boolean_of(d)) return false;
         break;
+      case TypeId::Float:
+        v = ::Value(types::Float{types::narrow_to_float(d)});
+        return true;
       default:
         break;
     }

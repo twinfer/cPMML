@@ -75,9 +75,9 @@ JPMML gives up on the whole file at the first row it refuses.
 |---|---|---|---|---|
 | fix_string_unseen_equal | **registered by P6.1** (moved to `test/data/`, as are its files; base 92994f3 FAIL `predicted: same  expected: diff`, rows 1, 3, 8) | no | FAIL `predicted: same  expected: diff` | all 8 rows agree (re-checked on 92994f3) |
 | fix_string_builtin_recode | **registered by P6.1** (moved to `test/data/`, as are its files; base 92994f3 FAIL `predicted: other  expected: up`, rows 1, 3-5, 7, 8) | no | FAIL `predicted: other  expected: up` | all 10 rows agree (re-checked on 92994f3) |
-| fix_float_equal | P6.2 | **yes: `e_isin`** (see note 1) | FAIL `predicted: 72.0  expected: 9.0` | all 6 rows agree |
-| fix_float_set_narrow | P6.2 | no; **header to write** (note 2) | FAIL `predicted: 240.0  expected: 0.20000000149011612` (the `o_fpd` column) | all 7 rows agree |
-| fix_output_double_float_target | P6.2 | no | FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity` | all 7 rows agree |
+| fix_float_equal | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `predicted: 72.0  expected: 9.0`, rows 1-3) | **done: `e_isin` rows 1-2 false** (note 1; header rewritten) | FAIL `predicted: 72.0  expected: 9.0` | all 6 rows agree but `e_isin` rows 1-2 (D1; re-checked on caa57c9) |
+| fix_float_set_narrow | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `target 'y': predicted: 240.0  expected: 231.0`, row 1) | no; **header written by P6.2** (note 2) | FAIL `predicted: 240.0  expected: 0.20000000149011612` (the `o_fpd` column) | all 7 rows agree (re-checked on caa57c9) |
+| fix_output_double_float_target | **registered by P6.2** (moved to `test/data/`, as are its files; base caa57c9 FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity`) | no | FAIL `output 'tv_f': predicted: 1e+300  expected: Infinity` | all 7 rows agree (re-checked on caa57c9) |
 | fix_string_number_equal | P6.3 | no (note 3) | FAIL `predicted: 0.0  expected: 15.0` | all 6 rows agree |
 | fix_typed_equal_mixed | P6.3 | **yes, and restructure** (note 4) | FAIL `output 'e_s_i': predicted: false  expected: true` | all 4 rows agree |
 | fix_binsim_clustering_string | P6.5 | **yes: row 6** (note 5) | FAIL `predicted:   expected: K2` | rows 1-4 agree; rows 5-7 refused (`Expected false or true, got "n"` / `"1"` / `"TRUE"`) |

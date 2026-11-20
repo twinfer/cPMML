@@ -65,9 +65,9 @@
  * split by a comment or CDATA section is read up to the first text node, as
  * before P2.3, not as the whole xs:string content.
  *
- * Storage is the old Value (P2): integer, float and double are doubles (a
- * float's text keeps its double reading until P6, B4), a boolean is 1 or 0, a
- * string its code with its text. The value is the Constant's own; the cast to
+ * Storage: an integer, float or double is the number of its type (a float
+ * the Float its text reads as since P6.2, B4), a boolean is 1 or 0, a string
+ * its code with its text. The value is the Constant's own; the cast to
  * an enclosing DerivedField's or OutputField's dataType is P4.7's.
  */
 class Constant : public Expression {
@@ -109,12 +109,8 @@ class Constant : public Expression {
                                                 : std::string(" (inherited from the parameter of ") +
                                                       node.xml().parent().attribute("function").value() + ", S2)"));
       if (*type == TypeId::String) return Value::string(text);
-      // A float's text keeps its double reading (B4, P6): 0.1 is the double
-      // 0.1, as DataType::read stored it; INF and NaN are the same either way.
-      if (const auto* f = std::get_if<cpmml::types::Float>(&v)) {
-        double d = 0;
-        return cpmml::legacy::float_value(lexical::parse_double(text, d) ? d : static_cast<double>(f->v));
-      }
+      // A float is the Float the text reads as (P6.2, B4): 0.1 is
+      // 0.10000000149011612 (XML Schema Part 2 §3.2.4).
       return cpmml::bind::engine_value(v);
     }
     using cpmml::bind::ConstantKind;

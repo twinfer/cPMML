@@ -671,9 +671,10 @@ inline scalar::Double operand(const Bound& b, const ::Value* args, std::size_t i
   return {d};
 }
 
-// A number result in the engine's storage; a float result is narrowed.
+// A number result in the engine's storage; a float result is the Float
+// nearest the double (P6.2).
 inline Status number(const Bound& b, scalar::Double r, ::Value& out) {
-  out = ::Value(b.float_result ? static_cast<double>(types::narrow_to_float(r.v)) : r.v);
+  out = b.float_result ? ::Value(types::Float{types::narrow_to_float(r.v)}) : ::Value(r.v);
   return Status::Ok;
 }
 // A kernel that may have no value: invalid, or missing (`out` stays as the

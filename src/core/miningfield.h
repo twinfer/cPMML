@@ -140,11 +140,25 @@ class MiningField : public DataField {
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_MISSING_VALUES:
         return handle_missing();
       case OutlierTreatmentMethod::OutlierTreatmentMethodValue::AS_EXTREME_VALUES:
-        if (cpmml::legacy::LegacyCompare::less_than(value, low_value)) return low_value;
-        return high_value;
+        if (cpmml::legacy::LegacyCompare::less_than(value, low_value)) return extreme(low_value);
+        return extreme(high_value);
       default:
         return value;  // "asIs" treatment
     }
+  }
+
+  // The value an outlier takes under asExtremeValues: the bound, which
+  // pmml-4-4.xsd types NUMBER (xs:double) and which is compared as one, as a
+  // value of the field. MiningSchema.html: asExtremeValues "outlier values
+  // are changed to a specific high or low value defined in MiningField"; the
+  // field's value is of its dataType, and every double literal is a float
+  // literal (XML Schema Part 2 §3.2.4.1, §3.2.5.1), so for a float field the
+  // bound read as a float (§3.4 K1 rule 1): the double rounded to the nearest
+  // float (P6.2; JPMML 1.7.7: a bound 0.1 gives 0.10000000149011612). An
+  // integer field keeps the double bound (D22, the slot widened).
+  inline Value extreme(const Value& bound) const {
+    if (datatype.value != DataType::DataTypeValue::FLOAT) return bound;
+    return Value(cpmml::types::Float{cpmml::types::narrow_to_float(bound.as_double())});
   }
 
   inline bool is_invalid(const Value& value) const { return !constraints(value); }
@@ -197,10 +211,15 @@ class MiningField : public DataField {
         return InputStatus::VALID;
       }
       case DataType::DataTypeValue::FLOAT: {
-        double d = 0.0;
-        if (!lexical::parse_double(raw, d)) return InputStatus::MALFORMED;
-        parsed = cpmml::legacy::float_value(d);
-        return std::isnan(d) ? InputStatus::INVALID : InputStatus::VALID;
+        // XML Schema Part 2 §3.2.4: "float is patterned after the IEEE
+        // single-precision 32-bit floating point type"; a decimal
+        // "maps to the normalized value in the value space of float that is
+        // closest to d" (P6.2, B4: 0.1 is 0.10000000149011612, 3.4e39 is
+        // INF, 1e-50 is 0).
+        float f = 0;
+        if (!cpmml::types::detail::read_float(raw, f)) return InputStatus::MALFORMED;
+        parsed = Value(cpmml::types::Float{f});
+        return std::isnan(f) ? InputStatus::INVALID : InputStatus::VALID;
       }
       case DataType::DataTypeValue::DOUBLE: {
         double d = 0.0;

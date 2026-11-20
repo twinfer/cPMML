@@ -77,7 +77,7 @@ class InternalModel {
   Shown shown = Shown::AS_IS;
   java::Kind shown_kind = java::Kind::DOUBLE;
   // The target cast of a regression's prediction (cast_target): a double
-  // to an integer or boolean target; Op::None for every other target.
+  // to an integer, boolean or float target; Op::None for every other target.
   cpmml::fn::DeclaredCast target_cast;
 
   InternalModel() = default;
@@ -117,7 +117,7 @@ class InternalModel {
     if (mining_function.value == MiningFunction::MiningFunctionType::REGRESSION && !text) {
       shown = Shown::NUMBER;
       const auto to = cpmml::bind::type_id(target_field.datatype);
-      if (to == cpmml::bind::TypeId::Integer || to == cpmml::bind::TypeId::Boolean)
+      if (to == cpmml::bind::TypeId::Integer || to == cpmml::bind::TypeId::Boolean || to == cpmml::bind::TypeId::Float)
         target_cast = cpmml::fn::DeclaredCast(cpmml::bind::TypeId::Double, to);
     } else if (mining_function.value == MiningFunction::MiningFunctionType::CLASSIFICATION && !text)
       shown = Shown::LABEL;
@@ -225,8 +225,12 @@ class InternalModel {
   // "Expected integer value, got double value". Targets.html: "If a
   // regression model should predict integers, use the attribute castInteger
   // to control how decimal places should be handled". cPMML returned the
-  // double (3.5 for an integer target) before. A float or double target is
-  // not checked here (a float's narrowing is B5, P6/P8).
+  // double (3.5 for an integer target) before. A float target's prediction
+  // is the double rounded to the nearest float (§2.6 "double -> float: IEEE
+  // round to nearest; overflow -> ±INF, underflow -> 0"; P6.2, B5: JPMML
+  // 1.7.7 gives 0.10000000149011612 for a double OutputField over the float
+  // prediction 0.1, Infinity for 1e300), which always has a value; a double
+  // target is not cast.
   inline void cast_target(double& value) const {
     if (target_cast.op == cpmml::fn::DeclaredCast::Op::None) return;
     if (!target_cast.apply_number(value)) raise_target_invalid(value);
