@@ -752,6 +752,31 @@ static void domains() {
   }
   CHECK(number("floor", nums({-2.5})) == -3 && number("ceil", nums({-2.5})) == -2 && number("round", nums({2.5})) == 3,
         "finite: as before");
+  // round sends a half up (B54, decided 2026-11-20 after P4.9: as XPath
+  // fn:round, "the one that is closest to positive infinity", and Java
+  // Math.round), exactly: a fraction just below one half is not a half, and
+  // from 2^52 on every double is an integer and is returned as it is.
+  {
+    const double below_half = std::nextafter(0.5, 0.0);  // 0.49999999999999994
+    const double p52 = 4503599627370496.0;
+    CHECK(number("round", nums({0.5})) == 1 && number("round", nums({1.5})) == 2 &&
+              number("round", nums({2.5})) == 3,
+          "round of a positive half goes up");
+    CHECK(number("round", nums({-0.5})) == 0 && !std::signbit(number("round", nums({-0.5}))) &&
+              number("round", nums({-1.5})) == -1 && number("round", nums({-2.5})) == -2,
+          "round of a negative half goes up, towards +INF (B54); round(-0.5) is the integer 0, not -0.0");
+    CHECK(number("round", nums({below_half})) == 0 && number("round", nums({-below_half})) == 0 &&
+              number("round", nums({std::nextafter(-0.5, -1.0)})) == -1 &&
+              number("round", nums({std::nextafter(1.5, 0.0)})) == 1 &&
+              number("round", nums({std::nextafter(-1.5, -2.0)})) == -2,
+          "round is exact next to a half (no floor(x + 0.5))");
+    CHECK(number("round", nums({p52 + 1})) == p52 + 1 && number("round", nums({-(p52 + 1)})) == -(p52 + 1) &&
+              number("round", nums({p52 - 0.5})) == p52 && number("round", nums({-(p52 - 0.5)})) == -(p52 - 1),
+          "round from 2^52 on returns x; just below 2^52 a half goes up");
+    CHECK(number("round", nums({3.7})) == 4 && number("round", nums({-3.7})) == -4 &&
+              number("round", nums({-3.2})) == -3,
+          "round off a half: the closest integer");
+  }
 
   // modulo: an infinite operand (B21) and a zero divisor (B41) are invalid;
   // NaN gives NaN (D23).

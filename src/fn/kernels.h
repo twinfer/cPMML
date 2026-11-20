@@ -199,7 +199,23 @@ inline Double exp(Double x) { return {std::exp(x.v)}; }
 // is invalid (adapter::to_integer_unary). The integer is stored as the
 // double it is (exact: a rounded double within the range is an integer
 // double), but +0 for a -0.0 (XSD's integer has one zero).
-inline double round_half_away(double x) { return std::round(x); }
+// round's tie (B54, decided 2026-11-20 after P4.9, §9): "to the closest
+// integer" leaves a half open, and it goes up, as XPath fn:round ("If two
+// such values are equally near (for example, if the fractional part in $arg
+// is exactly .5), the function returns the one that is closest to positive
+// infinity") and Java Math.round: round(-0.5) = 0, round(-2.5) = -2,
+// round(2.5) = 3. Exact, as XPath's "cast to xs:decimal ... that imposes no
+// limits on the number of digits": x - floor(x) is the exact fraction of
+// every finite double (0 from 2^52 on, where every double is an integer and
+// x is returned), so 0.49999999999999994 gives 0, where floor(x + 0.5)
+// rounds x + 0.5 up to 1 first; and floor(x) + 1 is exact below 2^52. ±INF
+// and NaN give a fraction NaN and return x itself, invalid in to_integer as
+// before (P4.4). XPath's -0 for round(-0.5) is an xs:double; the result here
+// is an integer, which has one zero (to_integer stores +0).
+inline double round_half_up(double x) {
+  const double f = std::floor(x);
+  return x - f >= 0.5 ? f + 1.0 : f;
+}
 inline double round_down(double x) { return std::floor(x); }
 inline double round_up(double x) { return std::ceil(x); }
 template <double (*R)(double)>
@@ -1199,7 +1215,7 @@ inline KernelFn instantiate(Op op, bool integer_result = false) {
     case Op::Log10: return a::unary<s::log10>;
     case Op::Sqrt: return a::unary<s::sqrt>;
     case Op::Abs: return a::unary<s::abs>;
-    case Op::Round: return a::to_integer_unary<s::round_half_away>;
+    case Op::Round: return a::to_integer_unary<s::round_half_up>;
     case Op::Floor: return a::to_integer_unary<s::round_down>;
     case Op::Ceil: return a::to_integer_unary<s::round_up>;
     case Op::Pow: return a::pow;
