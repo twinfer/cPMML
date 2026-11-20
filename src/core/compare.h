@@ -115,8 +115,10 @@ inline const char* type_name(const TypeId t) {
 // The declared order of an ordinal string field (DataDictionary.html: "For
 // ordinal fields, if a sequence of Value elements is given, the sequence
 // defines the ascending order"): the field's valid Values, pooled at load. A
-// string outside them has no place in the order: comparing it is
-// indeterminate (the choice P6.3 makes where the spec is silent).
+// string outside them has no place in the order: a document string (a
+// Constant operand, a SimplePredicate's value) outside them is a load error
+// (D47, P6.9); one computed per record (another field's value, an
+// expression's) makes the comparison indeterminate (P6.3).
 class OrdinalOrder {
  public:
   explicit OrdinalOrder(const std::vector<std::string>& values) {

@@ -9,6 +9,9 @@
 
 #define SET_THRESHOLD 150
 
+#include <algorithm>
+#include <string>
+
 #include "bind/load_scope.h"
 #include "datadictionary.h"
 #include "miningschema.h"
@@ -78,10 +81,20 @@ class PredicateBuilder {
         // follows their order (DataDictionary.html: "For ordinal fields, if
         // a sequence of Value elements is given, the sequence defines the
         // ascending order").
+        // A value outside the Values has no place in that order: a load
+        // error (D47, design item P6.9; the binder's E-ORDINAL-VALUE-UNKNOWN).
         std::shared_ptr<const cpmml::compare::OrdinalOrder> ordinal;
         if (datatype.value == DataType::DataTypeValue::STRING && op != Op::EQUAL && op != Op::NOT_EQUAL)
-          if (auto values = cpmml::bind::ordinal_values(node, node.required_attribute("field")))
+          if (auto values = cpmml::bind::ordinal_values(node, node.required_attribute("field"))) {
+            const std::string value = node.required_attribute("value");
+            if (std::find(values->begin(), values->end(), value) == values->end())
+              throw cpmml::ParsingException(
+                  cpmml::bind::ordinal_value_message(node,
+                                                     "SimplePredicate field=\"" + node.required_attribute("field") +
+                                                         "\" operator=\"" + node.required_attribute("operator") + "\"",
+                                                     "value ", value, node.required_attribute("field"), *values));
             ordinal = std::make_shared<const cpmml::compare::OrdinalOrder>(*values);
+          }
         return Predicate::simple(index, op, Value::document(node.required_attribute("value"), datatype),
                                  std::move(ordinal));
       }

@@ -30,7 +30,8 @@
  * diagnostic of every fixture to test/data/bind_baseline.txt. The codes are
  * the design's where it names one (E-SCOPE-UNRESOLVED, E-TYPE-ORDER-MIXED,
  * W-SCOPE-IMPLICIT, W-FORWARD-REF, W-ORDER-CATEGORICAL,
- * W-ORDINAL-STRING-NO-VALUES, W-SLOT-WIDENED); the others are listed below
+ * W-ORDINAL-STRING-NO-VALUES, W-SLOT-WIDENED, E-ORDINAL-VALUE-UNKNOWN for
+ * D47); the others are listed below
  * with the rule each stands for.
  *
  * Since P2.1 the engine binds every document at load through
@@ -91,6 +92,10 @@ inline constexpr std::string_view kValueMalformed = "E-VALUE-MALFORMED";
 inline constexpr std::string_view kTypeOrderMixed = "E-TYPE-ORDER-MIXED";
 // Functions.html / Q7: boolean mixed with another type.
 inline constexpr std::string_view kTypeBooleanMixed = "E-TYPE-BOOLEAN-MIXED";
+// DataDictionary.html / D47 (P6.9): an ordering of an ordinal string field
+// with Values against a document string that is none of them ("the sequence
+// defines the ascending order": the value has no place in it).
+inline constexpr std::string_view kOrdinalValueUnknown = "E-ORDINAL-VALUE-UNKNOWN";
 // An argument outside its parameter's category (§4.1): a string to a
 // numeric parameter, a double to an integer parameter.
 inline constexpr std::string_view kTypeParam = "E-TYPE-PARAM";

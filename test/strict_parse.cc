@@ -2106,6 +2106,183 @@ static void boolean_mixed() {
   CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="d"/><Constant dataType="string">3</Constant></Apply>)")).empty());
 }
 
+// ---- P6.9: D47, a document string outside an ordinal field's Values --------
+//
+// DataDictionary.html: "For ordinal fields, if a sequence of Value elements
+// is given, the sequence defines the ascending order". A string that is none
+// of the Values has no place in that order, so an ordering (lessThan,
+// lessOrEqual, greaterThan, greaterOrEqual) of the field against such a
+// document string (a Constant operand, either side, typed or untyped; a
+// SimplePredicate's value) has no answer for any record: a load error,
+// E-ORDINAL-VALUE-UNKNOWN, naming the field, the value and the Values
+// (decided 2026-11-20 after P6.4). Equality and isIn need no order and load.
+// Each refused document loads on base e7f42de, which gave every record a
+// missing result (an Apply) or UNKNOWN (a predicate). JPMML 1.7.7 refuses
+// the same comparisons per record ('Values "high" and "zzz" cannot be
+// ordered', EvaluationException), not at load.
+static void ordinal_value_unknown() {
+  const auto doc = [](const std::string& expression, const std::string& td = "", const std::string& mining_o = "") {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="string"><Value value="low"/><Value value="mid"/><Value value="high"/><Value value="x" property="invalid"/></DataField>
+    <DataField name="k" optype="categorical" dataType="string"><Value value="low"/><Value value="mid"/></DataField>
+    <DataField name="n" optype="ordinal" dataType="string"/>
+    <DataField name="s" optype="categorical" dataType="string"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>)") +
+           td + R"(
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="o"/><MiningField name="k")" +
+           mining_o +
+           R"(/><MiningField name="n"/><MiningField name="s"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="t" dataType="string" feature="transformedValue">)" +
+           expression + R"(</OutputField>
+    </Output>
+    <RegressionTable intercept="1"/>
+  </RegressionModel>
+</PMML>)";
+  };
+  const std::string code = "E-ORDINAL-VALUE-UNKNOWN: ";
+  const std::string basis =
+      "(Values \"low\", \"mid\", \"high\"; DataDictionary.html: \"For ordinal fields, if a sequence of Value elements "
+      "is given, the sequence defines the ascending order\": a value outside it has no place in the order, D47)";
+  // Every ordering, a typed Constant on the right; the message names the
+  // function, the model, the value, the field and the valid Values.
+  for (const std::string f : {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})
+    CHECK(load_error(doc("<Apply function=\"" + f +
+                         "\"><FieldRef field=\"o\"/><Constant dataType=\"string\">zzz</Constant></Apply>")) ==
+          code + "Apply \"" + f + "\" in RegressionModel: \"zzz\" is not a Value of ordinal field \"o\" " + basis);
+  // On the left, untyped (a string: Transformations.html, Constant).
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><Constant>zzz</Constant><FieldRef field="o"/></Apply>)")),
+                 code + "Apply \"lessThan\" in RegressionModel: \"zzz\" is not a Value"));
+  // Values are texts: case, a trailing blank, an invalid Value, the empty string.
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>Mid</Constant></Apply>)")),
+                 "\"Mid\" is not a Value"));
+  CHECK(
+      contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>mid </Constant></Apply>)")),
+               "\"mid \" is not a Value"));
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>x</Constant></Apply>)")),
+                 "\"x\" is not a Value"));
+  CHECK(contains(
+      load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant dataType="string"/></Apply>)")),
+      "\"\" is not a Value"));
+  // In a TransformationDictionary DerivedField.
+  CHECK(contains(
+      load_error(doc(
+          R"(<FieldRef field="d"/>)",
+          R"(<TransformationDictionary><DerivedField name="d" optype="categorical" dataType="boolean"><Apply function="greaterThan"><FieldRef field="o"/><Constant>top</Constant></Apply></DerivedField></TransformationDictionary>)")),
+      code + "Apply \"greaterThan\" in the TransformationDictionary: \"top\" is not a Value"));
+  // A categorical DataField made ordinal by its MiningField (MiningSchema.html,
+  // optype: "The attribute value overrides the corresponding value in the
+  // DataField"): ordered by the DataField's Values.
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="k"/><Constant>high</Constant></Apply>)",
+                                "", " optype=\"ordinal\"")),
+                 "\"high\" is not a Value of ordinal field \"k\" (Values \"low\", \"mid\";"));
+  // An ordinal DerivedField with Values.
+  CHECK(contains(
+      load_error(doc(
+          R"(<Apply function="lessThan"><FieldRef field="od"/><Constant>c</Constant></Apply>)",
+          R"(<TransformationDictionary><DerivedField name="od" optype="ordinal" dataType="string"><Value value="a"/><Value value="b"/><FieldRef field="s"/></DerivedField></TransformationDictionary>)")),
+      "\"c\" is not a Value of ordinal field \"od\" (Values \"a\", \"b\";"));
+  // Controls that load: a Value; equality and isIn; a missing Constant; an
+  // ordinal field without Values (code units, Q6); a categorical field; a
+  // categorical DataField's Values do not order it; two fields.
+  CHECK(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>mid</Constant></Apply>)")).empty());
+  CHECK(
+      load_error(doc(R"(<Apply function="lessThan"><Constant>high</Constant><FieldRef field="o"/></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="equal"><FieldRef field="o"/><Constant>zzz</Constant></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="notEqual"><FieldRef field="o"/><Constant>zzz</Constant></Apply>)")).empty());
+  CHECK(
+      load_error(
+          doc(R"(<Apply function="isIn"><FieldRef field="o"/><Constant>zzz</Constant><Constant>low</Constant></Apply>)"))
+          .empty());
+  CHECK(
+      load_error(
+          doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant dataType="string" missing="true">zzz</Constant></Apply>)"))
+          .empty());
+  CHECK(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="n"/><Constant>zzz</Constant></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="s"/><Constant>zzz</Constant></Apply>)")).empty());
+  CHECK(
+      load_error(doc(R"(<Apply function="lessThan"><FieldRef field="k"/><Constant>high</Constant></Apply>)")).empty());
+  CHECK(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><FieldRef field="s"/></Apply>)")).empty());
+  // A string computed per record outside the Values stays indeterminate
+  // (missing, P6.3): o against the input of s.
+  {
+    const cpmml::Model model =
+        load(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><FieldRef field="s"/></Apply>)"));
+    const auto t = [&](const std::string& o, const std::string& s) {
+      cpmml::Input in;
+      in["o"] = o;
+      in["k"] = std::string("low");
+      in["n"] = std::string("a");
+      in["s"] = s;
+      const auto out = model.evaluate(in).str_outputs();
+      const auto it = out.find("t");
+      return it == out.end() ? std::string("none") : it->second;
+    };
+    CHECK(t("low", "mid") == "true" && t("high", "mid") == "false" && t("low", "zzz") == "none");
+  }
+
+  // A SimplePredicate, in a tree (BoundPredicates) and in a segment's
+  // predicate (the Predicate tree).
+  const auto tree = [](const std::string& predicate) {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="string"><Value value="low"/><Value value="mid"/><Value value="high"/></DataField>
+    <DataField name="y" optype="categorical" dataType="string"/>
+  </DataDictionary>
+  <TreeModel functionName="classification">
+    <MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Node score="r"><True/><Node score="T">)") +
+           predicate + R"(</Node><Node score="F"><True/></Node></Node>
+  </TreeModel>
+</PMML>)";
+  };
+  for (const std::string op : {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})
+    CHECK(load_error(tree("<SimplePredicate field=\"o\" operator=\"" + op + "\" value=\"zzz\"/>")) ==
+          code + "SimplePredicate field=\"o\" operator=\"" + op +
+              "\" in TreeModel: value \"zzz\" is not a Value of ordinal field \"o\" " + basis);
+  CHECK(contains(
+      load_error(tree(
+          R"(<CompoundPredicate booleanOperator="or"><True/><SimplePredicate field="o" operator="lessThan" value="MID"/></CompoundPredicate>)")),
+      "value \"MID\" is not a Value"));
+  CHECK(load_error(tree(R"(<SimplePredicate field="o" operator="lessThan" value="mid"/>)")).empty());
+  CHECK(load_error(tree(R"(<SimplePredicate field="o" operator="equal" value="zzz"/>)")).empty());
+  CHECK(
+      load_error(
+          tree(
+              R"(<SimpleSetPredicate field="o" booleanOperator="isIn"><Array type="string">zzz low</Array></SimpleSetPredicate>)"))
+          .empty());
+  const std::string segment = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="string"><Value value="low"/><Value value="mid"/><Value value="high"/></DataField>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <MiningModel functionName="regression">
+    <MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Segmentation multipleModelMethod="selectFirst">
+      <Segment id="1"><SimplePredicate field="o" operator="greaterOrEqual" value="VALUE"/>
+        <RegressionModel functionName="regression"><MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema><RegressionTable intercept="1"/></RegressionModel>
+      </Segment>
+    </Segmentation>
+  </MiningModel>
+</PMML>)";
+  const auto with = [&](const std::string& value) {
+    std::string d = segment;
+    d.replace(d.find("VALUE"), 5, value);
+    return d;
+  };
+  CHECK(contains(load_error(with("top")),
+                 code +
+                     "SimplePredicate field=\"o\" operator=\"greaterOrEqual\" in MiningModel: value \"top\" is not a "
+                     "Value of ordinal field \"o\""));
+  CHECK(load_error(with("mid")).empty());
+}
+
 // ---- P6.6: trailing blanks of categorical string inputs --------------------
 //
 // DataDictionary.html: "Trailing blanks in categorical input values are not
@@ -2218,6 +2395,7 @@ int main() {
   surrogate_errors();
   writer_round_trip();
   trailing_blanks();
+  ordinal_value_unknown();
 
   if (failures) std::cerr << failures << " check(s) failed\n";
   return failures;

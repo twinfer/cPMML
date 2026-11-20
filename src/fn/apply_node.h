@@ -53,6 +53,7 @@
  * defaultValue and invalidValueTreatment.
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -352,6 +353,17 @@ class ApplyNode : public Expression {
         for (pugi::xml_node argument : apply.xml().children()) {
           if (argument.type() != pugi::node_element || std::strcmp(argument.name(), "FieldRef") != 0) continue;
           if (auto values = cpmml::bind::ordinal_values(XmlNode(argument), argument.attribute("field").value())) {
+            // D47 (P6.9): a Constant operand outside the Values has no
+            // place in the order, a load error (Binder::check_ordinal_constants).
+            for (pugi::xml_node c : apply.xml().children()) {
+              if (c.type() != pugi::node_element || std::strcmp(c.name(), "Constant") != 0) continue;
+              const Value constant = Constant::read(XmlNode(c));
+              if (constant.is_missing()) continue;
+              if (std::find(values->begin(), values->end(), constant.text()) == values->end())
+                throw cpmml::ParsingException(
+                    cpmml::bind::ordinal_value_message(apply, "Apply \"" + std::string(sig.name) + "\"", "",
+                                                       constant.text(), argument.attribute("field").value(), *values));
+            }
             bound.ordinal = std::make_shared<const compare::OrdinalOrder>(*values);
             break;
           }

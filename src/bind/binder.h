@@ -215,6 +215,54 @@ inline std::string arity_mismatch(const fn::Signature& sig, std::size_t n) {
          expected + " (BuiltinFunctions.html)";
 }
 
+// The declared order of the field `b` names (design items P6.3, P6.9, §2.7):
+// the texts of its declaration's valid Value elements, in document order,
+// when its binding is an ordinal string field that has them, else nullopt.
+// The optype is the binding's in the model's scope (MiningSchema.html,
+// optype: "The attribute value overrides the corresponding value in the
+// DataField"); the Values are its declaration's, a MiningField's those of the
+// field it reads. DataDictionary.html: "For ordinal fields, if a sequence of
+// Value elements is given, the sequence defines the ascending order". Shared
+// by the binder's report (E-ORDINAL-VALUE-UNKNOWN) and the engine's load
+// (load_scope.h ordinal_values).
+inline std::optional<std::vector<std::string>> declared_order(const Binding* b) {
+  if (!b || b->type.type != TypeId::String || b->type.optype != OpType::Ordinal) return std::nullopt;
+  const Binding* root = b;
+  while (root->source) root = root->source;
+  if (!root->declaration) return std::nullopt;
+  std::vector<std::string> values;
+  for (pugi::xml_node v : root->declaration.children("Value")) {
+    const pugi::xml_attribute property = v.attribute("property");
+    if (property && std::string_view(property.value()) != "valid") continue;
+    values.emplace_back(v.attribute("value").value());
+  }
+  if (values.empty()) return std::nullopt;
+  return values;
+}
+
+// D47 (design item P6.9, decided 2026-11-20 after P6.4): an ordering of an
+// ordinal string field with Values against a document string (a Constant, a
+// SimplePredicate's value) that is none of them is a load error. The order
+// is the Value sequence (DataDictionary.html: "For ordinal fields, if a
+// sequence of Value elements is given, the sequence defines the ascending
+// order"); a value not in it has no place in that order, so the comparison
+// has no answer for any record. The words after "<code>: <where>: ", shared
+// by the binder and the engine: '"zzz" is not a Value of ordinal field "o"
+// (Values "low", "mid", "high"; ...)'. At most 10 Values are listed.
+inline std::string ordinal_value_unknown(std::string_view value, std::string_view field,
+                                         const std::vector<std::string>& values) {
+  std::string listed;
+  const std::size_t shown = std::min<std::size_t>(values.size(), 10);
+  for (std::size_t i = 0; i < shown; i++) {
+    if (i) listed += ", ";
+    listed += detail::quoted(values[i]);
+  }
+  if (shown < values.size()) listed += ", ... (" + std::to_string(values.size()) + " in all)";
+  return detail::quoted(value) + " is not a Value of ordinal field " + detail::quoted(field) + " (Values " + listed +
+         "; DataDictionary.html: \"For ordinal fields, if a sequence of Value elements is given, the sequence "
+         "defines the ascending order\": a value outside it has no place in the order, D47)";
+}
+
 class Binder {
  public:
   // Report: every element is bound (test/bind_report.cc, §3.7). Load: the
@@ -1718,6 +1766,30 @@ class Binder {
     }
   }
 
+  // D47 (P6.9): a string ordering follows the declared Values of its first
+  // FieldRef operand that has them (the engine's choice, fn/apply_node.h);
+  // a Constant operand outside them has no place in that order, a load error.
+  // A Constant with missing="true" has no value to place.
+  void check_ordinal_constants(Ctx& ctx, pugi::xml_node node, const std::vector<pugi::xml_node>& args,
+                               const std::vector<Typed>& types, const std::string& what) {
+    const Binding* field = nullptr;
+    std::optional<std::vector<std::string>> values;
+    for (std::size_t i = 0; i < args.size() && !values; i++)
+      if (std::string_view(args[i].name()) == "FieldRef" && types[i].field) {
+        values = declared_order(types[i].field);
+        field = types[i].field;
+      }
+    if (!values) return;
+    for (pugi::xml_node a : args) {
+      if (std::string_view(a.name()) != "Constant") continue;
+      bool missing = false;
+      if (const auto m = attr(a, "missing"); m && lexical::parse_boolean(*m, missing) && missing) continue;
+      const std::string_view text = a.text().get();
+      if (std::find(values->begin(), values->end(), text) == values->end())
+        error(code::kOrdinalValueUnknown, ctx, node, what + ": " + ordinal_value_unknown(text, field->name, *values));
+    }
+  }
+
   Typed bind_apply(Ctx& ctx, pugi::xml_node node) {
     const auto function = attr(node, "function");
     // "children after Extension*" (B25).
@@ -1773,6 +1845,8 @@ class Binder {
       const std::string what = "Apply " + detail::quoted(name);
       const bool ordering = is_ordering(name);
       for (std::size_t i = 1; i < n; i++) check_comparable(ctx, node, ordering, types[0], types[i], what);
+      if (ordering && n == 2 && types[0].type == TypeId::String && types[1].type == TypeId::String)
+        check_ordinal_constants(ctx, node, args, types, what);
     }
     // Result (§4.1, typing.h apply_result_type, shared with the engine's load).
     std::vector<StaticType> arg_types(n);
@@ -1918,8 +1992,14 @@ class Binder {
     if (!b) return;
     // §3.4: "value read by the rule above"; the comparison then follows §2.7.
     document_value(ctx, node, b->type.type, *value, "value", b);
-    if (detail::one_of(*op, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"}))
+    if (detail::one_of(*op, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})) {
       check_order_operand(ctx, node, b, "operator " + detail::quoted(*op));
+      // D47 (P6.9): the value must have a place in the field's declared order.
+      if (const auto values = declared_order(b);
+          values && std::find(values->begin(), values->end(), *value) == values->end())
+        error(code::kOrdinalValueUnknown, ctx, node,
+              "operator " + detail::quoted(*op) + ": value " + ordinal_value_unknown(*value, b->name, *values));
+    }
   }
 
   void bind_set_predicate(Ctx& ctx, pugi::xml_node node) {

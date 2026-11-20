@@ -42,7 +42,10 @@
  * So is P2.7's E-TYPE-ORDER-MIXED (string x number ordering, §2.7), by the
  * Apply constructor over expression_type's argument types
  * (order_mixed_message), and P2.8b2's E-ARITY (a built-in Apply with the
- * wrong number of arguments), by the same constructor (arity_message).
+ * wrong number of arguments), by the same constructor (arity_message), and
+ * P6.9's E-ORDINAL-VALUE-UNKNOWN (D47: an ordering of an ordinal string field
+ * against a Constant or SimplePredicate value outside its Values), by the
+ * Apply constructor and the PredicateBuilder (ordinal_value_message).
  * The clashes that documents
  * which load today contain are warnings (W-NAME-SHADOWS-MININGFIELD,
  * W-NAME-SHADOWS-TD, W-SCOPE-FLAT; binder.h).
@@ -222,21 +225,30 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
 inline std::optional<std::vector<std::string>> ordinal_values(const XmlNode& from, const std::string& name) {
   const LoadScope* scope = LoadScope::current();
   if (!scope) return std::nullopt;
-  const Binding* b = scope->binder().lookup(from.xml(), name);
-  if (!b || b->type.type != TypeId::String || b->type.optype != OpType::Ordinal) return std::nullopt;
-  const Binding* root = b;
-  while (root->source) root = root->source;
-  // The declaration's Value elements are read here: in load mode the binder
-  // does not bind a DataField's Values (has_values is report mode's).
-  if (!root->declaration) return std::nullopt;
-  std::vector<std::string> values;
-  for (pugi::xml_node v : root->declaration.children("Value")) {
-    const pugi::xml_attribute property = v.attribute("property");
-    if (property && std::string_view(property.value()) != "valid") continue;
-    values.emplace_back(v.attribute("value").value());
-  }
-  if (values.empty()) return std::nullopt;
-  return values;
+  // The declaration's Value elements are read by declared_order (binder.h):
+  // in load mode the binder does not bind a DataField's Values (has_values
+  // is report mode's).
+  return declared_order(scope->binder().lookup(from.xml(), name));
+}
+
+// The load error of an ordering of an ordinal string field with Values
+// against a document string that is none of them (D47, design item P6.9;
+// raised by the Apply constructor, fn/apply_node.h, for a Constant operand,
+// and by the PredicateBuilder for a SimplePredicate's value), in the
+// binder's words for E-ORDINAL-VALUE-UNKNOWN (Binder::check_ordinal_constants,
+// bind_simple_predicate): 'E-ORDINAL-VALUE-UNKNOWN: Apply "lessThan" in
+// TreeModel: "zzz" is not a Value of ordinal field "o" (Values "low", ...)'.
+// `element` names the comparison ('Apply "lessThan"', 'SimplePredicate
+// field="o" operator="lessThan"'), `at` is its node; `value_word` is
+// "value " for a SimplePredicate's attribute, empty for a Constant.
+inline std::string ordinal_value_message(const XmlNode& at, const std::string& element, const std::string& value_word,
+                                         std::string_view value, std::string_view field,
+                                         const std::vector<std::string>& values) {
+  const LoadScope* scope = LoadScope::current();
+  const std::string model = scope ? scope->binder().scope_label(at.xml()) : std::string();
+  return std::string(code::kOrdinalValueUnknown) + ": " + element + " in " +
+         (model.empty() ? std::string("the TransformationDictionary") : model) + ": " + value_word +
+         ordinal_value_unknown(value, field, values);
 }
 
 // ---------------------------------------------------------------- document text (P2.2)

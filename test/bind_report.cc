@@ -496,6 +496,39 @@ void rule_cases() {
          pmml(kNum + field("o", "string", "ordinal", "<Value value=\"a\"/><Value value=\"b\"/>"),
               tree(kTree + mf("o"), "<SimplePredicate field=\"o\" operator=\"lessThan\" value=\"b\"/>")),
          {});
+  // D47 (P6.9): a document string outside an ordinal field's Values has no
+  // place in the order "the sequence defines" (DataDictionary.html).
+  {
+    const std::string ord = kNum + field("o", "string", "ordinal", "<Value value=\"a\"/><Value value=\"b\"/>");
+    const std::string ord_mining = kMining + mf("o");
+    const auto out = [&](const std::string& expr) {
+      return pmml(ord, regression(ord_mining,
+                                  "<Output><OutputField name=\"t\" dataType=\"boolean\" "
+                                  "feature=\"transformedValue\">" +
+                                      expr + "</OutputField></Output>"));
+    };
+    expect("ordinal-value-unknown-predicate", "DataDictionary.html: \"the sequence defines the ascending order\" (D47)",
+           pmml(ord, tree(kTree + mf("o"), "<SimplePredicate field=\"o\" operator=\"lessThan\" value=\"c\"/>")),
+           {"E-ORDINAL-VALUE-UNKNOWN"});
+    expect("ordinal-value-equal-predicate", "equality needs no order (D47 is an ordering's)",
+           pmml(ord, tree(kTree + mf("o"), "<SimplePredicate field=\"o\" operator=\"equal\" value=\"c\"/>")), {});
+    expect("ordinal-value-unknown-apply", "DataDictionary.html: \"the sequence defines the ascending order\" (D47)",
+           out(call("greaterThan", ref("o") + constant("c", "string"))), {"E-ORDINAL-VALUE-UNKNOWN"});
+    expect("ordinal-value-unknown-apply-left", "D47: a Constant on the left, untyped",
+           out(call("lessOrEqual", constant("A") + ref("o"))), {"E-ORDINAL-VALUE-UNKNOWN"});
+    expect("ordinal-value-known-apply", "DataDictionary.html: \"the sequence defines the ascending order\"",
+           out(call("lessThan", ref("o") + constant("b", "string"))), {});
+    expect("ordinal-value-missing-constant", "Transformations.html: a missing Constant has no value to place",
+           out(call("lessThan", ref("o") + "<Constant dataType=\"string\" missing=\"true\">c</Constant>")), {});
+    expect("ordinal-value-isin", "isIn is equality (D47 is an ordering's)",
+           out(call("isIn", ref("o") + constant("c", "string"))), {});
+    expect("ordinal-value-mining-optype",
+           "MiningSchema.html: the optype \"overrides\"; the order is the DataField's Values",
+           pmml(ord + field("k", "string", "categorical", "<Value value=\"a\"/>"),
+                tree(kTree + mf("k", "optype=\"ordinal\""),
+                     "<SimplePredicate field=\"k\" operator=\"lessThan\" value=\"b\"/>")),
+           {"E-ORDINAL-VALUE-UNKNOWN"});
+  }
   expect("set-nan", "§2.7, D26: a NaN key matches nothing",
          pmml(kNum, tree(kTree,
                          "<SimpleSetPredicate field=\"x\" booleanOperator=\"isIn\"><Array type=\"real\">1 "
