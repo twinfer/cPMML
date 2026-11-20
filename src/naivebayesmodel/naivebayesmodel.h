@@ -67,7 +67,7 @@ class NaiveBayesModel : public InternalModel {
       : InternalModel(node, data_dictionary, transformation_dictionary, indexer),
         threshold(node.get_double_attribute("threshold", 1e-6)) {
     parse_output(node);
-    parse_inputs(node, data_dictionary, indexer);
+    parse_inputs(node, indexer);
   }
 
   // --- Scoring ---
@@ -102,18 +102,23 @@ class NaiveBayesModel : public InternalModel {
     for (const auto& [cls, cnt] : counts) log_priors[cls] = std::log(cnt / total);
   }
 
-  void parse_inputs(const XmlNode& node, const DataDictionary& data_dictionary,
-                    const std::shared_ptr<Indexer>& indexer) {
+  void parse_inputs(const XmlNode& node, const std::shared_ptr<Indexer>& indexer) {
     for (const auto& bi : node.get_child("BayesInputs").get_childs("BayesInput")) {
       const std::string field = bi.required_attribute("fieldName");
-      const size_t idx = cpmml::bind::scope_resolve(*indexer, bi, field).index;  // scope.resolve (P2.1)
+      // BayesInput@fieldName is a model-internal reference, resolved like a
+      // FieldRef (design §3 table; P6.10, B60): its slot and its declared type
+      // are the binding's in the model's scope, a DataField, or a DerivedField
+      // of the TransformationDictionary or of a LocalTransformations in scope.
+      // The PairCounts values are values of that field, read in its type.
+      const auto resolved = cpmml::bind::scope_resolve(*indexer, bi, field);  // scope.resolve (P2.1)
+      const size_t idx = resolved.index;
 
       // Discrete: PairCounts → PairValueCounts → TargetValueCounts
       if (bi.exists_child("PairCounts")) {
         DiscreteInput di;
         di.field_index = idx;
         for (const auto& pvc : bi.get_childs("PairCounts")) {
-          const Value input_val = Value::document(pvc.required_attribute("value"), data_dictionary.at(field).datatype);
+          const Value input_val = Value::document(pvc.required_attribute("value"), resolved.datatype);
           for (const auto& tvc : pvc.get_child("TargetValueCounts").get_childs("TargetValueCount"))
             di.counts[input_val.as_double()][tvc.required_attribute("value")] = tvc.required_double_attribute("count");
         }
