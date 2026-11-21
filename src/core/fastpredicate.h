@@ -33,8 +33,9 @@
  * NaN UNKNOWN (D9); and equal / notEqual of a string operand with a string
  * value, by rep (canonical reps, P6.1). `type` is the type of the
  * predicate's value. Every other pair (a ±INF or NaN value, D9 and B44; a
- * boolean; an ordering of strings, in an ordinal field's declared order; a
- * string against a number, D2) goes out of line to predicate::typed_compare,
+ * boolean; an ordering of strings; an ordering of an ordinal field that
+ * lists Values, of any type, in their declared order, P6.12; a string
+ * against a number, D2) goes out of line to predicate::typed_compare,
  * as do predicates whose op carries kTyped. A SimpleSetPredicate is
  * predicate::KeySet::member.
  */
@@ -263,7 +264,7 @@ class BoundPredicates {
   std::vector<double> constants_;      // the SimplePredicate values' ContainerKeys (a number itself)
   std::vector<const cpmml::types::StringRep*> reps_;  // their pooled reps, read for a string value (P6.1)
   std::vector<Value> values_;          // the values, for the typed path
-  std::vector<std::shared_ptr<const cpmml::compare::OrdinalOrder>> ordinals_;  // an ordinal string's order
+  std::vector<std::shared_ptr<const cpmml::compare::OrdinalOrder>> ordinals_;  // an ordinal field's declared order (P6.12)
   std::vector<cpmml::predicate::KeySet> sets_;
 };
 

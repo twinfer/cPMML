@@ -529,6 +529,57 @@ void rule_cases() {
                      "<SimplePredicate field=\"k\" operator=\"lessThan\" value=\"b\"/>")),
            {"E-ORDINAL-VALUE-UNKNOWN"});
   }
+  // P6.12: the Values order an ordinal field of any type; D47 applies to a
+  // number by its value (the integer Values 3, 1, 2).
+  {
+    const std::string ord = kNum + field("oi", "integer", "ordinal",
+                                         "<Value value=\"3\"/><Value value=\"1\"/><Value value=\"2\"/>");
+    const std::string ord_mining = kMining + mf("oi");
+    const auto out = [&](const std::string& expr) {
+      return pmml(ord, regression(ord_mining,
+                                  "<Output><OutputField name=\"t\" dataType=\"boolean\" "
+                                  "feature=\"transformedValue\">" +
+                                      expr + "</OutputField></Output>"));
+    };
+    expect("ordinal-number-unknown-predicate",
+           "DataDictionary.html: \"the sequence defines the ascending order on the respective field\" (D47, P6.12)",
+           pmml(ord, tree(kTree + mf("oi"), "<SimplePredicate field=\"oi\" operator=\"lessThan\" value=\"2.5\"/>")),
+           {"E-ORDINAL-VALUE-UNKNOWN", "W-TEXT-WIDENED"});
+    expect("ordinal-number-known-predicate", "P6.12: the value 2.0 is the Value 2 (§3.4 K1 rule 2)",
+           pmml(ord, tree(kTree + mf("oi"), "<SimplePredicate field=\"oi\" operator=\"lessThan\" value=\"2.0\"/>")),
+           {"W-TEXT-WIDENED"});
+    expect("ordinal-number-unknown-apply", "D47, P6.12: a Constant outside the Values, untyped, on the left",
+           out(call("lessThan", constant("5") + ref("oi"))), {"E-ORDINAL-VALUE-UNKNOWN"});
+    expect("ordinal-number-known-apply", "P6.12: the double Constant 1.0 is the Value 1",
+           out(call("lessThan", ref("oi") + constant("1.0", "double"))), {});
+    expect("ordinal-number-equal-apply", "equality needs no order (D47 is an ordering's)",
+           out(call("equal", ref("oi") + constant("5", "integer"))), {});
+    expect("ordinal-number-no-values",
+           "DataDictionary.html: \"If no Value elements are given, the order is always assumed to be the ascending "
+           "order of the representation type\"",
+           pmml(kNum + field("ni", "integer", "ordinal"),
+                tree(kTree + mf("ni"), "<SimplePredicate field=\"ni\" operator=\"lessThan\" value=\"5\"/>")),
+           {});
+    // A DerivedField's Value that is no value of its type takes no place in
+    // the order, with a warning (the document loads, P6.12 strictness); D47
+    // then reads the remaining Values (3, 2): the Constant 2 is one, 1 not.
+    const std::string k = td(derived("k", "integer",
+                                     ref("i") + "<Value value=\"3\"/><Value value=\"abc\"/><Value value=\"2\"/>",
+                                     "ordinal"));
+    const auto kout = [&](const std::string& expr) {
+      return pmml(kNum, k + regression(kMining,
+                                       "<Output><OutputField name=\"t\" dataType=\"boolean\" "
+                                       "feature=\"transformedValue\">" +
+                                           expr + "</OutputField></Output>"));
+    };
+    expect("ordinal-derived-value-not-of-type",
+           "a Value that is no value of the field's type is no value of the field (P6.12, D51; warning)",
+           kout(call("lessThan", ref("k") + constant("2", "integer"))), {"W-VALUE-NOT-OF-TYPE"});
+    expect("ordinal-derived-value-not-of-type-unknown",
+           "D47 over the Values that remain (3, 2): the Constant 1 has no place",
+           kout(call("lessThan", ref("k") + constant("1", "integer"))),
+           {"W-VALUE-NOT-OF-TYPE", "E-ORDINAL-VALUE-UNKNOWN"});
+  }
   expect("set-nan", "§2.7, D26: a NaN key matches nothing",
          pmml(kNum, tree(kTree,
                          "<SimpleSetPredicate field=\"x\" booleanOperator=\"isIn\"><Array type=\"real\">1 "

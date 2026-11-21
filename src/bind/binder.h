@@ -68,6 +68,7 @@
 #include "bind/scope.h"
 #include "bind/typing.h"
 #include "core/types/cast.h"
+#include "core/types/compare.h"
 #include "core/types/keys.h"
 #include "core/types/parse.h"
 #include "core/types/string_pool.h"
@@ -215,18 +216,20 @@ inline std::string arity_mismatch(const fn::Signature& sig, std::size_t n) {
          expected + " (BuiltinFunctions.html)";
 }
 
-// The declared order of the field `b` names (design items P6.3, P6.9, §2.7):
-// the texts of its declaration's valid Value elements, in document order,
-// when its binding is an ordinal string field that has them, else nullopt.
+// The declared order of the field `b` names (design items P6.3, P6.9, P6.12,
+// §2.7): the texts of its declaration's valid Value elements, in document
+// order, when its binding is an ordinal field that has them, of any type
+// (P6.12: an integer field's Values 3, 1, 2 order 3 < 1 < 2), else nullopt
+// (no Values: "the ascending order of the representation type").
 // The optype is the binding's in the model's scope (MiningSchema.html,
 // optype: "The attribute value overrides the corresponding value in the
 // DataField"); the Values are its declaration's, a MiningField's those of the
 // field it reads. DataDictionary.html: "For ordinal fields, if a sequence of
 // Value elements is given, the sequence defines the ascending order". Shared
 // by the binder's report (E-ORDINAL-VALUE-UNKNOWN) and the engine's load
-// (load_scope.h ordinal_values).
+// (load_scope.h ordinal_declaration).
 inline std::optional<std::vector<std::string>> declared_order(const Binding* b) {
-  if (!b || b->type.type != TypeId::String || b->type.optype != OpType::Ordinal) return std::nullopt;
+  if (!b || !b->type.type || b->type.optype != OpType::Ordinal) return std::nullopt;
   const Binding* root = b;
   while (root->source) root = root->source;
   if (!root->declaration) return std::nullopt;
@@ -238,6 +241,55 @@ inline std::optional<std::vector<std::string>> declared_order(const Binding* b) 
   }
   if (values.empty()) return std::nullopt;
   return values;
+}
+
+// The declared order of the field `b` names read in its type (P6.12): the
+// texts of its valid Values and, for a field that is not a string, their
+// values by the K1 rule (§3.4: the field's type, else, for a number, an
+// xs:double literal), as the field's Values are read. A string field's
+// members are its texts (the engine pools them itself). A Value that is no
+// value of the field's type (`<Value value="abc"/>` on an integer DerivedField
+// or OutputField; a DataField's is its own load error, E-VALUE-MALFORMED) is
+// no value of the field, so it takes no place in the order and is left out
+// of both lists; bind_values warns, W-VALUE-NOT-OF-TYPE. DataDictionary.html:
+// "the sequence defines the ascending order on the respective field": the
+// remaining Values keep their sequence. nullopt when no Value remains (the
+// natural order, as for a field without Values: "If no Value elements are
+// given, the order is always assumed to be the ascending order of the
+// representation type"). Shared by the binder's report and the engine's load
+// (load_scope.h ordinal_declaration), so both pick the same FieldRef.
+struct DeclaredOrder {
+  std::vector<std::string> values;    // the texts, in document order
+  std::vector<types::Value> members;  // their values, parallel; empty for a string field
+};
+
+inline std::optional<DeclaredOrder> read_declared_order(const Binding* b, types::ParseContext& ctx) {
+  auto values = declared_order(b);
+  if (!values) return std::nullopt;
+  DeclaredOrder d;
+  const TypeId type = *b->type.type;
+  if (type == TypeId::String) {
+    d.values = std::move(*values);
+    return d;
+  }
+  d.values.reserve(values->size());
+  d.members.reserve(values->size());
+  for (std::string& v : *values) {
+    const DocumentValue read = read_document_text(type, v, ctx);
+    if (read.rule == TextRule::Malformed) continue;
+    d.values.push_back(std::move(v));
+    d.members.push_back(read.value);
+  }
+  if (d.values.empty()) return std::nullopt;
+  return d;
+}
+
+// Whether the document value `v` is one of `members` (types::same_member: a
+// string by text, a number by value; D47, P6.9, P6.12).
+inline bool in_order(const types::Value& v, const std::vector<types::Value>& members) {
+  for (const types::Value& m : members)
+    if (types::same_member(v, m)) return true;
+  return false;
 }
 
 // D47 (design item P6.9, decided 2026-11-20 after P6.4): an ordering of an
@@ -1061,6 +1113,20 @@ class Binder {
       // §2.8: a missing marker is matched as raw text first, so it may be
       // anything; valid and invalid values are read by the §3.4 rule.
       if (property && *property == "missing") continue;
+      // A DerivedField's or OutputField's Value that is no value of its type
+      // is no value of the field: it takes no place in the order
+      // (read_declared_order, P6.12, D51), with a warning, since such
+      // documents load (the engine read these Values for nothing before).
+      if (!allow_property && b.type.type &&
+          read_document_text(*b.type.type, *value, parse_ctx_).rule == TextRule::Malformed) {
+        warning(code::kValueNotOfType, ctx, v,
+                "Value@value=" + detail::quoted(*value) + " of " + std::string(type_name(*b.type.type)) + " field " +
+                    detail::quoted(b.name) +
+                    " is not a value of that type: it is no value of the field and takes no place in its order "
+                    "(DataDictionary.html: \"the sequence defines the ascending order on the respective field\"; "
+                    "P6.12, D51)");
+        continue;
+      }
       if (!property || *property == "valid") any_valid = true;
       document_value(ctx, v, b.type.type, *value, "Value@value", &b);
     }
@@ -1766,27 +1832,42 @@ class Binder {
     }
   }
 
-  // D47 (P6.9): a string ordering follows the declared Values of its first
-  // FieldRef operand that has them (the engine's choice, fn/apply_node.h);
-  // a Constant operand outside them has no place in that order, a load error.
-  // A Constant with missing="true" has no value to place.
+  // D47 (P6.9, P6.12): an ordering follows the declared Values of its first
+  // FieldRef operand that has them, of any type (the engine's choice,
+  // fn/apply_node.h); a Constant operand outside them has no place in that
+  // order, a load error. A string is placed by its text, a number by its
+  // value (types::same_member: the Constant 2.0 is the integer Value 2). A
+  // Constant with missing="true" has no value to place; one that is no value
+  // of its type is its own error.
   void check_ordinal_constants(Ctx& ctx, pugi::xml_node node, const std::vector<pugi::xml_node>& args,
                                const std::vector<Typed>& types, const std::string& what) {
     const Binding* field = nullptr;
-    std::optional<std::vector<std::string>> values;
-    for (std::size_t i = 0; i < args.size() && !values; i++)
+    std::optional<DeclaredOrder> order;
+    for (std::size_t i = 0; i < args.size() && !order; i++)
       if (std::string_view(args[i].name()) == "FieldRef" && types[i].field) {
-        values = declared_order(types[i].field);
+        order = read_declared_order(types[i].field, parse_ctx_);
         field = types[i].field;
       }
-    if (!values) return;
-    for (pugi::xml_node a : args) {
+    if (!order) return;
+    const TypeId field_type = *field->type.type;
+    for (std::size_t i = 0; i < args.size(); i++) {
+      const pugi::xml_node a = args[i];
       if (std::string_view(a.name()) != "Constant") continue;
       bool missing = false;
       if (const auto m = attr(a, "missing"); m && lexical::parse_boolean(*m, missing) && missing) continue;
       const std::string_view text = a.text().get();
-      if (std::find(values->begin(), values->end(), text) == values->end())
-        error(code::kOrdinalValueUnknown, ctx, node, what + ": " + ordinal_value_unknown(text, field->name, *values));
+      bool known = false;
+      if (field_type == TypeId::String) {
+        known = std::find(order->values.begin(), order->values.end(), text) != order->values.end();
+      } else {
+        if (!types[i].type) continue;
+        const types::Value v = parse_constant(*types[i].type, text, parse_ctx_);
+        if (types::is_invalid(v) || types::is_missing(v)) continue;
+        known = in_order(v, order->members);
+      }
+      if (!known)
+        error(code::kOrdinalValueUnknown, ctx, node,
+              what + ": " + ordinal_value_unknown(text, field->name, order->values));
     }
   }
 
@@ -1845,7 +1926,7 @@ class Binder {
       const std::string what = "Apply " + detail::quoted(name);
       const bool ordering = is_ordering(name);
       for (std::size_t i = 1; i < n; i++) check_comparable(ctx, node, ordering, types[0], types[i], what);
-      if (ordering && n == 2 && types[0].type == TypeId::String && types[1].type == TypeId::String)
+      if (ordering && n == 2 && same_kind(types[0].type, types[1].type))
         check_ordinal_constants(ctx, node, args, types, what);
     }
     // Result (§4.1, typing.h apply_result_type, shared with the engine's load).
@@ -1994,11 +2075,22 @@ class Binder {
     document_value(ctx, node, b->type.type, *value, "value", b);
     if (detail::one_of(*op, {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})) {
       check_order_operand(ctx, node, b, "operator " + detail::quoted(*op));
-      // D47 (P6.9): the value must have a place in the field's declared order.
-      if (const auto values = declared_order(b);
-          values && std::find(values->begin(), values->end(), *value) == values->end())
-        error(code::kOrdinalValueUnknown, ctx, node,
-              "operator " + detail::quoted(*op) + ": value " + ordinal_value_unknown(*value, b->name, *values));
+      // D47 (P6.9, P6.12): the value must have a place in the field's
+      // declared order: a string by its text, a number by its value read
+      // by the K1 rule (a value that is no value of the type is
+      // document_value's error above).
+      if (const auto order = read_declared_order(b, parse_ctx_)) {
+        bool known = true;
+        if (b->type.type == TypeId::String) {
+          known = std::find(order->values.begin(), order->values.end(), *value) != order->values.end();
+        } else {
+          const DocumentValue v = read_document_text(*b->type.type, *value, parse_ctx_);
+          known = v.rule == TextRule::Malformed || in_order(v.value, order->members);
+        }
+        if (!known)
+          error(code::kOrdinalValueUnknown, ctx, node,
+                "operator " + detail::quoted(*op) + ": value " + ordinal_value_unknown(*value, b->name, order->values));
+      }
     }
   }
 
@@ -2280,7 +2372,7 @@ class Binder {
         // A MiningField whose optype differs from its source's is not one:
         // MiningSchema.html, optype: "overrides the corresponding value in
         // the DataField", and the model's ordinal comparisons read it
-        // (bind::ordinal_values, P6.3).
+        // (bind::ordinal_declaration, P6.3).
         m.mining.emplace(key, const_cast<Binding*>(source));
         index++;
         continue;

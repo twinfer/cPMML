@@ -2283,6 +2283,327 @@ static void ordinal_value_unknown() {
   CHECK(load_error(with("mid")).empty());
 }
 
+// ---- P6.12: an ordinal field of any type is ordered by its Values ---------
+//
+// DataDictionary.html: "For ordinal fields, if a sequence of Value elements
+// is given, the sequence defines the ascending order on the respective
+// field"; "If no Value elements are given, the order is always assumed to be
+// the ascending order of the representation type. For example, if the
+// representation type is integer, an order must only be given explicitly
+// via a respective sequence of Value elements in case an order different
+// from the natural order of integers should be used." The integer Values
+// 3, 1, 2 order 3 < 1 < 2. A number is placed by its value in the field's
+// type (the double Constant 2.0 is the Value 2); a document number that is
+// none of the Values is D47's load error, as a string is (P6.9). ±INF
+// against the same infinity stays indeterminate (D9), Values or not. Base
+// 00e945c ordered every non-string ordinal by its natural order and loaded
+// each refused document.
+static void ordinal_numeric_order() {
+  const auto doc = [](const std::string& expression, const std::string& mining_c = "") {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="integer"><Value value="3"/><Value value="1"/><Value value="2"/><Value value="9" property="invalid"/></DataField>
+    <DataField name="d" optype="ordinal" dataType="double"><Value value="INF"/><Value value="0"/><Value value="-INF"/></DataField>
+    <DataField name="f" optype="ordinal" dataType="float"><Value value="0.1"/><Value value="-1"/></DataField>
+    <DataField name="c" optype="continuous" dataType="integer"><Value value="3"/><Value value="1"/><Value value="2"/></DataField>
+    <DataField name="n" optype="ordinal" dataType="integer"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="o"/><MiningField name="d"/><MiningField name="f"/><MiningField name="c")") +
+           mining_c + R"(/><MiningField name="n"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="t" dataType="string" feature="transformedValue">)" +
+           expression + R"(</OutputField>
+    </Output>
+    <RegressionTable intercept="1"/>
+  </RegressionModel>
+</PMML>)";
+  };
+  const std::string code = "E-ORDINAL-VALUE-UNKNOWN: ";
+  const std::string basis =
+      "(Values \"3\", \"1\", \"2\"; DataDictionary.html: \"For ordinal fields, if a sequence of Value elements "
+      "is given, the sequence defines the ascending order\": a value outside it has no place in the order, D47)";
+  // D47 for a number: every ordering, a typed Constant on the right, the full
+  // message; untyped on the left; a double that is no integer; an invalid
+  // Value; a float Constant against float Values (0.1f is a Value, 0.1 as a
+  // double is not: compared in double, §2.5, D1).
+  for (const std::string fn : {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})
+    CHECK(load_error(doc("<Apply function=\"" + fn +
+                         "\"><FieldRef field=\"o\"/><Constant dataType=\"integer\">5</Constant></Apply>")) ==
+          code + "Apply \"" + fn + "\" in RegressionModel: \"5\" is not a Value of ordinal field \"o\" " + basis);
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><Constant>7</Constant><FieldRef field="o"/></Apply>)")),
+                 code + "Apply \"lessThan\" in RegressionModel: \"7\" is not a Value of ordinal field \"o\""));
+  CHECK(contains(load_error(doc(
+                     R"(<Apply function="lessThan"><FieldRef field="o"/><Constant dataType="double">2.5</Constant></Apply>)")),
+                 "\"2.5\" is not a Value of ordinal field \"o\""));
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>9</Constant></Apply>)")),
+                 "\"9\" is not a Value"));
+  CHECK(contains(load_error(doc(
+                     R"(<Apply function="lessThan"><FieldRef field="f"/><Constant dataType="double">0.1</Constant></Apply>)")),
+                 "\"0.1\" is not a Value of ordinal field \"f\""));
+  // A continuous field with Values made ordinal by its MiningField.
+  CHECK(contains(load_error(doc(R"(<Apply function="lessThan"><FieldRef field="c"/><Constant>5</Constant></Apply>)",
+                                " optype=\"ordinal\"")),
+                 "\"5\" is not a Value of ordinal field \"c\""));
+  // Controls that load: a Value by its value (2.0, 1.0 as double, 0.1 float,
+  // INF); equality; a missing Constant; no Values; a continuous field.
+  for (const std::string e :
+       {R"(<Apply function="lessThan"><FieldRef field="o"/><Constant dataType="double">2.0</Constant></Apply>)",
+        R"(<Apply function="lessThan"><Constant>1</Constant><FieldRef field="o"/></Apply>)",
+        R"(<Apply function="lessThan"><FieldRef field="f"/><Constant dataType="float">0.1</Constant></Apply>)",
+        R"(<Apply function="lessThan"><FieldRef field="d"/><Constant dataType="double">INF</Constant></Apply>)",
+        R"(<Apply function="equal"><FieldRef field="o"/><Constant>5</Constant></Apply>)",
+        R"(<Apply function="lessThan"><FieldRef field="o"/><Constant dataType="integer" missing="true">5</Constant></Apply>)",
+        R"(<Apply function="lessThan"><FieldRef field="n"/><Constant>5</Constant></Apply>)",
+        R"(<Apply function="lessThan"><FieldRef field="c"/><Constant>5</Constant></Apply>)"})
+    CHECK(load_error(doc(e)).empty());
+
+  // The order per record.
+  const auto score = [&](const std::string& expression, const std::string& mining_c = "") {
+    const auto model = std::make_shared<const cpmml::Model>(load(doc(expression, mining_c)));
+    return [model](const std::string& field, const std::string& v) {
+      cpmml::Input in;
+      in["o"] = std::string("3");
+      in["d"] = std::string("0");
+      in["f"] = std::string("0.1");
+      in["c"] = std::string("3");
+      in["n"] = std::string("1");
+      in[field] = v;
+      const auto out = model->evaluate(in).str_outputs();
+      const auto it = out.find("t");
+      return it == out.end() ? std::string("none") : it->second;
+    };
+  };
+  {
+    const auto t = score(R"(<Apply function="lessThan"><FieldRef field="o"/><Constant>2</Constant></Apply>)");
+    CHECK(t("o", "3") == "true" && t("o", "1") == "true" && t("o", "2") == "false");
+  }
+  {
+    // On the left: 1 < o holds for o = 2 only (3 < 1 < 2).
+    const auto t = score(R"(<Apply function="lessThan"><Constant>1</Constant><FieldRef field="o"/></Apply>)");
+    CHECK(t("o", "3") == "false" && t("o", "1") == "false" && t("o", "2") == "true");
+  }
+  {
+    // INF < 0 < -INF; INF against INF is indeterminate (D9).
+    const auto lt = score(R"(<Apply function="lessThan"><FieldRef field="d"/><Constant dataType="double">0</Constant></Apply>)");
+    CHECK(lt("d", "INF") == "true" && lt("d", "0") == "false" && lt("d", "-INF") == "false");
+    const auto le = score(
+        R"(<Apply function="lessOrEqual"><FieldRef field="d"/><Constant dataType="double">INF</Constant></Apply>)");
+    CHECK(le("d", "INF") == "none" && le("d", "0") == "false" && le("d", "-INF") == "false");
+  }
+  {
+    const auto t = score(R"(<Apply function="lessThan"><FieldRef field="c"/><Constant>2</Constant></Apply>)",
+                         " optype=\"ordinal\"");
+    CHECK(t("c", "3") == "true" && t("c", "2") == "false");
+    // Continuous: the natural order (the Values only restrict the valid ones).
+    const auto u = score(R"(<Apply function="lessThan"><FieldRef field="c"/><Constant>2</Constant></Apply>)");
+    CHECK(u("c", "3") == "false" && u("c", "1") == "true");
+    // No Values: the natural order.
+    const auto v = score(R"(<Apply function="lessThan"><FieldRef field="n"/><Constant>2</Constant></Apply>)");
+    CHECK(v("n", "3") == "false" && v("n", "1") == "true");
+  }
+
+  // A SimplePredicate, in a tree (BoundPredicates) and in a segment's
+  // predicate (the Predicate tree).
+  const auto tree = [](const std::string& predicate) {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="integer"><Value value="3"/><Value value="1"/><Value value="2"/></DataField>
+    <DataField name="y" optype="categorical" dataType="string"/>
+  </DataDictionary>
+  <TreeModel functionName="classification">
+    <MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Node score="r"><True/><Node score="T">)") +
+           predicate + R"(</Node><Node score="F"><True/></Node></Node>
+  </TreeModel>
+</PMML>)";
+  };
+  for (const std::string op : {"lessThan", "lessOrEqual", "greaterThan", "greaterOrEqual"})
+    CHECK(load_error(tree("<SimplePredicate field=\"o\" operator=\"" + op + "\" value=\"2.5\"/>")) ==
+          code + "SimplePredicate field=\"o\" operator=\"" + op +
+              "\" in TreeModel: value \"2.5\" is not a Value of ordinal field \"o\" " + basis);
+  CHECK(load_error(tree(R"(<SimplePredicate field="o" operator="lessThan" value="2.0"/>)")).empty());
+  CHECK(load_error(tree(R"(<SimplePredicate field="o" operator="equal" value="5"/>)")).empty());
+  {
+    const cpmml::Model model = load(tree(R"(<SimplePredicate field="o" operator="greaterThan" value="1"/>)"));
+    const auto t = [&](const std::string& o) {
+      cpmml::Input in;
+      in["o"] = o;
+      return model.evaluate(in).as_string();
+    };
+    CHECK(t("3") == "F" && t("1") == "F" && t("2") == "T");
+  }
+  const std::string segment = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="o" optype="ordinal" dataType="integer"><Value value="3"/><Value value="1"/><Value value="2"/></DataField>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <MiningModel functionName="regression">
+    <MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Segmentation multipleModelMethod="selectFirst">
+      <Segment id="1"><SimplePredicate field="o" operator="lessOrEqual" value="VALUE"/>
+        <RegressionModel functionName="regression"><MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema><RegressionTable intercept="1"/></RegressionModel>
+      </Segment>
+      <Segment id="2"><True/>
+        <RegressionModel functionName="regression"><MiningSchema><MiningField name="o"/><MiningField name="y" usageType="target"/></MiningSchema><RegressionTable intercept="2"/></RegressionModel>
+      </Segment>
+    </Segmentation>
+  </MiningModel>
+</PMML>)";
+  const auto with = [&](const std::string& value) {
+    std::string d = segment;
+    d.replace(d.find("VALUE"), 5, value);
+    return d;
+  };
+  CHECK(contains(load_error(with("4")),
+                 code + "SimplePredicate field=\"o\" operator=\"lessOrEqual\" in MiningModel: value \"4\" is not a "
+                        "Value of ordinal field \"o\""));
+  {
+    const cpmml::Model model = load(with("3"));
+    const auto t = [&](const std::string& o) {
+      cpmml::Input in;
+      in["o"] = o;
+      return model.evaluate(in).as_string();
+    };
+    // o <= 3 holds for o = 3 only (3 is the least Value).
+    CHECK(t("3") == "1.0" && t("1") == "2.0" && t("2") == "2.0");
+  }
+
+  // A NaN Value is a member (user decision 7a: "a NaN in a Value list matches
+  // any NaN"; XML Schema Part 2 Second Edition, 3.2.5: "Not-a-number equals
+  // itself"), so a NaN Constant or SimplePredicate value is no D47 load error
+  // (base 00e945c and JPMML 1.7.7 load these documents). NaN takes the NaN
+  // Value's place against another member (NaN < 2 < 1); NaN against NaN
+  // stays indeterminate (comparisons keep NaN != NaN, D51).
+  const auto nan_doc = [](const std::string& expression) {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="e" optype="ordinal" dataType="double"><Value value="NaN"/><Value value="2"/><Value value="1"/></DataField>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="e"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="t" dataType="string" feature="transformedValue">)") +
+           expression + R"(</OutputField>
+    </Output>
+    <RegressionTable intercept="1"/>
+  </RegressionModel>
+</PMML>)";
+  };
+  {
+    const std::string lt_nan =
+        R"(<Apply function="lessThan"><FieldRef field="e"/><Constant dataType="double">NaN</Constant></Apply>)";
+    CHECK(load_error(nan_doc(lt_nan)).empty());
+    CHECK(load_error(nan_doc(R"(<Apply function="greaterThan"><Constant dataType="double">NaN</Constant><FieldRef field="e"/></Apply>)"))
+              .empty());
+    const auto model = std::make_shared<const cpmml::Model>(load(nan_doc(lt_nan)));
+    const auto t = [&](const std::string& e) {
+      cpmml::Input in;
+      in["e"] = e;
+      const auto out = model->evaluate(in).str_outputs();
+      const auto it = out.find("t");
+      return it == out.end() ? std::string("none") : it->second;
+    };
+    CHECK(t("2") == "false" && t("1") == "false");
+    const auto gt = std::make_shared<const cpmml::Model>(load(nan_doc(
+        R"(<Apply function="greaterThan"><FieldRef field="e"/><Constant dataType="double">NaN</Constant></Apply>)")));
+    cpmml::Input in;
+    in["e"] = std::string("1");
+    CHECK(gt->evaluate(in).str_outputs().at("t") == "true");
+    // A value outside the Values is still D47's load error.
+    CHECK(contains(load_error(nan_doc(
+                       R"(<Apply function="lessThan"><FieldRef field="e"/><Constant dataType="double">3</Constant></Apply>)")),
+                   "\"3\" is not a Value of ordinal field \"e\""));
+    // The order itself: NaN < 2 < 1, NaN against NaN unordered.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const cpmml::compare::OrdinalOrder order(
+        std::vector<cpmml::types::Value>{cpmml::types::Double{nan}, cpmml::types::Double{2}, cpmml::types::Double{1}});
+    CHECK(order.rank(cpmml::types::Double{nan}) == 0 && order.rank(cpmml::types::Float{std::nanf("")}) == 0);
+    CHECK(order.order(cpmml::types::Double{nan}, cpmml::types::Double{1}) == std::partial_ordering::less);
+    CHECK(order.order(cpmml::types::Double{nan}, cpmml::types::Double{nan}) == std::partial_ordering::unordered);
+    CHECK(cpmml::types::same_member(cpmml::types::Double{nan}, cpmml::types::Double{nan}));
+    CHECK(!cpmml::types::same_member(cpmml::types::Double{nan}, cpmml::types::Double{1}));
+  }
+  {
+    const std::string nan_tree = R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="e" optype="ordinal" dataType="double"><Value value="NaN"/><Value value="2"/><Value value="1"/></DataField>
+    <DataField name="y" optype="categorical" dataType="string"/>
+  </DataDictionary>
+  <TreeModel functionName="classification">
+    <MiningSchema><MiningField name="e"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Node score="r"><True/><Node score="T"><SimplePredicate field="e" operator="greaterThan" value="NaN"/></Node><Node score="F"><True/></Node></Node>
+  </TreeModel>
+</PMML>)";
+    CHECK(load_error(nan_tree).empty());
+    const cpmml::Model model = load(nan_tree);
+    cpmml::Input in;
+    in["e"] = std::string("2");
+    CHECK(model.evaluate(in).as_string() == "T");
+  }
+
+  // A Value that is no value of the field's type (`abc` on an integer
+  // DerivedField) is no value of the field: it takes no place in the order,
+  // the remaining Values keep their sequence (3 < 2), and the document loads
+  // as it did on base 00e945c (the binder warns, W-VALUE-NOT-OF-TYPE). D47
+  // reads the remaining Values. With no Value left, the natural order.
+  const auto derived = [](const std::string& values, const std::string& function, const std::string& c) {
+    return std::string(R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="integer"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <TransformationDictionary>
+    <DerivedField name="k" optype="ordinal" dataType="integer"><FieldRef field="x"/>)") +
+           values + R"(</DerivedField>
+  </TransformationDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <Output>
+      <OutputField name="t" dataType="string" feature="transformedValue"><Apply function=")" +
+           function + R"("><FieldRef field="k"/><Constant dataType="integer">)" + c + R"(</Constant></Apply></OutputField>
+    </Output>
+    <RegressionTable intercept="1"/>
+  </RegressionModel>
+</PMML>)";
+  };
+  const std::string bad = R"(<Value value="3"/><Value value="abc"/><Value value="2"/>)";
+  CHECK(load_error(derived(bad, "lessThan", "2")).empty());
+  CHECK(load_error(derived(bad, "equal", "3")).empty());
+  CHECK(load_error(derived(bad, "lessThan", "1")) ==
+        code + "Apply \"lessThan\" in RegressionModel: \"1\" is not a Value of ordinal field \"k\" (Values \"3\", "
+               "\"2\"; DataDictionary.html: \"For ordinal fields, if a sequence of Value elements is given, the "
+               "sequence defines the ascending order\": a value outside it has no place in the order, D47)");
+  const auto per_record = [&](const std::string& values, const std::string& function, const std::string& c) {
+    const auto model = std::make_shared<const cpmml::Model>(load(derived(values, function, c)));
+    return [model](const std::string& x) {
+      cpmml::Input in;
+      in["x"] = x;
+      const auto out = model->evaluate(in).str_outputs();
+      const auto it = out.find("t");
+      return it == out.end() ? std::string("none") : it->second;
+    };
+  };
+  {
+    // 3 < 2: lessThan(k, 2) for k = 3 holds; 7 and 1 have no place.
+    const auto t = per_record(bad, "lessThan", "2");
+    CHECK(t("3") == "true" && t("2") == "false" && t("7") == "none" && t("1") == "none");
+    const auto e = per_record(bad, "equal", "3");
+    CHECK(e("3") == "true" && e("2") == "false");
+    // No Value of the type at all: the natural order.
+    const auto n = per_record(R"(<Value value="abc"/><Value value="def"/>)", "lessThan", "2");
+    CHECK(n("3") == "false" && n("1") == "true");
+  }
+}
+
 // ---- P6.6: trailing blanks of categorical string inputs --------------------
 //
 // DataDictionary.html: "Trailing blanks in categorical input values are not
@@ -2396,6 +2717,7 @@ int main() {
   writer_round_trip();
   trailing_blanks();
   ordinal_value_unknown();
+  ordinal_numeric_order();
 
   if (failures) std::cerr << failures << " check(s) failed\n";
   return failures;

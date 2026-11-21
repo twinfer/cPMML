@@ -57,8 +57,8 @@ inline types::Relation relation_of(const Op op) {
 
 // A SimplePredicate's comparison of an operand x (not missing) with its value
 // c, typed (§2.7, P6.3; core/compare.h): in the common type, ±INF against the
-// same infinity and NaN UNKNOWN (D9, B44), an ordinal string field's declared
-// order. The value is read in the field's type (§3.4), so a pair of no common
+// same infinity and NaN UNKNOWN (D9, B44), an ordinal field's declared order
+// (any type, P6.12). The value is read in the field's type (§3.4), so a pair of no common
 // type is a binder bug, never an answer. The operand is read as the value's
 // type when that is string or boolean (compare::operand: a number that
 // carries a text is that text; a boolean result held as the Double 1 or 0,
@@ -275,7 +275,8 @@ class Predicate {
   bool typed = false;
   // A typed comparison whose value is a finite number: the double fast path.
   bool finite_number = false;
-  // An ordering of an ordinal string field with Values: its declared order.
+  // An ordering of an ordinal field with Values (any type, P6.12): its
+  // declared order.
   std::shared_ptr<const cpmml::compare::OrdinalOrder> ordinal;
   // A set predicate: its members as read, in the order of their keys, one per
   // key (the iteration order of the std::set<Value> they were); values is
@@ -308,7 +309,8 @@ class Predicate {
     // two integers exactly.)
     p.finite_number = (t == cpmml::types::TypeId::Integer || t == cpmml::types::TypeId::Float || t == cpmml::types::TypeId::Double) &&
                       std::isfinite(value.as_double()) &&
-                      !(t == cpmml::types::TypeId::Integer && std::fabs(value.as_double()) >= 9007199254740992.0);
+                      !(t == cpmml::types::TypeId::Integer && std::fabs(value.as_double()) >= 9007199254740992.0) &&
+                      !ordinal;  // an ordinal field's Values order it (P6.12): the typed path
     p.ordinal = std::move(ordinal);
     return p;
   }

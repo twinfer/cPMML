@@ -162,6 +162,15 @@ constexpr bool order_mixed(StaticType a, StaticType b) {
   return (*a == TypeId::String && is_numeric(*b)) || (is_numeric(*a) && *b == TypeId::String);
 }
 
+// Two static types of one kind (both strings, both numbers, both booleans):
+// the operands an ordinal field's declared order can rank (design item
+// P6.12, core/compare.h OrdinalOrder). Shared by the binder and the engine's
+// load (fn/apply_node.h).
+constexpr bool same_kind(StaticType a, StaticType b) {
+  if (!a || !b) return false;
+  return (is_numeric(*a) && is_numeric(*b)) || (*a == *b && (*a == TypeId::String || *a == TypeId::Boolean));
+}
+
 // ---------------------------------------------------------------- dataType, optype
 struct DataTypeInfo {
   TypeId type;

@@ -74,29 +74,33 @@ class PredicateBuilder {
         // isMissing / isNotMissing have no value attribute
         // scope.resolve (P2.1): the field's declared type even when it is
         // declared after this predicate's model element builds it (B12).
-        const auto [index, datatype] = cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"));
+        const cpmml::bind::Binding* binding = nullptr;
+        const auto [index, datatype] =
+            cpmml::bind::scope_resolve(*indexer, node, node.required_attribute("field"), &binding);
         if (op == Op::IS_MISSING || op == Op::IS_NOT_MISSING) return Predicate(index, op, Value());
         // Every other operator compares with value (Predicates.html), typed
-        // (P6.3, §2.7). An ordering of an ordinal string field with Values
-        // follows their order (DataDictionary.html: "For ordinal fields, if
-        // a sequence of Value elements is given, the sequence defines the
-        // ascending order").
+        // (P6.3, §2.7). An ordering of an ordinal field with Values, of any
+        // type, follows their order (P6.12; DataDictionary.html: "For
+        // ordinal fields, if a sequence of Value elements is given, the
+        // sequence defines the ascending order on the respective field").
         // A value outside the Values has no place in that order: a load
-        // error (D47, design item P6.9; the binder's E-ORDINAL-VALUE-UNKNOWN).
+        // error (D47, design items P6.9, P6.12; the binder's
+        // E-ORDINAL-VALUE-UNKNOWN), a number placed by its value.
+        const Value value = Value::document(node.required_attribute("value"), datatype);
         std::shared_ptr<const cpmml::compare::OrdinalOrder> ordinal;
-        if (datatype.value == DataType::DataTypeValue::STRING && op != Op::EQUAL && op != Op::NOT_EQUAL)
-          if (auto values = cpmml::bind::ordinal_values(node, node.required_attribute("field"))) {
-            const std::string value = node.required_attribute("value");
-            if (std::find(values->begin(), values->end(), value) == values->end())
+        // (The optype test first: most predicates are of no ordinal field.)
+        if (op != Op::EQUAL && op != Op::NOT_EQUAL && binding->type.optype == cpmml::bind::OpType::Ordinal)
+          if (auto declared = cpmml::bind::ordinal_declaration(binding)) {
+            if (!declared->contains(value))
               throw cpmml::ParsingException(
                   cpmml::bind::ordinal_value_message(node,
                                                      "SimplePredicate field=\"" + node.required_attribute("field") +
                                                          "\" operator=\"" + node.required_attribute("operator") + "\"",
-                                                     "value ", value, node.required_attribute("field"), *values));
-            ordinal = std::make_shared<const cpmml::compare::OrdinalOrder>(*values);
+                                                     "value ", node.required_attribute("value"),
+                                                     node.required_attribute("field"), declared->values));
+            ordinal = std::make_shared<const cpmml::compare::OrdinalOrder>(std::move(declared->members));
           }
-        return Predicate::simple(index, op, Value::document(node.required_attribute("value"), datatype),
-                                 std::move(ordinal));
+        return Predicate::simple(index, op, value, std::move(ordinal));
       }
       case PredicateType::PredicateTypeValue::SIMPLESET: {
         const Op op = read_enum(node, "booleanOperator", PredicateOpType::SET_OPERATOR_TABLE);

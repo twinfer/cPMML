@@ -51,10 +51,12 @@
  * W-NAME-SHADOWS-TD, W-SCOPE-FLAT; binder.h).
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -196,8 +198,11 @@ struct ResolvedField {
 
 // scope.resolve (§3.1) answering with today's Indexer slots (P2.1). `from` is
 // the element holding the reference (SimplePredicate, NumericPredictor,
-// FieldColumnPair, ...).
-inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const std::string& name) {
+// FieldColumnPair, ...). `binding`, when given, receives the binding the
+// name resolved to (the PredicateBuilder reads its declared order from it,
+// ordinal_declaration, without a second lookup per predicate).
+inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const std::string& name,
+                                   const Binding** binding = nullptr) {
   const LoadScope* scope = LoadScope::current();
   if (!scope) throw std::logic_error("scope_resolve(\"" + name + "\") outside a model load");
   const Binding* b = scope->binder().lookup(from.xml(), name);
@@ -210,25 +215,53 @@ inline ResolvedField scope_resolve(Indexer& indexer, const XmlNode& from, const 
   if (!b->type.type)
     throw cpmml::ParsingException(from.name() + ": the type of field \"" + name +
                                   "\" is unknown (its declaration has no valid dataType)");
+  if (binding) *binding = b;
   return ResolvedField{indexer.get_or_set(name), engine_type(*b->type.type)};
 }
 
-// The declared order of `name` seen from `from` (design item P6.3, §2.7): the
-// texts of its declaration's valid Value elements, in document order, when
-// the field is an ordinal string field that has them, else nullopt. The
-// optype is the binding's in the model's scope, so a MiningField's counts
-// (MiningSchema.html, optype: "The attribute value overrides the
-// corresponding value in the DataField"; the load-mode binder keeps a
-// MiningField of another optype as its own binding). DataDictionary.html: "For ordinal
-// fields, if a sequence of Value elements is given, the sequence defines the
-// ascending order".
-inline std::optional<std::vector<std::string>> ordinal_values(const XmlNode& from, const std::string& name) {
+// The declared order of `name` seen from `from`, of any type (design items
+// P6.3, P6.12, §2.7; the optype is the binding's in the model's scope, so a
+// MiningField's counts, MiningSchema.html, optype: "The attribute value
+// overrides the corresponding value in the DataField"; DataDictionary.html:
+// "For ordinal fields, if a sequence of Value elements is given, the sequence
+// defines the ascending order on the respective field"): the Values' texts
+// (for the messages), the field's type, and the Values read in it, by
+// bind::read_declared_order (a Value that is no value of the field's type is
+// left out: it takes no place in the order, W-VALUE-NOT-OF-TYPE), a string
+// pooled in the document's pool; else nullopt (the natural order).
+struct OrdinalDeclaration {
+  std::vector<std::string> values;
+  TypeId type;
+  std::vector<types::Value> members;
+
+  // Whether the document value `v` has a place in the order (D47): a string
+  // by its text, any other value by types::same_member.
+  bool contains(const ::Value& v) const {
+    if (type == TypeId::String) return std::find(values.begin(), values.end(), v.text()) != values.end();
+    return in_order(v.typed(), members);
+  }
+};
+
+// `b` is the binding `name` resolves to (scope_resolve's, or a lookup's).
+inline std::optional<OrdinalDeclaration> ordinal_declaration(const Binding* b) {
+  // A number or boolean needs no pool (a string's members are pooled below).
+  types::StringPool pool;
+  types::ParseContext ctx{&pool, nullptr, nullptr};
+  auto order = read_declared_order(b, ctx);
+  if (!order) return std::nullopt;
+  OrdinalDeclaration d{std::move(order->values), *b->type.type, std::move(order->members)};
+  if (d.type == TypeId::String) {
+    d.members.reserve(d.values.size());
+    for (const auto& v : d.values) d.members.push_back(::Value::string(v).typed());
+  }
+  return d;
+}
+
+// The declared order of `name` seen from `from` (a FieldRef of an Apply).
+inline std::optional<OrdinalDeclaration> ordinal_declaration(const XmlNode& from, const std::string& name) {
   const LoadScope* scope = LoadScope::current();
   if (!scope) return std::nullopt;
-  // The declaration's Value elements are read by declared_order (binder.h):
-  // in load mode the binder does not bind a DataField's Values (has_values
-  // is report mode's).
-  return declared_order(scope->binder().lookup(from.xml(), name));
+  return ordinal_declaration(scope->binder().lookup(from.xml(), name));
 }
 
 // The load error of an ordering of an ordinal string field with Values

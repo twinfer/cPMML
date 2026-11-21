@@ -1,6 +1,6 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 485
+# documents: 489
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
 # U-ELEMENT: 25
@@ -14,7 +14,8 @@
 # W-SCOPE-FLAT: 1
 # W-SCOPE-IMPLICIT: 8
 # W-SLOT-WIDENED: 4
-# W-TEXT-WIDENED: 35
+# W-TEXT-WIDENED: 37
+# W-VALUE-NOT-OF-TYPE: 3
 benchmark/data/model/AuditTree.xml:88	W-NAME-SHADOWS-MININGFIELD	1	TreeModel "RPart_Model"	OutputField "as.factor(TARGET_Adjusted)": OutputField name "as.factor(TARGET_Adjusted)" is already a MiningField of this model (FieldScope.html: names "must be unique from any other names in their scope"; accepted, decided 2026-11-18)
 benchmark/data/model/HousingGBTRegressor.xml:55	U-ELEMENT	1	MiningModel	ModelStats: not typed by the binder (statistics and verification data, not used in scoring); 1 occurrence
 benchmark/data/model/HousingGBTRegressor.xml:172	W-CAST-LOSSY	1	MiningModel	DerivedField "float(standard_scaler(longitude))": declares float over an expression of type double: the value is rounded to float (§2.6)
@@ -258,6 +259,11 @@ test/data/model/fix_normdiscrete_field_type.zip:17	W-TEXT-WIDENED	1	RegressionMo
 test/data/model/fix_normdiscrete_field_type.zip:25	W-CAST-NARROWING	1	RegressionModel	OutputField "o_ndm": declares double over its expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_normdiscrete_integer_decimal.zip:10	W-TEXT-WIDENED	1	RegressionModel	NormDiscrete "i" in OutputField "nd35": value="3.5" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_normdiscrete_integer_decimal.zip:11	W-TEXT-WIDENED	1	RegressionModel	NormDiscrete "i" in OutputField "nd30": value="3.0" of integer field "i" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_ordinal_derived_value_not_of_type.zip:9	W-VALUE-NOT-OF-TYPE	1		Value in DerivedField "k": Value@value="abc" of integer field "k" is not a value of that type: it is no value of the field and takes no place in its order (DataDictionary.html: "the sequence defines the ascending order on the respective field"; P6.12, D51)
+test/data/model/fix_ordinal_derived_value_not_of_type.zip:10	W-VALUE-NOT-OF-TYPE	1		Value in DerivedField "j": Value@value="abc" of integer field "j" is not a value of that type: it is no value of the field and takes no place in its order (DataDictionary.html: "the sequence defines the ascending order on the respective field"; P6.12, D51)
+test/data/model/fix_ordinal_derived_value_not_of_type.zip:10	W-VALUE-NOT-OF-TYPE	1		Value in DerivedField "j": Value@value="def" of integer field "j" is not a value of that type: it is no value of the field and takes no place in its order (DataDictionary.html: "the sequence defines the ascending order on the respective field"; P6.12, D51)
+test/data/model/fix_ordinal_numeric_values_order.zip:50	W-TEXT-WIDENED	1	TreeModel	SimplePredicate "o": value="2.0" of integer field "o" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_ordinal_numeric_values_scorecard.zip:28	W-TEXT-WIDENED	1	Scorecard	SimplePredicate "o": value="2.0" of integer field "o" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_output_boolean_class_text.zip:17	W-CAST-NARROWING	1	TreeModel	OutputField "pv": declares boolean over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_boolean_class_text.zip:18	W-CAST-NARROWING	1	TreeModel	OutputField "pvi": declares integer over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_boolean_class_text.zip:19	W-CAST-NARROWING	1	TreeModel	OutputField "pvd": declares double over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)

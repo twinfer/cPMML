@@ -118,8 +118,9 @@ struct Bound {
   // the pattern's static types.
   std::shared_ptr<const scalar::NumberPattern> number_pattern;
   // The comparisons (P6.3) read argument_type too, one static type per
-  // argument (TypeId::Missing: unknown). An ordering of strings one of which
-  // is an ordinal field with Values follows that field's declared order.
+  // argument (TypeId::Missing: unknown). An ordering of two operands of one
+  // kind one of which is an ordinal field with Values, of any type, follows
+  // that field's declared order (P6.3, P6.12).
   std::shared_ptr<const compare::OrdinalOrder> ordinal;
 };
 
@@ -956,9 +957,9 @@ inline Status if_then_else_text(const Bound& bound, const ::Value* args, std::si
 // The comparisons (§2.7, P6.3; core/compare.h): each operand read as its
 // static type (Bound::argument_type, the binder's type fixed at load),
 // compared in the common type, in either order (D1, D2). Indeterminate (±INF
-// against the same infinity, NaN: D9, B44; a string computed per record
+// against the same infinity, NaN: D9, B44; a value computed per record
 // outside an ordinal field's Values, a Constant outside them being a load
-// error, D47) is a missing result: BuiltinFunctions.html (lessThan ...):
+// error, D47, P6.12) is a missing result: BuiltinFunctions.html (lessThan ...):
 // "any attempt to either with itself is indeterminate and will result in a
 // missing value being returned". Operands of no common type, which the
 // static types did not exclude at load, are an invalid result (§2.6:

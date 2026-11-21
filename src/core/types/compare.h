@@ -91,6 +91,72 @@ inline std::partial_ordering numeric_order(A a, B b) {
   return compare(x, y);
 }
 
+// ---------------------------------------------------------------- ordinal members (P6.12)
+// Whether `a` and `b` are one member of an ordinal field's Value sequence
+// (design item P6.12, §2.7): the identity that places a value in the
+// declared order, shared by the engine's order (core/compare.h OrdinalOrder)
+// and the load error of a document value outside it (D47, bind/binder.h).
+// Two strings by text (§2.3); two booleans by value; two numbers by value in
+// their promoted type (§2.5, D1: the Value "2" of an integer field is the
+// Constant 2.0), an infinity being the same infinity (this is identity, not
+// a comparison; D9 applies to the comparison, compare::OrdinalOrder), and a
+// NaN the NaN Value (user decision 7a of 2026-11-20: "a NaN in a Value list
+// matches any NaN"; XML Schema Part 2 Second Edition, 3.2.5 double:
+// "Not-a-number equals itself"; the comparison of two NaN stays indeterminate,
+// compare::OrdinalOrder, D51). Values of two kinds never are. A switch, no
+// visit (§6.4).
+namespace detail {
+inline double member_double(const Value& v) {
+  switch (type_of(v)) {
+    case TypeId::Integer:
+      return static_cast<double>(std::get<Integer>(v).v);
+    case TypeId::Float:
+      return static_cast<double>(std::get<Float>(v).v);
+    default:
+      return std::get<Double>(v).v;
+  }
+}
+template <PmmlNumeric A>
+inline std::partial_ordering member_order(const A& a, const Value& b) {
+  switch (type_of(b)) {
+    case TypeId::Integer:
+      return numeric_order(a, std::get<Integer>(b));
+    case TypeId::Float:
+      return numeric_order(a, std::get<Float>(b));
+    default:
+      return numeric_order(a, std::get<Double>(b));
+  }
+}
+constexpr bool member_number(TypeId t) { return t == TypeId::Integer || t == TypeId::Float || t == TypeId::Double; }
+}  // namespace detail
+
+inline bool same_member(const Value& a, const Value& b) {
+  const TypeId ta = type_of(a);
+  const TypeId tb = type_of(b);
+  if (ta == TypeId::String && tb == TypeId::String) return string_equal(std::get<String>(a), std::get<String>(b));
+  if (ta == TypeId::Boolean && tb == TypeId::Boolean) return std::get<Boolean>(a).v == std::get<Boolean>(b).v;
+  if (!detail::member_number(ta) || !detail::member_number(tb)) return false;
+  std::partial_ordering o = std::partial_ordering::unordered;
+  switch (ta) {
+    case TypeId::Integer:
+      o = detail::member_order(std::get<Integer>(a), b);
+      break;
+    case TypeId::Float:
+      o = detail::member_order(std::get<Float>(a), b);
+      break;
+    default:
+      o = detail::member_order(std::get<Double>(a), b);
+      break;
+  }
+  if (o == std::partial_ordering::equivalent) return true;
+  // numeric_order makes an infinity unordered with itself (D9) and NaN
+  // unordered with anything; as a member each is itself (7a).
+  const double x = detail::member_double(a);
+  const double y = detail::member_double(b);
+  if (std::isnan(x)) return std::isnan(y);
+  return std::isinf(x) && x == y;
+}
+
 // A string against a number's Java text: only `equivalent` or not is
 // meaningful (equality purpose).
 template <PmmlNumeric N>

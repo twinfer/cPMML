@@ -147,6 +147,13 @@ inline constexpr std::string_view kNameShadowsTD = "W-NAME-SHADOWS-TD";
 // a field declared elsewhere in the document, which the engine's flat name
 // space reaches today (B14/B16, P7): kept as a warning in P2.1.
 inline constexpr std::string_view kScopeFlat = "W-SCOPE-FLAT";
+// A Value of a DerivedField or OutputField that is no value of the field's
+// dataType (`<Value value="abc"/>` on an integer field): no value of the
+// field, so it takes no place in an ordinal field's order (design item
+// P6.12, D51). A warning, not E-VALUE-MALFORMED, because such documents load
+// today (the engine reads these Values only for the order); a DataField's
+// is a load error.
+inline constexpr std::string_view kValueNotOfType = "W-VALUE-NOT-OF-TYPE";
 // OutputField without the XSD-required dataType (§3.4: "inferred with
 // warning when absent, as today").
 inline constexpr std::string_view kOutputNoDataType = "W-OUTPUT-NO-DATATYPE";

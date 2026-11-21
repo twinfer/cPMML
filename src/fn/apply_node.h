@@ -344,27 +344,30 @@ class ApplyNode : public Expression {
       // P6.3: the comparison reads each operand as its static type
       // (core/compare.h); unknown is TypeId::Missing (as stored).
       for (const auto& t : argument_types) bound.argument_type.push_back(t ? *t : TypeId::Missing);
-      // §2.7: an ordering of strings follows the declared Values of an
-      // ordinal string field operand (DataDictionary.html: "For ordinal
-      // fields, if a sequence of Value elements is given, the sequence
-      // defines the ascending order"); the first such FieldRef's.
-      if (ordering && bound.argument_type.size() == 2 && bound.argument_type[0] == TypeId::String &&
-          bound.argument_type[1] == TypeId::String)
+      // §2.7: an ordering follows the declared Values of an ordinal field
+      // operand that lists them, of any type (P6.12; DataDictionary.html:
+      // "For ordinal fields, if a sequence of Value elements is given, the
+      // sequence defines the ascending order on the respective field"); the
+      // first such FieldRef's, for operands of one kind.
+      if (ordering && argument_types.size() == 2 && cpmml::bind::same_kind(argument_types[0], argument_types[1]))
         for (pugi::xml_node argument : apply.xml().children()) {
           if (argument.type() != pugi::node_element || std::strcmp(argument.name(), "FieldRef") != 0) continue;
-          if (auto values = cpmml::bind::ordinal_values(XmlNode(argument), argument.attribute("field").value())) {
-            // D47 (P6.9): a Constant operand outside the Values has no
-            // place in the order, a load error (Binder::check_ordinal_constants).
+          if (auto declared =
+                  cpmml::bind::ordinal_declaration(XmlNode(argument), argument.attribute("field").value())) {
+            // D47 (P6.9, P6.12): a Constant operand outside the Values has
+            // no place in the order, a load error
+            // (Binder::check_ordinal_constants); a number by its value.
             for (pugi::xml_node c : apply.xml().children()) {
               if (c.type() != pugi::node_element || std::strcmp(c.name(), "Constant") != 0) continue;
               const Value constant = Constant::read(XmlNode(c));
               if (constant.is_missing()) continue;
-              if (std::find(values->begin(), values->end(), constant.text()) == values->end())
-                throw cpmml::ParsingException(
-                    cpmml::bind::ordinal_value_message(apply, "Apply \"" + std::string(sig.name) + "\"", "",
-                                                       constant.text(), argument.attribute("field").value(), *values));
+              if (!declared->contains(constant))
+                throw cpmml::ParsingException(cpmml::bind::ordinal_value_message(
+                    apply, "Apply \"" + std::string(sig.name) + "\"", "",
+                    declared->type == cpmml::bind::TypeId::String ? std::string(constant.text()) : c.text().get(),
+                    argument.attribute("field").value(), declared->values));
             }
-            bound.ordinal = std::make_shared<const compare::OrdinalOrder>(*values);
+            bound.ordinal = std::make_shared<const compare::OrdinalOrder>(std::move(declared->members));
             break;
           }
         }

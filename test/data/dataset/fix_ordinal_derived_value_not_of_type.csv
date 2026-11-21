@@ -1,0 +1,5 @@
+x,y,py,lt_k,ge_k,eq_k,lt_j
+3,1.0,1.0,true,true,true,false
+2,1.0,1.0,false,true,false,false
+7,1.0,1.0,N/A,N/A,false,false
+1,1.0,1.0,N/A,N/A,false,true

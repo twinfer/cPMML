@@ -29,12 +29,17 @@
  *                     least restrictive type). Ordering one against the other
  *                     is a load error (E-TYPE-ORDER-MIXED, P2.7).
  *   string x string   equality by text (XML Schema Part 2 §3.2.1, P6.1);
- *                     order: an ordinal field's declared Values when one is
- *                     given (DataDictionary.html: "For ordinal fields, if a
- *                     sequence of Value elements is given, the sequence
- *                     defines the ascending order"), else UTF-8 code units
- *                     (the binder warns, Q6).
+ *                     order: UTF-8 code units (the binder warns, Q6).
  *   boolean x boolean false < true.
+ *   an ordinal field  an ordering with an operand that is an ordinal field
+ *   with Values       listing Values, of any type, follows their sequence,
+ *                     for two operands of one kind (P6.3, P6.12;
+ *                     DataDictionary.html: "For ordinal fields, if a sequence
+ *                     of Value elements is given, the sequence defines the
+ *                     ascending order on the respective field"): the integer
+ *                     Values 3, 1, 2 order 3 < 1 < 2. Without Values the
+ *                     rules above ("the ascending order of the
+ *                     representation type").
  *   boolean x other   no common type: a load error (Functions.html: "boolean
  *                     dataTypes can not be mixed with other types", Q7).
  *   ±INF x same INF   indeterminate (Transformations.html: "the first
@@ -112,32 +117,60 @@ inline const char* type_name(const TypeId t) {
 }
 
 // ---------------------------------------------------------------- ordinal order
-// The declared order of an ordinal string field (DataDictionary.html: "For
-// ordinal fields, if a sequence of Value elements is given, the sequence
-// defines the ascending order"): the field's valid Values, pooled at load. A
-// string outside them has no place in the order: a document string (a
-// Constant operand, a SimplePredicate's value) outside them is a load error
-// (D47, P6.9); one computed per record (another field's value, an
-// expression's) makes the comparison indeterminate (P6.3).
+// The declared order of an ordinal field that lists Values, of any type
+// (design items P6.3, P6.12; DataDictionary.html: "For ordinal fields, if a
+// sequence of Value elements is given, the sequence defines the ascending
+// order on the respective field"): the field's valid Values, read in its
+// type at load (strings pooled). An ordinal field without Values has none
+// ("If no Value elements are given, the order is always assumed to be the
+// ascending order of the representation type"). A value is placed by
+// types::same_member (a string by text, a number by value). A value outside
+// the Values has no place in the order: a document value (a Constant
+// operand, a SimplePredicate's value) outside them is a load error (D47,
+// P6.9, P6.12); one computed per record (another field's value, an
+// expression's, a DerivedField's) makes the comparison indeterminate
+// (P6.3), an input kept outside a DataField's Values by
+// invalidValueTreatment="asIs" included (P6.13, D52); any other input
+// outside them is invalid and MiningSchema::validate fails the record first.
 class OrdinalOrder {
  public:
+  // An ordinal string field's Values (texts).
   explicit OrdinalOrder(const std::vector<std::string>& values) {
-    reps_.reserve(values.size());
-    for (const auto& v : values) {
-      const ::Value s = ::Value::string(v);
-      reps_.push_back(std::get<types::String>(s.typed()).rep);
-    }
+    members_.reserve(values.size());
+    for (const auto& v : values) members_.push_back(::Value::string(v).typed());
   }
-  // The rank of `s`, or -1.
-  inline int rank(const types::String& s) const {
-    for (std::size_t i = 0; i < reps_.size(); i++)
-      if (types::string_equal(s, types::String{reps_[i]})) return static_cast<int>(i);
+  // The Values read in the field's type (P6.12).
+  explicit OrdinalOrder(std::vector<types::Value> members) : members_(std::move(members)) {
+    for (const auto& m : members_)
+      if (types::is_missing(m) || types::is_invalid(m))
+        throw std::logic_error("compare::OrdinalOrder: a Value that is no value of the field");
+  }
+  // The rank of `x`, or -1.
+  inline int rank(const types::Value& x) const {
+    for (std::size_t i = 0; i < members_.size(); i++)
+      if (types::same_member(x, members_[i])) return static_cast<int>(i);
     return -1;
   }
-  inline std::size_t size() const { return reps_.size(); }
+  inline std::size_t size() const { return members_.size(); }
+
+  // a against b in the declared order: unordered when either has no place
+  // in it, or when both are one infinity (D9: "infinity is not single
+  // number, but a class of numbers"; the built-ins' "any attempt to either
+  // with itself is indeterminate") or both NaN (a NaN Value is a member,
+  // user decision 7a, but comparisons keep NaN != NaN, D51). A NaN against
+  // another member takes the NaN Value's place in the sequence.
+  inline std::partial_ordering order(const types::Value& a, const types::Value& b) const {
+    const int ra = rank(a);
+    const int rb = rank(b);
+    if (ra < 0 || rb < 0) return std::partial_ordering::unordered;
+    if (ra == rb && types::type_of(a) != types::TypeId::String && types::type_of(a) != types::TypeId::Boolean &&
+        !std::isfinite(types::detail::member_double(a)))
+      return std::partial_ordering::unordered;
+    return ra <=> rb;
+  }
 
  private:
-  std::vector<const types::StringRep*> reps_;
+  std::vector<types::Value> members_;
 };
 
 // ---------------------------------------------------------------- operands
@@ -264,11 +297,18 @@ constexpr bool is_number(TypeId t) { return t == TypeId::Integer || t == TypeId:
 }  // namespace detail
 
 // a against b for `purpose`; nullopt: no common type. Neither is missing.
-// `order`: the declared order of an ordinal string operand, or null.
+// `ordinal`: the declared order of an ordinal operand with Values, or null.
 inline std::optional<std::partial_ordering> order(const types::Value& a, const types::Value& b, const Purpose purpose,
                                                   const OrdinalOrder* ordinal) {
   const TypeId ta = types::type_of(a);
   const TypeId tb = types::type_of(b);
+  // An ordering with an ordinal field that lists Values: their order, for
+  // operands of one kind (P6.12; two strings, two numbers, two booleans).
+  // Equality is by value whatever the order.
+  if (ordinal && purpose == Purpose::Ordering &&
+      ((detail::is_number(ta) && detail::is_number(tb)) || (ta == tb && (ta == TypeId::String || ta == TypeId::Boolean))))
+    [[unlikely]]
+    return ordinal->order(a, b);
   if (detail::is_number(ta) && detail::is_number(tb)) return detail::numeric(a, b);
   if (ta == TypeId::String && tb == TypeId::String) {
     const auto& x = std::get<types::String>(a);
@@ -277,12 +317,6 @@ inline std::optional<std::partial_ordering> order(const types::Value& a, const t
     // whether the ordering is `equivalent`).
     if (purpose == Purpose::Equality)
       return types::string_equal(x, y) ? std::partial_ordering::equivalent : std::partial_ordering::less;
-    if (ordinal) {
-      const int rx = ordinal->rank(x);
-      const int ry = ordinal->rank(y);
-      if (rx < 0 || ry < 0) return std::partial_ordering::unordered;
-      return rx <=> ry;
-    }
     return types::compare(x, y);
   }
   if (ta == TypeId::Boolean && tb == TypeId::Boolean)
