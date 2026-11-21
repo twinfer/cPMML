@@ -197,6 +197,13 @@ class Value;
 namespace cpmml::legacy {
 inline double code_of(const ::Value& v);  // switch 2, below
 }
+namespace cpmml {
+// B38 (P6.8): the record error of a string that reaches a numeric reader,
+// below (Value::as_number).
+[[noreturn]] [[gnu::cold]] [[gnu::noinline]] inline void raise_string_as_number(std::string_view reader,
+                                                                                std::string_view field,
+                                                                                const ::Value& v);
+}  // namespace cpmml
 
 /**
  * @class Value
@@ -254,6 +261,26 @@ class Value {
     if (std::holds_alternative<cpmml::types::String>(v_)) return cpmml::legacy::code_of(*this);
     return as_double_other();
   }
+
+  // The number of a numeric reader (a numeric built-in's argument, a
+  // NumericPredictor, a PredictorTerm, NormContinuous, Discretize; B38,
+  // P6.8): as_double() of a number or a boolean; a string is no number, an
+  // invalid record (Q2) naming `reader` and `field`, where as_double() gives
+  // its legacy code, the category identity the categorical readers use
+  // (switch 2). §2.5: "no arithmetic accepts" string; Regression.html
+  // NumericPredictor "Defines a numeric independent variable", PredictorTerm
+  // "The type of all fields referenced within PredictorTerm must be
+  // continuous"; Transformations.html NormContinuous and Discretize read a
+  // numeric field. Missing gives double_min() as as_double() does (callers
+  // test is_missing() first).
+  inline double as_number(std::string_view reader, std::string_view field) const {
+    if (const auto* d = std::get_if<cpmml::types::Double>(&v_)) [[likely]]
+      return d->v;
+    if (std::holds_alternative<cpmml::types::String>(v_)) [[unlikely]]
+      cpmml::raise_string_as_number(reader, field, *this);
+    return as_double_other();
+  }
+  inline bool is_string() const { return std::holds_alternative<cpmml::types::String>(v_); }
 
   // The text: a string's own, the text a number carries, else empty.
   inline std::string_view text() const {
@@ -396,6 +423,12 @@ inline double code_of(const ::Value& v) {
 }
 
 }  // namespace cpmml::legacy
+
+inline void cpmml::raise_string_as_number(std::string_view reader, std::string_view field, const ::Value& v) {
+  throw cpmml::InvalidValueException(std::string(reader) + (field.empty() ? "" : " \"" + std::string(field) + "\"") +
+                                     ": the string \"" + std::string(v.text()) +
+                                     "\" where a number is expected (§2.5: no arithmetic accepts string; B38)");
+}
 
 inline double Value::as_double_other() const {
   switch (static_cast<cpmml::types::TypeId>(v_.index())) {

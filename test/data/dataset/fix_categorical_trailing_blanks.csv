@@ -5,7 +5,7 @@ a,a,lo,x,x,11.0,11.0,a,false,[a],lo,x,x
 " a"," a"," hi"," x","x ",0.0,0.0,N/A,true,[ a],N/A,N/A,x
 "a	","a	","hi	","y	","NA	",21.0,21.0,a,false,[a],N/A,y,R
 "b ","b ","hi ","x ",y,12.0,12.0,b,false,[b],N/A,x,y
-" b "," b "," mid","x 	","  ",14.0,14.0," b",false,[ b],N/A,x,R
-"   ","   ",lo,"	",z,0.0,0.0,N/A,true,missing,lo,N/A,z
-"a b ","a b ",lo,y,"	 	",20.0,20.0,N/A,true,[a b],lo,y,R
+" b "," b "," mid","x 	","  ",14.0,14.0," b",false,[ b],N/A,x,""
+"   ","   ",lo,"	",z,0.0,0.0,N/A,true,[],lo,N/A,z
+"a b ","a b ",lo,y,"	 	",20.0,20.0,N/A,true,[a b],lo,y,""
 "a ","a ",lo,"x ","NA ",0.0,0.0,N/A,true,[a ],lo,N/A,"NA "

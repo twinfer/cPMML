@@ -9,6 +9,9 @@
 
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "utils.h"
@@ -33,11 +36,22 @@ class CSVReader {
     const std::string row = read_line();
     if (row.empty()) return result;
 
-    const std::vector<std::string> fields = split_row(row);
-    for (size_t i = 0; i < header.size() && i < fields.size(); i++) result[header[i]] = fields[i];
+    std::vector<bool> quoted;
+    const std::vector<std::string> fields = split_row(row, &quoted);
+    quoted_empty_.clear();
+    for (size_t i = 0; i < header.size() && i < fields.size(); i++) {
+      result[header[i]] = fields[i];
+      if (quoted[i] && fields[i].empty()) quoted_empty_.insert(header[i]);
+    }
 
     return result;
   }
+
+  // The columns of the row read last whose cell was written `""`, a quoted
+  // empty field, which read() gives as "" as it does an empty cell. The test
+  // driver reads the first as the empty string and the second as no value
+  // (test/pmml_tester.cc, design P6.8).
+  bool quoted_empty(const std::string& column) const { return quoted_empty_.count(column) > 0; }
 
   std::string read_raw() { return read_line(); }
 
@@ -57,12 +71,13 @@ class CSVReader {
   // literal double quote is written as two of them. The old reader treated the
   // first inner quote as the terminator, so a value like "say ""hi""" came back
   // as `say ` with the rest of the row shifted into the wrong columns.
-  static std::vector<std::string> split_row(const std::string& row) {
+  static std::vector<std::string> split_row(const std::string& row, std::vector<bool>* quoted = nullptr) {
     std::vector<std::string> fields;
     size_t pos = 0;
 
     while (true) {
       std::string field;
+      if (quoted) quoted->push_back(pos < row.size() && row[pos] == '"');
       if (pos < row.size() && row[pos] == '"') {
         ++pos;
         while (pos < row.size()) {
@@ -94,6 +109,7 @@ class CSVReader {
 
   std::ifstream file;
   std::vector<std::string> header;
+  std::unordered_set<std::string> quoted_empty_;
 };
 
 #endif

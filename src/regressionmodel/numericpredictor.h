@@ -56,7 +56,8 @@ class NumericPredictor {
 
   inline double get_term(const Sample& sample) const {
     const Value& value = sample[index].value;
-    return value.is_missing() ? 0 : coefficient * std::pow(value.as_double(), exponent);
+    // B38 (P6.8): a string field is no number, an invalid record (Value::as_number).
+    return value.is_missing() ? 0 : coefficient * std::pow(value.as_number("NumericPredictor", name), exponent);
   }
 
   static std::vector<NumericPredictor> to_numericpredictors(const std::vector<XmlNode>& nodes,

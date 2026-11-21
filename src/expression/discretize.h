@@ -118,6 +118,11 @@ class Discretize : public Expression {
     const Value& input = sample[index].value;
 
     if (input.is_missing()) return mapmissing_to;
+    // B38 (P6.8): the bins are intervals of numbers; a string field is no
+    // number, an invalid record (as Value::as_number; the predicates
+    // compared the string's code).
+    if (input.is_string()) [[unlikely]]
+      cpmml::raise_string_as_number("Discretize", field_name, input);
 
     for (auto i = 0u; i < discretizebin_intervals.size(); i++)
       if (discretizebin_intervals[i](input)) return discretizebin_values[i];

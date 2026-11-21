@@ -475,12 +475,20 @@ static void invalid_inputs() {
     // "+INF"); "+inf" is not in it, and an integer field takes no INF.
     CHECK(model.evaluate(row("+INF")).as_double() == std::numeric_limits<double>::infinity());
     // JPMML: Field "d" cannot accept invalid value "5abc" / "abc" / "1e" /
-    // "0x10" / NaN; Field "i" cannot accept invalid value "3.5" / "INF";
-    // Field "b" cannot accept invalid value "yes" / "2".
+    // "0x10"; Field "i" cannot accept invalid value "3.5" / "INF";
+    // Field "b" cannot accept invalid value "yes" / "2". The empty string is
+    // in no lexical space but string's (P6.8, B37; JPMML alike), and "nan",
+    // "-NaN", "+NaN" are not XSD's NaN (D11).
     for (const auto& input :
-         {row("5abc"), row("abc"), row("+inf"), row("1e"), row("0x10"), row("NaN"), row("5", "3.5"), row("5", "3abc"),
-          row("5", "INF"), row("5", "+INF"), row("5", "1", "yes"), row("5", "1", "2"), row("5", "1", "-1")})
+         {row("5abc"), row("abc"), row("+inf"), row("1e"), row("0x10"), row("5", "3.5"), row("5", "3abc"),
+          row("5", "INF"), row("5", "+INF"), row("5", "1", "yes"), row("5", "1", "2"), row("5", "1", "-1"), row(""),
+          row("   "), row("5", ""), row("5", "1", ""), row("nan"), row("-NaN"), row("+NaN"), row("5", "NaN")})
       CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input); }));
+    // NaN is a value of double (P6.8, B39; XML Schema Part 2 §3.2.5), valid on
+    // a field with no Interval or Values: 2 * NaN + 10 is NaN. JPMML 1.7.7:
+    // Field "d" cannot accept invalid value NaN (D55).
+    CHECK(std::isnan(model.evaluate(row("NaN")).as_double()));
+    CHECK(std::isnan(model.evaluate(row(" NaN ")).as_double()));
     // Spec departures, each the XSD lexical space against JPMML's Java
     // parsing: JPMML scores these (i=3.0 as 3, i=1e2 as 100, b=TRUE as true,
     // d=1d as 1, d=inf as Infinity) and rejects b=" true ".
@@ -2655,9 +2663,19 @@ static void trailing_blanks() {
   // An ordinal field keeps its text: "b " is no Value of o.
   CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a", "b ", "x")); }));
   CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a", "b\n", "x")); }));
-  // The marker NA, with trailing blanks; blanks only is an empty cell.
-  for (const std::string& m : {"NA", "NA ", "NA\n", "NA\r\n", "", " \n", "\r"})
+  // The marker NA, with trailing blanks; blanks only is the empty string, as
+  // "" is (P6.8, B37), no marker; an absent m is missing.
+  for (const std::string& m : {"NA", "NA ", "NA\n", "NA\r\n"})
     CHECK(model.evaluate(input("a", "b", m)).str_outputs()["o_m"] == "R");
+  for (const std::string& m : {"", " \n", "\r"}) {
+    const auto out = model.evaluate(input("a", "b", m)).str_outputs();
+    CHECK(out.count("o_m") && out.at("o_m").empty());
+  }
+  {
+    cpmml::Input absent = input("a", "b", "x");
+    absent.erase("m");
+    CHECK(model.evaluate(absent).str_outputs()["o_m"] == "R");
+  }
   CHECK(model.evaluate(input("a", "b", "x\n")).str_outputs()["o_m"] == "x");
   CHECK(model.evaluate(input("a", "b", " x")).str_outputs()["o_m"] == " x");
   // A form feed or NBSP is no XML blank: kept, and no Value of c.
@@ -2665,7 +2683,7 @@ static void trailing_blanks() {
   CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(input("a\xc2\xa0", "b", "x")); }));
 
   // The residual's actual value of a categorical string target: blanks only
-  // is the absent value an empty cell is.
+  // is the empty string "" is (P6.8, B37).
   const cpmml::Model clf = load(R"(<?xml version="1.0" encoding="UTF-8"?>
 <PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
   <DataDictionary>
@@ -2694,6 +2712,124 @@ static void trailing_blanks() {
   CHECK(residual(" \t\n") == residual(""));
 }
 
+// P6.8 (B37): "" is the empty string or a malformed value for the caller's
+// inputs only. A document's own empty InlineTable cell keeps its missing
+// meaning, so a NearestNeighborModel whose KNNInputs are DerivedFields (its
+// TrainingInstances read through the MiningSchema and LocalTransformations,
+// knnmodel.h) and whose double cell <x></x> is empty loads as before P6.8
+// (JPMML 1.7.7 refuses it: ValueCheckException, Field "x" cannot accept
+// invalid value "", D54).
+static void document_empty_cells() {
+  const auto knn = [](const std::string& cell) {
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double"/>
+    <DataField name="n" optype="continuous" dataType="integer"/>
+    <DataField name="z" optype="continuous" dataType="double"/>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <NearestNeighborModel functionName="regression" numberOfNeighbors="2" continuousScoringMethod="average">
+    <MiningSchema>
+      <MiningField name="x"/><MiningField name="n"/><MiningField name="z"/>
+      <MiningField name="y" usageType="target"/>
+    </MiningSchema>
+    <LocalTransformations>
+      <DerivedField name="dx" optype="continuous" dataType="double">
+        <Apply function="*"><FieldRef field="x"/><Constant>2</Constant></Apply>
+      </DerivedField>
+    </LocalTransformations>
+    <TrainingInstances>
+      <InstanceFields>
+        <InstanceField field="x" column="x"/><InstanceField field="n" column="n"/>
+        <InstanceField field="z" column="z"/><InstanceField field="y" column="y"/>
+      </InstanceFields>
+      <InlineTable>
+        <row><x>0</x><n>1</n><z>0</z><y>1</y></row>
+        <row><x>1</x><n>1</n><z>0</z><y>2</y></row>
+        <row><x>0</x><n>1</n><z>1</z><y>4</y></row>
+        )" + cell + R"(
+      </InlineTable>
+    </TrainingInstances>
+    <ComparisonMeasure kind="distance"><minkowski p-parameter="3"/></ComparisonMeasure>
+    <KNNInputs><KNNInput field="dx"/><KNNInput field="z"/></KNNInputs>
+  </NearestNeighborModel>
+</PMML>)";
+  };
+  const auto loads_any = [](const std::string& document) {
+    const std::string path = write_document(document);
+    bool ok = true;
+    try {
+      cpmml::Model model(path, false);
+    } catch (const std::exception&) {
+      ok = false;
+    }
+    std::remove(path.c_str());
+    return ok;
+  };
+  CHECK(loads_any(knn("<row><x>1</x><n>1</n><z>1</z><y>8</y></row>")));
+  CHECK(loads_any(knn("<row><x></x><n>1</n><z>1</z><y>16</y></row>")));    // an empty double cell
+  CHECK(loads_any(knn("<row><x>1</x><n></n><z>1</z><y>16</y></row>")));    // an empty integer cell
+  CHECK(loads_any(knn("<row><x>1</x><n>1</n><z>  </z><y>16</y></row>")));  // blanks only: no text
+}
+
+// P6.8 (B39): a NaN Value is no member of the field's valid or invalid
+// Value set (it broke the ordering of its std::set<double>), and NaN inputs
+// are decided by DataField::nan_valid. The default invalidValueTreatment,
+// returnInvalid, makes an invalid value an invalid record.
+static void nan_value_lists() {
+  const auto document = [](const std::string& values) {
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<PMML xmlns="http://www.dmg.org/PMML-4_4" version="4.4"><Header/>
+  <DataDictionary>
+    <DataField name="x" optype="continuous" dataType="double">)" +
+           values + R"(</DataField>
+    <DataField name="y" optype="continuous" dataType="double"/>
+  </DataDictionary>
+  <RegressionModel functionName="regression">
+    <MiningSchema><MiningField name="x"/><MiningField name="y" usageType="target"/></MiningSchema>
+    <RegressionTable intercept="1"><NumericPredictor name="x" coefficient="1"/></RegressionTable>
+  </RegressionModel>
+</PMML>)";
+  };
+  const auto x = [](const std::string& v) {
+    cpmml::Input input;
+    input["x"] = v;
+    return input;
+  };
+  // Valid Values NaN only: NaN is valid, every other value invalid
+  // (DataDictionary.html: "Invalid value: The input value is not missing but
+  // it does not belong to a certain value range").
+  {
+    cpmml::Model model = load(document(R"(<Value value="NaN"/>)"));
+    CHECK(std::isnan(model.evaluate(x("NaN")).as_double()));
+    for (const char* v : {"1", "0", "-4", "1e300"})
+      CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(x(v)); }));
+  }
+  // Valid Values NaN, then 1: 1 and NaN are valid, 2, 0.5, -4 are not.
+  {
+    cpmml::Model model = load(document(R"(<Value value="NaN"/><Value value="1"/>)"));
+    CHECK(model.evaluate(x("1")).as_double() == 2);
+    CHECK(std::isnan(model.evaluate(x("NaN")).as_double()));
+    for (const char* v : {"2", "0.5", "-4", "100"})
+      CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(x(v)); }));
+  }
+  // An invalid Value NaN alone: NaN is invalid, every other value valid.
+  {
+    cpmml::Model model = load(document(R"(<Value value="NaN" property="invalid"/>)"));
+    CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(x("NaN")); }));
+    CHECK(model.evaluate(x("1")).as_double() == 2);
+    CHECK(model.evaluate(x("-4")).as_double() == -3);
+  }
+  // Invalid Values NaN and 5: both invalid, 1 valid.
+  {
+    cpmml::Model model = load(document(R"(<Value value="NaN" property="invalid"/><Value value="5" property="invalid"/>)"));
+    CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(x("NaN")); }));
+    CHECK(throws<cpmml::InvalidValueException>([&] { model.evaluate(x("5")); }));
+    CHECK(model.evaluate(x("1")).as_double() == 2);
+  }
+}
+
 int main() {
   bound_predicates();
   boolean_mixed();
@@ -2718,6 +2854,8 @@ int main() {
   trailing_blanks();
   ordinal_value_unknown();
   ordinal_numeric_order();
+  document_empty_cells();
+  nan_value_lists();
 
   if (failures) std::cerr << failures << " check(s) failed\n";
   return failures;

@@ -1,11 +1,12 @@
 # Binder report-mode baseline (test/bind_report.cc, docs/design/typed-core.md §3.7).
 # Regenerate with: bind_report.exe <source-dir> --update
-# documents: 489
+# documents: 503
 # E-REQUIRED: 1
 # E-SCOPE-UNRESOLVED: 1
+# E-TYPE-PARAM: 5
 # U-ELEMENT: 25
 # W-CAST-LOSSY: 115
-# W-CAST-NARROWING: 66
+# W-CAST-NARROWING: 69
 # W-FORWARD-REF: 10
 # W-NAME-SHADOWS-MININGFIELD: 7
 # W-NAME-SHADOWS-TD: 4
@@ -193,6 +194,8 @@ test/data/model/fix_derived_cast_novalue.zip:15	W-CAST-NARROWING	1		DerivedField
 test/data/model/fix_derived_cast_novalue.zip:16	W-CAST-NARROWING	1		DerivedField "tsb": declares boolean over an expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_derived_cast_novalue.zip:17	W-CAST-NARROWING	1		DerivedField "tnb": declares boolean over an expression of type integer: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_derived_cast_novalue.zip:18	W-CAST-NARROWING	1		DerivedField "tgi": declares integer over an expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_derived_string_input_cast.zip:10	W-CAST-NARROWING	1		DerivedField "dd": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_derived_string_input_cast.zip:11	W-CAST-NARROWING	1		DerivedField "db": declares boolean over an expression of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_derivedfield_shadow.zip:26	W-NAME-SHADOWS-TD	1	RegressionModel "Shadow"	DerivedField "d": LocalTransformations DerivedField name "d" is already a TransformationDictionary DerivedField (FieldScope.html: LocalTransformations names "must be unique from any other names in their scope"; accepted, P2.1)
 test/data/model/fix_derivedfield_shadow.zip:31	W-SCOPE-IMPLICIT	1	RegressionModel "Shadow"	NumericPredictor "d": TransformationDictionary DerivedField "d" reads DataField "z", which is not a MiningField of this model (FieldScope.html: an instantiated TD field "can only reference: MiningFields from the MiningSchema of that model element"; accepted, Q3)
 test/data/model/fix_ensemble_chain_display_last.zip:31	W-SCOPE-IMPLICIT	1	MiningModel	MiningField "m": field "m" is not in this model's scope; it is a DataField of the document (FieldScope.html: "Within a model element, all data must flow in through its MiningSchema"; accepted as a pass-through, Q3)
@@ -265,12 +268,13 @@ test/data/model/fix_ordinal_derived_value_not_of_type.zip:10	W-VALUE-NOT-OF-TYPE
 test/data/model/fix_ordinal_numeric_values_order.zip:50	W-TEXT-WIDENED	1	TreeModel	SimplePredicate "o": value="2.0" of integer field "o" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_ordinal_numeric_values_scorecard.zip:28	W-TEXT-WIDENED	1	Scorecard	SimplePredicate "o": value="2.0" of integer field "o" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_output_boolean_class_text.zip:17	W-CAST-NARROWING	1	TreeModel	OutputField "pv": declares boolean over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
-test/data/model/fix_output_boolean_class_text.zip:18	W-CAST-NARROWING	1	TreeModel	OutputField "pvi": declares integer over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
-test/data/model/fix_output_boolean_class_text.zip:19	W-CAST-NARROWING	1	TreeModel	OutputField "pvd": declares double over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_double_float_target.zip:11	W-OUTPUT-NO-DATATYPE	1	RegressionModel	OutputField "pv": has no dataType (pmml-4-4.xsd: required); its type is inferred from its feature
 test/data/model/fix_output_double_float_target.zip:16	W-CAST-LOSSY	1	RegressionModel	OutputField "tv_f": declares float over its expression of type double: the value is rounded to float (§2.6)
 test/data/model/fix_output_integer_nonintegral.zip:12	W-CAST-NARROWING	1	RegressionModel	OutputField "yi": declares integer over the predicted value of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_integer_nonintegral.zip:13	W-CAST-NARROWING	1	RegressionModel	OutputField "ti": declares integer over its expression of type double: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_predicted_class_cast.zip:15	W-CAST-NARROWING	1	TreeModel	OutputField "pvi": declares integer over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_predicted_class_cast.zip:16	W-CAST-NARROWING	1	TreeModel	OutputField "pvd": declares double over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_output_predicted_class_cast_double.zip:15	W-CAST-NARROWING	1	TreeModel	OutputField "pvd": declares double over the predicted value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_output_predicted_rescale.zip:16	W-CAST-LOSSY	1	RegressionModel	OutputField "pvf": declares float over the predicted value of type double: the value is rounded to float (§2.6)
 test/data/model/fix_output_predicted_rescale.zip:18	W-CAST-NARROWING	1	RegressionModel	OutputField "pdvd": declares double over a display value of type string: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_probability_regression_integer.zip:21	W-TEXT-WIDENED	1	RegressionModel	OutputField "p1_0": value="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
@@ -287,7 +291,12 @@ test/data/model/fix_probability_vote_integer.zip:21	W-TEXT-WIDENED	1	MiningModel
 test/data/model/fix_probability_vote_integer.zip:23	W-TEXT-WIDENED	1	MiningModel	OutputField "p4_0": value="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_probability_vote_integer.zip:42	W-TEXT-WIDENED	1	MiningModel > Segment "s2" > TreeModel	Node: score="4.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
 test/data/model/fix_probability_vote_integer.zip:51	W-TEXT-WIDENED	1	MiningModel > Segment "s3" > TreeModel	Node: score="1.0" of integer field "y" is an xs:double literal, read as double (§3.4 rule 2, D22)
+test/data/model/fix_string_arith_argument.zip:10	E-TYPE-PARAM	1		Apply "+" in DerivedField "d": argument 1 of + is string, where a number is expected (§2.5)
 test/data/model/fix_string_derived_set.zip:18	W-CAST-NARROWING	1		DerivedField "td": declares double over an expression of type string: the cast can fail at runtime (§2.6, Q2)
+test/data/model/fix_string_discretize.zip:10	E-TYPE-PARAM	1		Discretize "s" in DerivedField "d": field "s" is string; Discretize maps numerical input (Transformations.html: "Discretization of numerical input fields")
+test/data/model/fix_string_normcontinuous.zip:10	E-TYPE-PARAM	1		NormContinuous "s" in DerivedField "d": field "s" is string; NormContinuous normalizes a numeric field (Transformations.html: "piecewise linear interpolation")
+test/data/model/fix_string_numericpredictor.zip:16	E-TYPE-PARAM	1	RegressionModel	NumericPredictor "s": field "s" is string; NumericPredictor reads a number (Regression.html: "Defines a numeric independent variable")
+test/data/model/fix_string_predictorterm.zip:17	E-TYPE-PARAM	1	RegressionModel	FieldRef "s": field "s" is string; PredictorTerm multiplies numbers (Regression.html: "The type of all fields referenced within PredictorTerm must be continuous")
 test/data/model/fix_string_sum_avg.zip:10	W-CAST-LOSSY	1		DerivedField "ff": declares float over an expression of type double: the value is rounded to float (§2.6)
 test/data/model/fix_target_castinteger_round_half_up.zip:16	W-CAST-NARROWING	1	RegressionModel	OutputField "pv": declares integer over the predicted value of type double: the cast can fail at runtime (§2.6, Q2)
 test/data/model/fix_td_fieldref_widened_slot.zip:14	W-SLOT-WIDENED	1	RegressionModel	MiningField "j": missingValueReplacement="2.5" is not an integer: the slot of integer field "j" is widened to double (§3.4, N3, D22)

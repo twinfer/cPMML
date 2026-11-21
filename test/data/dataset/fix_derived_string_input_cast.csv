@@ -1,0 +1,6 @@
+s,bb,y,o_dd,o_cdd,o_db,o_ndb
+3,true,1.0,4.0,3.0|,true,false
+2.50,false,1.0,3.5,2.5|,false,true
+1e3,true,1.0,1001.0,1000.0|,true,false
+-4,false,1.0,-3.0,-4.0|,false,true
+" 5 ",true,1.0,6.0,5.0|,true,false

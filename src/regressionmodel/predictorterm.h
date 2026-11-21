@@ -52,7 +52,7 @@ class PredictorTerm {
         throw cpmml::MissingValueException("missing value index: " + std::to_string(field.index) +
                                            " name: " + field.field_name);
       else
-        partial *= value.as_double();
+        partial *= value.as_number("PredictorTerm", field.field_name);  // B38 (P6.8): a string is no number
     }
 
     return coefficient * partial;

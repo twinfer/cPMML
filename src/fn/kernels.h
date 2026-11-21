@@ -122,6 +122,12 @@ struct Bound {
   // kind one of which is an ordinal field with Values, of any type, follows
   // that field's declared order (P6.3, P6.12).
   std::shared_ptr<const compare::OrdinalOrder> ordinal;
+  // B38 (P6.8): per argument, 1 where the parameter is a number and the
+  // argument may hold a string (fn::ApplyNode::mark_string_arguments), which
+  // the Apply makes an invalid record before the kernel; read only when
+  // check_strings.
+  std::vector<std::uint8_t> string_argument;
+  bool check_strings = false;
 };
 
 enum class Status : std::uint8_t { Ok, Invalid };

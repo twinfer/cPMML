@@ -18,6 +18,17 @@
  * failed cast, and §2.8), and the row's other cells are not checked. JPMML
  * scores no such record, which its output cannot express.
  *
+ * Cells (design P6.8, B37, B58): an empty cell or "N/A" in an input column is
+ * a missing input, left out of the input (an absent field: DataDictionary.html
+ * "Input value is missing, for example, if a database column contains a null
+ * value"); a quoted empty cell, `""`, is the empty string, passed as "" (the
+ * empty string of a string field, a malformed value of any other type). In an
+ * expected column an empty cell asserts nothing, "N/A" asserts no value (the
+ * output is absent; an empty string is a value and fails it), and `""` asserts
+ * the empty string (a string output present and empty). A quoted empty cell in
+ * the target column of a model without a residual asserts nothing: a
+ * prediction cannot be the empty string through Result::as_string.
+ *
  * --locale installs a host locale before scoring: results must be identical
  * under a comma-decimal locale. Exits 77 (ctest SKIP) if it is unavailable.
  *
@@ -73,10 +84,12 @@ static double expected_double(const std::string& text) {
   return to_double(text);
 }
 
-// Convert CSV row (string map) to cpmml::Input
-static cpmml::Input to_input(const std::unordered_map<std::string, std::string>& row) {
+// The input of the CSV row `reader` read last (see the header): an empty or
+// N/A cell is left out (missing), a quoted empty cell is the empty string.
+static cpmml::Input to_input(const std::unordered_map<std::string, std::string>& row, const CSVReader& reader) {
   cpmml::Input input;
-  for (const auto& [k, v] : row) input[k] = v;
+  for (const auto& [k, v] : row)
+    if (v != "N/A" && (!v.empty() || reader.quoted_empty(k))) input[k] = v;
   return input;
 }
 
@@ -86,21 +99,32 @@ static cpmml::Input to_input(const std::unordered_map<std::string, std::string>&
 // OutputFields of `result`, on scored rows and on no-prediction rows alike.
 //   - empty cell: not asserted (input columns, and hand-written fixtures that
 //     leave an output unspecified);
-//   - "N/A" (the oracle's missing value): the output must be absent, or an
-//     empty string;
+//   - "N/A" (the oracle's missing value): the output must be absent; the
+//     empty string is a value (P6.8, B58) and fails it;
+//   - `""` (a quoted empty cell): the output must be the empty string;
 //   - anything else: the output must be present and match (numeric outputs
 //     within tolerance, string outputs exactly).
-static bool check_other_outputs(const cpmml::Result& result,
-                                const std::unordered_map<std::string, std::string>& row,
-                                const std::string& out_col,
-                                const std::unordered_set<std::string>& declared_outputs) {
+static bool check_other_outputs(const cpmml::Result& result, const std::unordered_map<std::string, std::string>& row,
+                                const std::string& out_col, const std::unordered_set<std::string>& declared_outputs,
+                                const CSVReader& reader) {
   const auto nout = result.num_outputs();
   const auto sout = result.str_outputs();
   for (const auto& [col, expected_val] : row) {
-    if (col == out_col || expected_val.empty()) continue;
+    if (col == out_col) continue;
 
     auto nit = nout.find(col);
     auto sit = sout.find(col);
+
+    if (expected_val.empty()) {
+      if (!reader.quoted_empty(col) || !declared_outputs.count(col)) continue;
+      if (sit == sout.end() || !sit->second.empty()) {
+        std::cerr << "output '" << col << "': predicted: "
+                  << (sit != sout.end() ? sit->second : nit != nout.end() ? std::to_string(nit->second) : "no value")
+                  << "  expected: the empty string  sample: " << to_string(row) << std::endl;
+        return false;
+      }
+      continue;
+    }
 
     if (expected_val == "N/A") {
       if (nit != nout.end()) {
@@ -108,8 +132,8 @@ static bool check_other_outputs(const cpmml::Result& result,
                   << "  sample: " << to_string(row) << std::endl;
         return false;
       }
-      if (sit != sout.end() && !sit->second.empty()) {
-        std::cerr << "output '" << col << "': predicted: " << sit->second << "  expected: no value"
+      if (sit != sout.end()) {
+        std::cerr << "output '" << col << "': predicted: \"" << sit->second << "\"  expected: no value"
                   << "  sample: " << to_string(row) << std::endl;
         return false;
       }
@@ -270,7 +294,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
     if (expected == "INVALID") {
       try {
-        const cpmml::Result result = model.evaluate(to_input(row));
+        const cpmml::Result result = model.evaluate(to_input(row, reader));
         std::cerr << "predicted: " << (result.as_string().empty() ? "no prediction" : result.as_string())
                   << "  expected: an invalid result (InvalidValueException)  sample: " << to_string(row) << std::endl;
         return -1;
@@ -285,8 +309,25 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
     // than skipping the row.
     // The other output columns of such a row are still checked: a model that
     // gives no prediction can still emit (wrong) probabilities.
+    // A quoted empty cell: the output column, an OutputField, is the empty
+    // string (P6.8, B58).
+    if (expected.empty() && reader.quoted_empty(out_col)) {
+      const cpmml::Result result = model.evaluate(to_input(row, reader));
+      const auto sout = result.str_outputs();
+      const auto sit = sout.find(out_col);
+      if (sit == sout.end() || !sit->second.empty()) {
+        std::cerr << "predicted: " << (sit != sout.end() ? sit->second : "no value")
+                  << "  expected: the empty string  sample: " << to_string(row) << std::endl;
+        return -1;
+      }
+      if (!target_col.empty() && !check_target(result, row, target_col, numeric_prediction)) return -1;
+      if (!check_other_outputs(result, row, out_col, declared_outputs, reader)) return -1;
+      row = reader.read();
+      continue;
+    }
+
     if (expected.empty() || expected == "N/A") {
-      const cpmml::Result result = model.evaluate(to_input(row));
+      const cpmml::Result result = model.evaluate(to_input(row, reader));
       const std::string predicted = result.as_string();
       if (!predicted.empty()) {
         std::cerr << "predicted: " << predicted << "  expected: no prediction"
@@ -294,12 +335,12 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
         return -1;
       }
       if (!target_col.empty() && !check_target(result, row, target_col, numeric_prediction)) return -1;
-      if (!check_other_outputs(result, row, out_col, declared_outputs)) return -1;
+      if (!check_other_outputs(result, row, out_col, declared_outputs, reader)) return -1;
       row = reader.read();
       continue;
     }
 
-    cpmml::Result result = model.evaluate(to_input(row));
+    cpmml::Result result = model.evaluate(to_input(row, reader));
 
     // The predicted value is compared as a number, within tolerance, only
     // where it is one: the prediction of a regression model, or an output
@@ -337,7 +378,7 @@ static int run_score(cpmml::Model& model, CSVReader& reader, std::unordered_map<
 
     // Verify every other oracle column the model claims to produce
     // (probability/transformedValue/... OutputFields keyed by name).
-    if (!check_other_outputs(result, row, out_col, declared_outputs)) return -1;
+    if (!check_other_outputs(result, row, out_col, declared_outputs, reader)) return -1;
     row = reader.read();
   }
   return 0;
@@ -524,10 +565,12 @@ static int run_forecast(cpmml::Model& model, CSVReader& reader, std::unordered_m
 // ---- dump mode --------------------------------------------------------------
 //
 // pmml_tester.exe model.zip inputs.csv --dump out.csv scores every row of
-// inputs.csv (input columns only, "N/A" or an empty cell for a missing value)
-// and writes, per row, the predicted value and every OutputField as text, in
-// the layout of JPMML's EvaluationExample output: the target field's column,
-// then the OutputFields, "N/A" for no value. tools/cross-validate-text.py
+// inputs.csv (input columns only, "N/A" or an empty cell for a missing value,
+// `""` for the empty string, as to_input reads them) and writes, per row, the
+// predicted value and every OutputField as text, in the layout of JPMML's
+// EvaluationExample output: the target field's column, then the
+// OutputFields, "N/A" for no value and `""` for the empty string (P6.8, B58;
+// JPMML writes it as an empty cell, which a CSV reader reads alike). tools/cross-validate-text.py
 // compares that with JPMML's own output, text for text.
 //
 // A string result is written as cPMML gives it; a numeric OutputField
@@ -625,32 +668,30 @@ static int run_dump(cpmml::Model& model, const std::string& model_zip, const std
 
   CSVReader reader(inputs);
   for (auto row = reader.read(); !row.empty(); row = reader.read()) {
-    cpmml::Input input;
-    for (const auto& [k, v] : row)
-      if (!v.empty() && v != "N/A") input[k] = v;
-    std::vector<std::string> cells;
+    const cpmml::Input input = to_input(row, reader);
+    std::vector<std::string> cells;  // CSV text, quoted where needed
     try {
       const cpmml::Result result = model.evaluate(input);
       const auto sout = result.str_outputs();
       const auto nout = result.num_outputs();
       for (const auto& column : columns) {
         if (column == target) {
-          cells.push_back(result.empty() || result.as_string().empty() ? "N/A" : result.as_string());
+          cells.push_back(result.empty() || result.as_string().empty() ? "N/A" : csv_cell(result.as_string()));
           continue;
         }
         const auto s = sout.find(column);
         const auto n = nout.find(column);
-        if (s != sout.end() && !s->second.empty())
-          cells.push_back(s->second);
+        if (s != sout.end())
+          cells.push_back(s->second.empty() ? std::string("\"\"") : csv_cell(s->second));
         else if (n != nout.end())
-          cells.push_back(java::text({n->second, kinds.count(column) ? kinds[column] : java::Kind::DOUBLE}));
+          cells.push_back(csv_cell(java::text({n->second, kinds.count(column) ? kinds[column] : java::Kind::DOUBLE})));
         else
           cells.push_back("N/A");
       }
     } catch (const std::exception& e) {
-      cells.assign(columns.size(), std::string("ERROR: ") + e.what());
+      cells.assign(columns.size(), csv_cell(std::string("ERROR: ") + e.what()));
     }
-    for (size_t i = 0; i < cells.size(); i++) out << (i ? "," : "") << csv_cell(cells[i]);
+    for (size_t i = 0; i < cells.size(); i++) out << (i ? "," : "") << cells[i];
     out << "\n";
   }
   return 0;

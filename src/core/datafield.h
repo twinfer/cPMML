@@ -7,6 +7,7 @@
 #ifndef CPMML_DATAFIELD_H
 #define CPMML_DATAFIELD_H
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <string>
@@ -41,6 +42,27 @@ class DataField {
   DataType datatype;
   size_t index = std::numeric_limits<size_t>::max();
   OpType optype;
+  // The two NaN flags (P6.8) sit in optype's padding, so the members after
+  // them keep their offsets and DataField its size (the per-record reads of
+  // MiningSchema::prepare touch them).
+  // Whether a <Value property="missing"> of a float or double field reads as
+  // NaN ("NaN", " NaN " after the whiteSpace collapse): every NaN input is
+  // then missing, as a valid <Value value="NaN"/> makes every NaN input valid
+  // (`nan_valid`), one rule for both (P6.8, decision (7a)).
+  bool nan_missing = false;
+  // Whether a NaN input is a valid value of the field (P6.8, B39), decided
+  // here and not by `constraints`, whose comparisons call NaN indeterminate
+  // (D9) or, in a member lookup, find it: NaN is one value of the XSD value
+  // space (XML Schema Part 2: Datatypes Second Edition §3.2.5: "not-a-number
+  // (NaN)"), and §3.2.5 (§3.2.4 float alike): "NaN equals itself but is
+  // incomparable with (neither greater than nor less than) any other value in
+  // the value space", so it is a member of a Value list only when the list
+  // names NaN (any NaN input, the same rule as `nan_missing`), and inside no
+  // Interval. So it is valid unless a valid Value list leaves it out, an
+  // invalid Value names it, or an Interval bounds the field
+  // (DataDictionary.html: "If intervals are present, any data that is
+  // outside the intervals will be considered invalid").
+  bool nan_valid = true;
   // <Value property="missing"> declares the values that *stand for* a missing
   // value: "?", "NA", "-999" (DataDictionary.html: "It is possible to
   // explicitly define values which are interpreted as missing values"). They
@@ -53,14 +75,20 @@ class DataField {
   //     is the double -999, D22) against the input read in it, so on a double
   //     field "-999.0" and "-9.99e2" are the marker -999. DataDictionary.html:
   //     "The dataType reuses names and semantics of atomic types in XML
-  //     Schema"; XML Schema 1.1 Part 2 §3.3.5 (double; §3.3.4 float alike):
-  //     "Equality is identity, except that 0 = −0 (although they are not
-  //     identical) and NaN ≠ NaN ... 0 and −0 are thus equivalent for
-  //     purposes of enumerations".
+  //     Schema", whose link is XML Schema Part 2: Datatypes Second Edition
+  //     (W3C Recommendation 28 October 2004), the one edition this rule
+  //     cites. Its §3.2.5 (double; §3.2.4 float alike): "This datatype
+  //     differs from that of [IEEE 754-1985] in that there is only one NaN
+  //     and only one zero. This makes the equality and ordering of values in
+  //     the data space differ from that of [IEEE 754-1985] only in that for
+  //     schema purposes NaN = NaN." So -0 is the marker 0 and a NaN marker
+  //     matches any NaN input (decided 2026-11-20 after P6.7, (7a); P6.8).
   std::set<std::string, std::less<>> missing_markers;  // transparent: inputs are looked up as views
   // The markers that are values of the field's (non-string) type, read in it;
   // a marker that is not one ("?" on a double field) is matched as text only.
-  // NaN is never one: NaN ≠ NaN.
+  // A NaN marker is kept apart, in `nan_missing`: NaN == NaN is false in the
+  // engine's (IEEE) comparison, but the marker list is a schema Value list,
+  // where NaN = NaN (`missing_markers`).
   std::vector<Value> missing_values;
   // The <Value property="valid"> categories in document order. The constraint
   // predicate below holds the same set, but as a set and behind a Predicate, so
@@ -107,7 +135,10 @@ class DataField {
             // space is still a marker, of text (§2.8), as it always was.
             try {
               Value marker = Value::document(text, datatype);
-              if (!std::isnan(marker.as_double())) missing_values.push_back(std::move(marker));
+              if (is_nan(marker))
+                nan_missing = true;
+              else
+                missing_values.push_back(std::move(marker));
             } catch (const cpmml::ParsingException&) {
             }
           }
@@ -119,20 +150,43 @@ class DataField {
       }
     }
     using Op = PredicateOpType::PredicateOpTypeValue;
+    auto intervals = node.get_childs("Interval");
+    // NaN is decided by `nan_valid` (validate, is_valid_value), never by the
+    // member sets: a NaN member breaks the ordering of their std::set<double>
+    // (NaN < x and x < NaN are both false, so NaN is "equivalent" to every
+    // key), which made any input a member of a valid list that names NaN and
+    // of an invalid one (P6.8, B39). So a NaN Value is taken out of both
+    // lists before they are built; a valid list of NaN only leaves every
+    // other value invalid (Op::FALSE).
+    const auto drop_nan = [](std::vector<Value>& values) {
+      const auto nan = std::remove_if(values.begin(), values.end(), [](const Value& v) { return is_nan(v); });
+      const bool had = nan != values.end();
+      values.erase(nan, values.end());
+      return had;
+    };
+    const bool allowed_had_values = !allowed_values.empty();
+    const bool nan_allowed = drop_nan(allowed_values);
+    const bool nan_forbidden = drop_nan(forbidden_values);
+    nan_valid = (!allowed_had_values || nan_allowed) && !nan_forbidden && intervals.empty();
     // The members are one per ContainerKey (a number itself, a string its
     // pool id), as the std::set<Value> they were: n_values counts the
-    // distinct ones.
-    std::size_t n_allowed = 0;
+    // distinct ones, NaN one of them.
+    std::size_t n_allowed = nan_allowed ? 1 : 0;
     if (allowed_values.size() > 0) {
       tmp_contraints.push_back(Predicate(index, Op::IS_IN, allowed_values, false));
-      n_allowed = tmp_contraints.back().values.size();
+      n_allowed += tmp_contraints.back().values.size();
+    } else if (allowed_had_values) {
+      tmp_contraints.push_back(Predicate(PredicateOpType(Op::FALSE)));
     }
     if (forbidden_values.size() > 0) tmp_contraints.push_back(Predicate(index, Op::IS_NOT_IN, forbidden_values, false));
 
-    auto intervals = node.get_childs("Interval");
     for (const auto& interval : intervals)
       tmp_contraints.push_back(IntervalBuilder::build(interval, index, DataType::DataTypeValue::DOUBLE));
 
+    // An invalid Value NaN alone leaves no member set; the constraints are
+    // then not empty, so that validate and is_valid_value ask `nan_valid`,
+    // and every other value passes them (Op::TRUE).
+    if (!nan_valid && tmp_contraints.empty()) tmp_contraints.push_back(Predicate(PredicateOpType(Op::TRUE)));
     if (tmp_contraints.size() > 0) constraints = Predicate(tmp_contraints, Op::AND);
 
     n_values = n_allowed > 0 ? n_allowed : 1;
@@ -145,7 +199,24 @@ class DataField {
   // UNKNOWN for a missing operand and UNKNOWN does not pass.
   inline bool validate(const Sample& sample) const {
     if (constraints.is_empty || sample[index].value.is_missing()) return true;
+    if (is_nan(sample[index].value)) [[unlikely]]
+      return nan_valid;
     return constraints(sample);
+  }
+
+  // Whether `value`, a value of the field (not missing), is valid.
+  inline bool is_valid_value(const Value& value) const {
+    if (constraints.is_empty) return true;
+    if (is_nan(value)) [[unlikely]]
+      return nan_valid;
+    return constraints(value);
+  }
+
+  // A double or float NaN (an input reads one since P6.8, B39).
+  static bool is_nan(const Value& value) {
+    if (const auto* d = std::get_if<cpmml::types::Double>(&value.typed())) return d->v != d->v;
+    if (const auto* f = std::get_if<cpmml::types::Float>(&value.typed())) return f->v != f->v;
+    return false;
   }
 
   static std::unordered_map<std::string, DataField> to_datafields(const std::vector<XmlNode>& nodes,

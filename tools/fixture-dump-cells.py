@@ -10,8 +10,10 @@ fixture-dump-cells.py -- the two halves of tools/fixture-dump-diff.sh.
       in row order, then the dump's column order. The input of a row is the
       whole fixture row, every column, as the fixture check (ctest) passes it:
       the target column too, so that residual OutputFields have the actual
-      value. An empty cell is written N/A, and pmml_tester --dump leaves an
-      empty or N/A cell out of the input where ctest passes its text.
+      value. pmml_tester --dump leaves an empty or N/A cell out of the input
+      and passes a quoted empty cell, `""`, as the empty string, as ctest
+      does (design P6.8); it writes an empty string output as `""`, read
+      here as the empty text, distinct from N/A.
       A time-series fixture is its own input (pmml_tester dumps every step).
       A tester that cannot load the model, or writes no dump, gives the single
       line "*\t*\tLOAD-ERROR: <first line of its stderr>".
@@ -43,7 +45,6 @@ _spec = importlib.util.spec_from_file_location("cross_validate_text", HERE / "cr
 cvt = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cvt)
 
-MISSING = "N/A"
 
 
 def escape(text: str) -> str:
@@ -69,22 +70,12 @@ def dump_one(name: str, exe: str, root: Path, out: Path) -> str:
     with zipfile.ZipFile(zip_path) as z:
         pmml = work / "model.pmml"
         pmml.write_bytes(z.read(z.namelist()[0]))
-    function = cvt.model_info(pmml)[0]
-    rows = cvt.read_csv(csv_path)
-    header = rows[0]
-    if function == "timeSeries":
-        in_csv = csv_path
-    else:
-        # Every column, as test/pmml_tester.cc's to_input: leaving the target
-        # out would dump every residual OutputField as N/A.
-        inputs = header
-        in_csv = work / "inputs.csv"
-        with open(in_csv, "w", newline="") as f:
-            w = csv.writer(f, lineterminator="\n")
-            w.writerow(inputs)
-            for row in rows[1:]:
-                cells = dict(zip(header, row))
-                w.writerow([cells.get(c, "") or MISSING for c in inputs])
+    # Every column of the fixture, as test/pmml_tester.cc's to_input reads
+    # them (leaving the target out would dump every residual OutputField as
+    # N/A): the fixture itself, so that a quoted empty cell, the empty string,
+    # stays one (design P6.8; a CSV reader here reads it as an empty cell, a
+    # missing input). A time-series fixture is its own input too.
+    in_csv = csv_path
 
     dump = work / "dump.csv"
     dump.unlink(missing_ok=True)

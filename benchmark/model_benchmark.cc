@@ -25,7 +25,8 @@
 //   --repeat N  score the whole dataset N times (the fixtures have 6-118 rows)
 //
 // Every row is read and converted to a cpmml::Input before the clock starts;
-// an empty CSV cell is passed as an empty string, as pmml_tester does. The
+// an empty CSV cell is a missing input, left out of the Input, as pmml_tester
+// does (since P6.8 an input "" is the empty string or a malformed value). The
 // tools/bench-ab.sh gate parses this line; keep its format.
 
 #include <cerrno>
@@ -86,7 +87,10 @@ int main(int argc, char** argv) {
   CSVReader reader(positional[1]);
   for (auto sample = reader.read(); !sample.empty(); sample = reader.read()) {
     cpmml::Input input;
-    for (const auto& [k, v] : sample) input[k] = v;
+    // An empty cell is a missing input, left out; "" would be the empty
+    // string, a malformed number (design P6.8, B37).
+    for (const auto& [k, v] : sample)
+      if (!v.empty()) input[k] = v;
     inputs.push_back(std::move(input));
   }
   if (inputs.empty()) usage("no rows in " + positional[1]);

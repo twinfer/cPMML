@@ -485,21 +485,21 @@ class InternalModel {
     // target field, so we have to do this separately.
     if (!mining_schema.target.empty) {
       auto it = sample.find(mining_schema.target.name);
-      // A blank cell is an absent actual value, not a value of "". Converting it
-      // threw for any numeric target, so a dataset carrying an empty target
-      // column -- an ordinary thing to score against -- failed outright.
+      // An absent actual value is missing; a given one is read as an input
+      // of the target's dataType, "" included (P6.8, B37): the empty string
+      // of a string target (JPMML 1.7.7: a class "" that is no predicted
+      // class, residual 0 - p), a malformed value of any other type.
       //
-      // The actual value is read as an input of the target's dataType. Only
-      // feature="residual" uses it, so as in JPMML 1.7.7 text that is not a
-      // value of that type fails the record (or takes the target's
+      // Only feature="residual" uses it, so as in JPMML 1.7.7 text that is not
+      // a value of that type fails the record (or takes the target's
       // invalidValueTreatment) only when the model declares a residual; a
       // model that never reads the column does not reject it.
       //
       // A categorical string's trailing blanks are dropped first (P6.6), so
-      // an actual value of blanks only is the blank cell.
+      // an actual value of blanks only is the empty string.
       //
       // A DataDictionary missing marker of the target is no actual value,
-      // the same as the blank cell (P6.13, B63), by the rule inputs follow
+      // the same as an absent one (P6.13, B63), by the rule inputs follow
       // (MiningSchema::prepare, P6.4): MiningSchema.html "The DataDictionary
       // allows for an optional list of values which indicate a missing
       // value. E.g., the data source may use the string "-" or "NA". If such
@@ -509,14 +509,11 @@ class InternalModel {
       const MiningField& actual_field = mining_schema.target;
       const std::string_view actual_text =
           it != sample.end() ? actual_field.input_text(it->second) : std::string_view();
-      if (!actual_text.empty() && !actual_field.is_missing_marker(actual_text)) {
+      if (it != sample.end() && !actual_field.is_missing_marker(actual_text)) {
         Value& actual = internal_sample[mining_schema.target_index].value;
         switch (actual_field.parse_input(actual_text, actual)) {
           case MiningField::InputStatus::VALID:
             if (actual_field.is_missing_value(actual)) actual = Value();
-            break;
-          case MiningField::InputStatus::INVALID:
-            actual = declares_residual() ? actual_field.handle_invalid(actual) : Value();
             break;
           case MiningField::InputStatus::MALFORMED:
             actual = declares_residual() ? actual_field.handle_malformed(it->second) : Value();

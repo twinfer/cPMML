@@ -11,7 +11,10 @@ test/data/dataset/*.csv) and compares text, not numbers within a tolerance:
 For each fixture:
   1. the PMML is extracted from the zip;
   2. the input CSV is the fixture's columns that are DataFields and not the
-     model's target, an empty cell written N/A (JPMML's missing value);
+     model's target, an empty cell written N/A (JPMML's missing value) and a
+     quoted empty cell `""` kept as `""`, the empty string (the fixture
+     convention of test/pmml_tester.cc, design P6.8: JPMML 1.7.7 and
+     pmml_tester both read it as the empty string);
   3. JPMML's EvaluationExample scores it, and
      pmml_tester.exe <zip> <inputs> --dump <out> scores it with cPMML;
   4. every column JPMML writes is compared cell by cell with cPMML's.
@@ -55,6 +58,58 @@ sys.path.insert(0, str(REPO / "tools"))
 from pmmltext import JPMML_MISSING, classify, model_info, read_csv  # noqa: E402
 
 
+# A quoted empty cell (`""`) of the fixture: the empty string, where an
+# unquoted empty cell is a missing input (test/pmml_tester.cc, design P6.8).
+QUOTED_EMPTY = object()
+
+
+def read_fixture(path: Path):
+    """The fixture's rows as csv.reader reads them, but a quoted empty cell
+    is QUOTED_EMPTY (csv.reader gives "" for both)."""
+    rows = []
+    with open(path, newline="") as f:
+        for line in f.read().splitlines():
+            cells, i, n = [], 0, len(line)
+            while True:
+                if i < n and line[i] == '"':
+                    i += 1
+                    text = []
+                    while i < n:
+                        if line[i] == '"':
+                            if i + 1 < n and line[i + 1] == '"':
+                                text.append('"')
+                                i += 2
+                                continue
+                            i += 1
+                            break
+                        text.append(line[i])
+                        i += 1
+                    j = line.find(",", i)
+                    j = n if j < 0 else j
+                    cell = "".join(text) + line[i:j]
+                    cells.append(QUOTED_EMPTY if cell == "" else cell)
+                else:
+                    j = line.find(",", i)
+                    j = n if j < 0 else j
+                    cells.append(line[i:j])
+                if j >= n:
+                    break
+                i = j + 1
+            rows.append(cells)
+    return rows
+
+
+def input_cell(cell) -> str:
+    """A fixture input cell as a CSV field for JPMML and pmml_tester."""
+    if cell is QUOTED_EMPTY:
+        return '""'
+    if cell == "":
+        return JPMML_MISSING
+    if any(c in cell for c in ',"\n\r'):
+        return '"' + cell.replace('"', '""') + '"'
+    return cell
+
+
 def check(name: str, args) -> dict:
     zip_path = Path(args.fixtures) / "model" / f"{name}.zip"
     csv_path = Path(args.fixtures) / "dataset" / f"{name}.csv"
@@ -68,7 +123,7 @@ def check(name: str, args) -> dict:
         pmml.write_bytes(z.read(member))
 
     function, target, data_fields, outputs = model_info(pmml)
-    rows = read_csv(csv_path)
+    rows = read_fixture(csv_path)
     header = rows[0]
     if function == "timeSeries" or "transaction" in header:
         return {"name": name, "status": "SKIP", "detail": "time series or transactional"}
@@ -80,7 +135,7 @@ def check(name: str, args) -> dict:
         w.writerow(inputs)
         for row in rows[1:]:
             cells = dict(zip(header, row))
-            w.writerow([cells.get(c, "") or JPMML_MISSING for c in inputs])
+            f.write(",".join(input_cell(cells.get(c, "")) for c in inputs) + "\n")
 
     j_out = work / "jpmml.csv"
     jp = subprocess.run(

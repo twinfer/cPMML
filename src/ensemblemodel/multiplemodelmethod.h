@@ -451,7 +451,8 @@ class MultipleModelMethod {
       ResultField field{of.name};
       const auto s = score.str_outputs.find(of.name);
       const auto n = score.num_outputs.find(of.name);
-      if (s != score.str_outputs.end() && !s->second.empty()) {
+      // An empty string is a value (P6.8, B58): JPMML 1.7.7 writes "[ab, ]".
+      if (s != score.str_outputs.end()) {
         field.missing = false;
         field.text = s->second;
       } else if (n != score.num_outputs.end()) {

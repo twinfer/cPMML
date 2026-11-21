@@ -2910,7 +2910,10 @@ class Binder {
       return visit_children(ctx, node);
     }
     if (n == "NumericPredictor") {
-      resolve_attr(ctx, node, "name");
+      // B38 (P6.8): the engine makes a string an invalid record.
+      require_numeric(ctx, node, resolve_attr(ctx, node, "name"),
+                      "NumericPredictor reads a number (Regression.html: \"Defines a numeric independent "
+                      "variable\")");
       // B7: NumericPredictor@exponent is INT-NUMBER.
       int_attr(ctx, node, "exponent");
       number_attr(ctx, node, "coefficient", true);
@@ -2927,7 +2930,10 @@ class Binder {
       for (pugi::xml_node c : node.children()) {
         if (c.type() != pugi::node_element) continue;
         if (std::string_view(c.name()) == "FieldRef")
-          bind_fieldref(ctx, c);
+          // B38 (P6.8): the engine makes a string an invalid record.
+          require_numeric(ctx, c, bind_fieldref(ctx, c).field,
+                          "PredictorTerm multiplies numbers (Regression.html: \"The type of all fields referenced "
+                          "within PredictorTerm must be continuous\")");
         else
           visit_body(ctx, c);
       }

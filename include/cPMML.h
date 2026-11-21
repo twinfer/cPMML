@@ -301,6 +301,17 @@ class CPMML_API Model {
    * std::string label = result.as_string();
    * @endcode
    *
+   * A missing value is a field left out of the input (or a value its
+   * DataField declares missing, `<Value property="missing">`). Any text given
+   * is read by the XML Schema lexical rules of the field's dataType: "" is
+   * the empty string of a string field and an invalid value of any other
+   * type (invalidValueTreatment applies; by default the record is not
+   * scored); "NaN" is a value of a float or double field.
+   *
+   * Changed in this release: "" used to be read as a missing value for every
+   * field. To pass a missing value, leave the field out of the input, e.g.
+   * skip an empty CSV cell, or declare "" a missing marker in the document.
+   *
    * For association models with transactional schemas, pass item baskets
    * as vector<string>:
    * @code{.cpp}
@@ -329,6 +340,9 @@ class CPMML_API Model {
 
   /**
    * @brief Validates user input against DataDictionary constraints.
+   *
+   * Inputs are read as evaluate() reads them: "" is no longer a missing
+   * value but the empty string, or an invalid value of a non-string field.
    *
    * @param arguments Input fields to validate.
    * @return true if valid, false otherwise.

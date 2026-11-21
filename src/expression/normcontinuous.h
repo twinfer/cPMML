@@ -98,7 +98,9 @@ class NormContinuous : public Expression {
     const Value& value = sample[index].value;
 
     if (value.is_missing()) return mapmissing_to;  // missing when no mapMissingTo is given
-    const double input = value.as_double();  // LinearNorm points are NUMBER
+    // LinearNorm points are NUMBER; a string field is no number, an invalid
+    // record (B38, P6.8: Value::as_number; it read the string's code).
+    const double input = value.as_number("NormContinuous", field_name);
 
     if (input < orig.front() || input > orig.back()) {  // outlier
       switch (outliertreatment_method.value) {

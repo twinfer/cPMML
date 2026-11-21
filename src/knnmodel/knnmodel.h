@@ -310,10 +310,18 @@ class NearestNeighborModel : public InternalModel {
     for (const auto& xml_row : ti.get_child("InlineTable").get_childs("row")) {
       if (uses_derived_inputs) {
         // Apply LocalTransformations to compute derived features from raw training data.
+        // A cell is the document's own data, not an input: an empty one (no
+        // text, or blanks only on a categorical string field, P6.6) is a
+        // missing value, as it was before P6.8 and as the direct path reads
+        // it. The empty-input rule of P6.8 (B37: "" is the empty string or a
+        // malformed value) is for the caller's inputs only, so a document
+        // that loaded keeps loading.
         std::unordered_map<std::string, std::string> raw_input;
         for (const auto& [field, col] : field_to_col) {
-          if (xml_row.exists_child(col))
-            raw_input[field] = xml_row.get_child(col).value();
+          if (!xml_row.exists_child(col)) continue;
+          std::string text = xml_row.get_child(col).value();
+          const bool empty = mining_schema.contains(field) ? mining_schema[field].input_text(text).empty() : text.empty();
+          if (!empty) raw_input[field] = std::move(text);
         }
         Sample train_sample = base_sample;
         mining_schema.prepare(train_sample, raw_input);

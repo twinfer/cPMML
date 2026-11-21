@@ -48,8 +48,9 @@ class OutputField {
   cpmml::fn::DeclaredCast cast;
   // Where a number or boolean field reads its value from: eval_double (a
   // number), the expression's Value (a transformedValue over a string
-  // expression: its text is parsed, §2.6), or eval_str (entityId: the id's
-  // text is parsed).
+  // expression: its text is parsed, §2.6), or eval_str (entityId, and the
+  // predictedValue of a string target: the id's or the class's text is
+  // parsed).
   enum class Source : unsigned char { Number, Value, Text };
   Source source = Source::Number;
 
@@ -110,8 +111,8 @@ class OutputField {
   //                     ParsingException in EntityId::eval_double);
   //   predictedValue    the target's type: the prediction's number, as
   //                     PredictedValue::eval_double gives it, checked to be a
-  //                     value of the dataType (a string target's class is
-  //                     the number of its text, as before);
+  //                     value of the dataType; a string target's class is
+  //                     its text, read strictly (Source::Text, P6.8, B56);
   //   any other         a double (probability, residual, confidence, ...;
   //                     the number of the text of a predictedDisplayValue,
   //                     reasonCode, ruleValue, as before), checked the same.
@@ -135,7 +136,18 @@ class OutputField {
       case OutputExpressionType::OutputExpressionTypeValue::PREDICTED_VALUE:
         if (indexer->contains(model_target)) {
           const TypeId target = cpmml::bind::type_id(indexer->get_type(model_target));
-          if (target != TypeId::String) from = target;
+          if (target != TypeId::String) {
+            from = target;
+          } else {
+            // A string target's class is text, cast by §2.6 string → T, the
+            // strict XSD reading (D42; P6.8, B56): "7" is 7, "a" or "7.0"
+            // as an integer no value of the type, an invalid result (Q2;
+            // JPMML 1.7.7: NumberFormatException For input string: "a"). It
+            // was the number InternalScore::value_of read, and no value,
+            // silently, for a class that is no number.
+            from = TypeId::String;
+            source = Source::Text;
+          }
         }
         break;
       default:
@@ -154,6 +166,7 @@ class OutputField {
   inline Value add_output(const Sample& sample, const InternalScore& from, InternalScore& into) const {
     switch (datatype.value) {
       case DataType::DataTypeValue::STRING: {
+        if (derived) return add_transformed_string(sample, into);
         std::string sv = expression->eval_str(sample, from);
         // A string OutputField over a number (a probability, a
         // transformedValue over a numeric expression): the number as JPMML
@@ -189,7 +202,7 @@ class OutputField {
           }
           case Source::Text: {
             const std::string id = expression->eval_str(sample, from);
-            if (id.empty()) return Value();  // no entity: no value
+            if (id.empty()) return Value();  // no entity, no class: no value
             if (!cast.parse_text(id, v)) raise_invalid(cast.failure(std::string_view(id)));
             break;
           }
@@ -206,6 +219,28 @@ class OutputField {
         return Value(v);
       }
     }
+  }
+
+  // A string transformedValue (P6.8, B58): its expression's value, so a
+  // missing one is no value and the empty string is a value, the empty
+  // string. XML Schema Part 2 §3.2.1: "The value space of string is the set
+  // of finite-length sequences of characters", the sequence of none
+  // included; BuiltinFunctions.html substring: "See XQuery fn:substring",
+  // whose result is "the characters in $sourceString whose position $p
+  // satisfies ..." and "The characters returned do not extend beyond
+  // $sourceString", so substring("abc", 4000, 5) is a string of no
+  // characters, not a missing value (JPMML 1.7.7 writes ""). A number or
+  // boolean without text is written as JPMML writes its type, as before.
+  inline Value add_transformed_string(const Sample& sample, InternalScore& into) const {
+    const Value value = expression->eval(sample);
+    if (value.is_missing()) return Value();
+    std::string sv(value.text());
+    if (sv.empty() && !std::holds_alternative<cpmml::types::String>(value.typed())) {
+      if (!expression->value_kind) return Value();  // a number of an unknown Java type: as before
+      sv = java::text({value.as_double(), *expression->value_kind});
+    }
+    into.str_outputs[name] = sv;
+    return Value::string(sv);
   }
 
   [[noreturn]] [[gnu::cold]] [[gnu::noinline]] void raise_invalid(const std::string& why) const {

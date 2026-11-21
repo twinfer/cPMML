@@ -183,8 +183,10 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
 
       const auto found = flat.find(field.name);
       const auto put = [&](const Value& value) {
+        // A missing value is an absent input for the inner model: "" is the
+        // empty string or a malformed value there (P6.8, B37).
         if (value.is_missing()) {
-          if (found != flat.end()) found->second.clear();
+          if (found != flat.end()) flat.erase(found);
         } else {
           flat[field.name] = input_text(field, value);
         }
@@ -197,7 +199,7 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
       // A categorical string's trailing blanks are dropped (P6.6), also from
       // the text the inner model reads.
       if (found != flat.end()) found->second.resize(field.input_text(found->second).size());
-      if (found == flat.end() || found->second.empty() || field.is_missing_marker(found->second)) {
+      if (found == flat.end() || field.is_missing_marker(found->second)) {
         put(field.handle_missing());
         continue;
       }
@@ -206,9 +208,6 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
       switch (field.parse_input(found->second, value)) {
         case MiningField::InputStatus::MALFORMED:
           put(field.handle_malformed(found->second));  // throws for returnInvalid and asIs
-          continue;
-        case MiningField::InputStatus::INVALID:
-          treat_invalid(value);
           continue;
         case MiningField::InputStatus::VALID:
           break;

@@ -188,7 +188,16 @@ class ApplyNode : public Expression {
       if (missing_ == MissingRule::Propagate) return has_default_ ? default_value_ : Value();
     }
 
-    // 3. The function, over the inputs.
+    // 3. The function, over the inputs. A string where the parameter is a
+    // number is an invalid record (B38, P6.8; §2.5: "no arithmetic accepts"
+    // string; Q2), where the kernel read its legacy code: the binder reports
+    // a static one (E-TYPE-PARAM), and JPMML 1.7.7 refuses the call ("No
+    // PMML data type for the intersection of PMML data types string and
+    // double"). Not an invalid result: invalidValueTreatment does not apply.
+    if (bound_.check_strings)
+      for (std::size_t i = 0; i < args.size(); i++)
+        if (bound_.string_argument[i] && args.data()[i].is_string()) [[unlikely]]
+          raise_string_argument(i, args.data()[i]);
     Value result;
     if (kernel_(bound_, args.data(), args.size(), result) == Status::Invalid) {
       // 4. An invalid result: asMissing "replaces the invalid value with a
@@ -228,6 +237,8 @@ class ApplyNode : public Expression {
       if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0) n++;
     if (!cpmml::bind::arity_fits(sig, n)) throw cpmml::ParsingException(cpmml::bind::arity_message(apply, sig, n));
     const KernelFn kernel = instantiate(sig.op);
+    // The numeric functions mark theirs below, from the types they compute.
+    if (!numeric(sig.op)) mark_string_arguments(apply, sig, nullptr, bound);
     if (sig.op == Op::If) {
       // B53 (P4.3c): the condition is a boolean parameter; a condition of
       // another static type is a load error (bind::if_condition_message).
@@ -318,6 +329,7 @@ class ApplyNode : public Expression {
     for (pugi::xml_node argument : apply.xml().children())
       if (argument.type() == pugi::node_element && std::strcmp(argument.name(), "Extension") != 0)
         argument_types.push_back(cpmml::bind::expression_type(argument));
+    if (!comparison) mark_string_arguments(apply, sig, &argument_types, bound);
     bound.float_argument.resize(n);
     for (std::size_t i = 0; i < n; i++)
       if (argument_types[i] == TypeId::Float) {
@@ -377,6 +389,31 @@ class ApplyNode : public Expression {
     bound.float_result = result == TypeId::Float;
     // P4.5 (D4): an integer result has its int64 kernel.
     return instantiate(sig.op, result == TypeId::Integer);
+  }
+
+  // B38 (P6.8): the positions whose parameter is a number (Param::Numeric,
+  // Double, Integer: the arithmetic, the math functions, substring's
+  // positions, formatNumber's input), where a string is no number, and
+  // whose argument may be a string: its static type (the binder's,
+  // bind::expression_type; `types` when the caller has them) is string or
+  // unknown. An argument of a static number or boolean type never holds a
+  // String (P4.7's Cast nodes keep every slot its declared type), so it is
+  // not checked per record (Bound::string_argument, ApplyNode::eval step 3).
+  static void mark_string_arguments(const XmlNode& apply, const Signature& sig,
+                                    const std::vector<cpmml::bind::StaticType>* types, Bound& bound) {
+    std::size_t i = 0;
+    for (pugi::xml_node argument : apply.xml().children()) {
+      if (argument.type() != pugi::node_element || std::strcmp(argument.name(), "Extension") == 0) continue;
+      const Param p = sig.param(i);
+      bool check = false;
+      if (p == Param::Numeric || p == Param::Double || p == Param::Integer) {
+        const cpmml::bind::StaticType type = types ? (*types)[i] : cpmml::bind::expression_type(argument);
+        check = !type || *type == cpmml::bind::TypeId::String;
+      }
+      bound.string_argument.push_back(check ? 1 : 0);
+      bound.check_strings |= check;
+      i++;
+    }
   }
 
   // The load error of a not, and or or argument (position `i`, from 1) whose
@@ -450,6 +487,19 @@ class ApplyNode : public Expression {
   // "pow" in DerivedField "p": invalid result
   // (invalidValueTreatment="returnInvalid")'.
   [[noreturn]] [[gnu::noinline]] [[gnu::cold]] void raise_invalid() const {
+    throw cpmml::InvalidValueException("Apply \"" + std::string(sig_->name) + "\" in " + where() +
+                                       ": invalid result (invalidValueTreatment=\"" + treatment_.to_string() + "\")");
+  }
+
+  // B38 (P6.8): a string argument `i` (from 0) where the parameter is a
+  // number: 'Apply "+" in DerivedField "plus": argument 1: the string "3"
+  // where a number is expected (...)'.
+  [[noreturn]] [[gnu::noinline]] [[gnu::cold]] void raise_string_argument(std::size_t i, const Value& v) const {
+    cpmml::raise_string_as_number(
+        "Apply \"" + std::string(sig_->name) + "\" in " + where() + ": argument " + std::to_string(i + 1), "", v);
+  }
+
+  std::string where() const {
     std::string where;
     switch (where_kind_) {
       case Where::DerivedField:
@@ -462,8 +512,7 @@ class ApplyNode : public Expression {
         where = where_name_;
         break;
     }
-    throw cpmml::InvalidValueException("Apply \"" + std::string(sig_->name) + "\" in " + where +
-                                       ": invalid result (invalidValueTreatment=\"" + treatment_.to_string() + "\")");
+    return where;
   }
 
   // §3.4: Apply "mapMissingTo, defaultValue (xs:string) parsed as the

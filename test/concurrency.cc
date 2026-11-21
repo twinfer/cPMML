@@ -57,7 +57,9 @@ static std::vector<cpmml::Input> read_inputs(const std::string& csv_path) {
     if (row.empty()) break;
 
     cpmml::Input input;
-    for (const auto& [field, value] : row) input[field] = value;
+    // An empty cell is a missing input, left out (design P6.8, B37).
+    for (const auto& [field, value] : row)
+      if (!value.empty()) input[field] = value;
     inputs.push_back(std::move(input));
   }
 
