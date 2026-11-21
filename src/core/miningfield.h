@@ -203,6 +203,21 @@ class MiningField : public DataField {
 
   inline bool is_invalid(const Value& value) const { return !constraints(value); }
 
+  // Whether the record may be scored with the value in this field's slot
+  // (P6.13, B64). MiningSchema.html: "asIs means to use the input without
+  // modification", so under asIs a value outside the field's Values or
+  // Intervals is the field's value and the record is scored with it: an
+  // ordinal string outside the Values (`zzz` of low < mid < high) has no
+  // place in the order, so an ordering of it is indeterminate (a missing
+  // result, an UNKNOWN predicate; P6.3, D52), while equality and isIn compare
+  // its text. Every other treatment has replaced or refused an invalid value
+  // in prepare(), except returnInvalid by default (no attribute), which the
+  // record's validation refuses here.
+  inline bool passes_validation(const Sample& sample) const {
+    return invalidvalue_treatmentmethod.value == InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::AS_IS ||
+           validate(sample);
+  }
+
   inline Value handle_invalid(const Value& value) const {
     switch (invalidvalue_treatmentmethod.value) {
       case InvalidValueTreatmentMethod::InvalidValueTreatmentMethodValue::RETURN_INVALID:

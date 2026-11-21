@@ -497,13 +497,23 @@ class InternalModel {
       //
       // A categorical string's trailing blanks are dropped first (P6.6), so
       // an actual value of blanks only is the blank cell.
+      //
+      // A DataDictionary missing marker of the target is no actual value,
+      // the same as the blank cell (P6.13, B63), by the rule inputs follow
+      // (MiningSchema::prepare, P6.4): MiningSchema.html "The DataDictionary
+      // allows for an optional list of values which indicate a missing
+      // value. E.g., the data source may use the string "-" or "NA". If such
+      // a value occurs in the input data, a PMML consumer must treat it as a
+      // missing value." Its text first (`?` on a double target), then, once
+      // read in the target's type, its value (`-999.0` is the marker -999).
       const MiningField& actual_field = mining_schema.target;
       const std::string_view actual_text =
           it != sample.end() ? actual_field.input_text(it->second) : std::string_view();
-      if (!actual_text.empty()) {
+      if (!actual_text.empty() && !actual_field.is_missing_marker(actual_text)) {
         Value& actual = internal_sample[mining_schema.target_index].value;
         switch (actual_field.parse_input(actual_text, actual)) {
           case MiningField::InputStatus::VALID:
+            if (actual_field.is_missing_value(actual)) actual = Value();
             break;
           case MiningField::InputStatus::INVALID:
             actual = declares_residual() ? actual_field.handle_invalid(actual) : Value();

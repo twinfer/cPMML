@@ -159,8 +159,8 @@ class AnomalyDetectionEvaluator : public InternalEvaluator {
    * valid value takes the outlier treatment. MiningSchema::prepare itself is
    * not called: it treats outliers after an asIs or asMissing invalid
    * treatment, and it leaves an invalid value with no invalidValueTreatment
-   * attribute to MiningSchema::validate, which refuses asIs as well -- JPMML
-   * does neither here.
+   * attribute to MiningSchema::validate (which keeps an asIs value since
+   * P6.13) -- JPMML does neither here.
    *
    * The inner model reads the record as text again, so a value the outer
    * schema changed is written back as text (java_format.h; a string as

@@ -148,7 +148,7 @@ class MiningSchema {
     for (const auto& mining_field : miningfields) {
       if (mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET ||
           mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::GROUP) continue;
-      if (!mining_field.validate(sample)) return false;
+      if (!mining_field.passes_validation(sample)) return false;
     }
 
     return true;
@@ -162,7 +162,7 @@ class MiningSchema {
     for (const auto& mining_field : miningfields) {
       if (mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::TARGET ||
           mining_field.field_usage_type.value == FieldUsageType::FieldUsageTypeValue::GROUP) continue;
-      if (!mining_field.validate(sample)) return &mining_field;
+      if (!mining_field.passes_validation(sample)) return &mining_field;
     }
 
     return nullptr;

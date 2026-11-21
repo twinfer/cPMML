@@ -1,0 +1,9 @@
+o,pv,ro,olt,oge,oeq,oez,oim
+low,1.0,low,true,false,false,false,false
+mid,2.0,mid,false,true,true,false,false
+high,2.0,high,false,true,false,false,false
+zzz,3.0,zzz,N/A,N/A,false,true,false
+Mid,4.0,Mid,N/A,N/A,false,false,false
+bad,4.0,bad,N/A,N/A,false,false,false
+"high ",4.0,"high ",N/A,N/A,false,false,false
+qq,4.0,qq,N/A,N/A,false,false,false
